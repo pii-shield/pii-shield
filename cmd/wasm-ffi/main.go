@@ -131,8 +131,10 @@ func redact(ptr uint32, length uint32) uint64 {
 	b := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
 	input := unsafe.String(&b[0], length)
 
-	// Process
-	redacted := scanner.ScanAndRedact(input)
+	// Process line by line: SDK callers pass whole documents (a git diff, a
+	// log batch), and the single-line engine would otherwise score the last
+	// token of every line together with its newline (#184).
+	redacted := scanner.ScanAndRedactText(input)
 	
 	outBytes := []byte(redacted)
 	var ptr32 uint32

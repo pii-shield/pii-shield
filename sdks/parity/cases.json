@@ -67,5 +67,17 @@
     },
     "input": "ref A1b2C3d4E5f6G7h8x9K0mN random tail",
     "expected": "ref A1b2C3d4E5f6G7h8x9K0mN random tail"
+  },
+  {
+    "name": "multiline_decimal_at_line_end_not_redacted",
+    "config": {},
+    "input": "+2,bob,20.25\n+total,4532015112.830366\n",
+    "expected": "+2,bob,20.25\n+total,4532015112.830366\n"
+  },
+  {
+    "name": "multiline_secret_on_inner_line_redacted_line_count_kept",
+    "config": {},
+    "input": "line one\npassword=SuperSecretValue123\r\n4532015112.830366\n",
+    "expected": "line one\npassword=[HIDDEN:8836e2]\r\n4532015112.830366\n"
   }
 ]
