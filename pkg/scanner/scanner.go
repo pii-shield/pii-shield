@@ -762,6 +762,42 @@ func (st *configState) ScanAndRedact(logLine string) string {
 	return sb.String()
 }
 
+// ScanAndRedactText redacts text that may span several lines, scanning each
+// line on its own. ScanAndRedact is a single-line engine: '\n' is not a token
+// separator, so a value at the end of a line would otherwise be scored
+// together with its newline (and the first token of the next line). That
+// defeats structural safe rules such as isPlainDecimal and swallows the
+// newline inside the redaction marker, changing the line count (#184). Line
+// endings ("\n" and "\r\n") are preserved, so the output has exactly as
+// many lines as the input — the same contract the CLI gives stdin.
+func ScanAndRedactText(text string) string {
+	return cfgState().ScanAndRedactText(text)
+}
+
+// ScanAndRedactText is the multi-line counterpart of ScanAndRedact; Scanner
+// embeds *configState, so it is promoted as (*Scanner).ScanAndRedactText.
+func (st *configState) ScanAndRedactText(text string) string {
+	if strings.IndexByte(text, '\n') == -1 {
+		return st.ScanAndRedact(text)
+	}
+	var sb strings.Builder
+	sb.Grow(len(text) + 100)
+	for len(text) > 0 {
+		line, ending := text, ""
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			line, ending, text = text[:i], "\n", text[i+1:]
+		} else {
+			text = ""
+		}
+		if strings.HasSuffix(line, "\r") {
+			line, ending = line[:len(line)-1], "\r"+ending
+		}
+		sb.WriteString(st.ScanAndRedact(line))
+		sb.WriteString(ending)
+	}
+	return sb.String()
+}
+
 // scanLine is the zero-allocation internal version of ScanAndRedact.
 // depth tracks nesting of the recursive token machinery (see
 // maxTokenRecursionDepth); top-level callers pass 0.

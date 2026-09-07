@@ -26,6 +26,8 @@ print(redacted_text)
 # Output might redact the high entropy secret based on context
 ```
 
+`redact()` accepts multi-line text. Each line is scanned independently and `\n` / `\r\n` endings are preserved, so the output has exactly as many lines as the input (the same contract the CLI gives stdin).
+
 ## Configuration
 
 `PiiShieldConfig` accepts these overrides. Any field left unset keeps the core
