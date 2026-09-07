@@ -56,14 +56,14 @@ go test -v -race -coverprofile=cover.out ./...
 Official images are published to Docker Hub and GitHub Container Registry. The current README documents:
 
 ```bash
-docker pull thelisdeep/pii-shield:2.2.0
-docker pull ghcr.io/pii-shield/pii-shield:2.2.0
+docker pull thelisdeep/pii-shield:2.2.1
+docker pull ghcr.io/pii-shield/pii-shield:2.2.1
 ```
 
 Smoke test example:
 
 ```bash
-echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm ghcr.io/pii-shield/pii-shield:2.2.0
+echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm ghcr.io/pii-shield/pii-shield:2.2.1
 ```
 
 ### Kubernetes And Helm
