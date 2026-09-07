@@ -1634,10 +1634,7 @@ func isGitHashRange(token string) bool {
 	if i < 7 {
 		return false
 	}
-	rest := token[i+2:]
-	if strings.HasPrefix(rest, ".") {
-		rest = rest[1:]
-	}
+	rest := strings.TrimPrefix(token[i+2:], ".")
 	return isAbbrevHash(token[:i]) && isAbbrevHash(rest)
 }
 
