@@ -806,6 +806,15 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 		return
 	}
 
+	// Git diff header lines carry file paths and object hashes only, never
+	// values, and their a/ b/ relative paths and abbreviated hash ranges
+	// score above the entropy threshold (#186). Structural rule, top level
+	// only: a header is a whole line, not a quoted fragment inside one.
+	if depth == 0 && isGitDiffHeader(logLine) {
+		sb.WriteString(logLine)
+		return
+	}
+
 	// JSON lines are handled by the tokenizer itself (quotes, braces, colon
 	// pairs) — deliberately no encoding/json parse here; see compact_json_test.go.
 
@@ -1470,7 +1479,7 @@ func isSafe(token string) bool {
 		return true
 	}
 
-	if isPath(token) || isGitHash(token) || isMongoObjectID(token) {
+	if isPath(token) || isGitHash(token) || isGitHashRange(token) || isMongoObjectID(token) {
 		return true
 	}
 
@@ -1615,6 +1624,56 @@ func isPath(token string) bool {
 
 func isGitHash(token string) bool {
 	return len(token) == 40 && isHexStr(token)
+}
+
+// isGitHashRange reports whether token is a git object range such as
+// 3b18e51..a1c9f02 (the `index` line of a diff, `git log A..B`): two
+// hex runs of 7 to 40 characters joined by ".." or "...".
+func isGitHashRange(token string) bool {
+	i := strings.Index(token, "..")
+	if i < 7 {
+		return false
+	}
+	rest := strings.TrimPrefix(token[i+2:], ".")
+	return isAbbrevHash(token[:i]) && isAbbrevHash(rest)
+}
+
+func isAbbrevHash(s string) bool {
+	return len(s) >= 7 && len(s) <= 40 && isHexStr(s)
+}
+
+// gitDiffHeaderPrefixes are the line starts of the `git diff` header
+// grammar that carry paths or hashes: the file pair, the old/new markers
+// (prefixed or /dev/null), renames and copies, and the binary-file notice.
+// Body lines ("+", "-", " ") are deliberately absent — they are scanned.
+var gitDiffHeaderPrefixes = [...]string{
+	"diff --git ",
+	"diff --cc ",
+	"diff --combined ",
+	"--- a/",
+	"+++ b/",
+	"--- \"a/",
+	"+++ \"b/",
+	"--- /dev/null",
+	"+++ /dev/null",
+	"rename from ",
+	"rename to ",
+	"copy from ",
+	"copy to ",
+	"Binary files ",
+}
+
+// isGitDiffHeader reports whether line is a git diff header line (see
+// gitDiffHeaderPrefixes). The `index <hash>..<hash> <mode>` line is not
+// listed: its range token is covered by isGitHashRange and the rest is
+// low-entropy.
+func isGitDiffHeader(line string) bool {
+	for _, p := range gitDiffHeaderPrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func isMongoObjectID(token string) bool {
