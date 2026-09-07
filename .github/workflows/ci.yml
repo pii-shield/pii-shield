@@ -33,7 +33,7 @@ jobs:
       uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
 
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
+      uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
       with:
         platforms: amd64,arm64
 
@@ -44,7 +44,7 @@ jobs:
       run: go mod verify
 
     - name: Run actionlint
-      uses: reviewdog/action-actionlint@dbe5299849118fd6f099ba563d263d770955a64a
+      uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
