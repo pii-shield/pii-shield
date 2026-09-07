@@ -19,12 +19,12 @@ func TestIsFileName(t *testing.T) {
 	yes := []string{
 		"report.csv", "config.yaml", "README.md", "src/main.go", "lib/foo/bar.py",
 		"app/models/user.py", "package-lock.json", "invoice_2024.xlsx", "scanner_test.go",
-		"data.jsonl", "photo.JPG", "archive.tar.gz", "a.b", "x/y/z.c", "v2.2.1.md",
+		"data.jsonl", "photo.JPG", "archive.tar.gz", "a.b", "x/y/z.c", "v2.2.1.md", "video.mp4", "model.h5",
 	}
 	no := []string{
 		"Dockerfile", "Makefile", ".gitignore", "src/", "/etc/passwd", "./run.sh", "a//b.txt",
 		"1.2.3.4", "10.0.0.1", "v2.2.1", "3.14", "alice@example.com", "https://x.io/a.txt",
-		"key=value.txt", "a:b.txt", "file..txt", "report.sqlite", "report.",
+		"key=value.txt", "a:b.txt", "file..txt", "report.sqlite", "report.", "report.c-v", "a.t_x", "x.1a",
 		"Zq8vN3pL7xR2wT9yB4mK6",
 		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
 		"KEY.ngeVfQFYQlKU0ufo8x5d1A.TwL2iGABf9DHoTf-09kqeF8tAmbihYzrnopKc-1s5cr",
