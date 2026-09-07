@@ -4,9 +4,9 @@ description: A Kubernetes Operator for automatic PII (Personally Identifiable In
 
 type: application
 
-version: 2.2.1
+version: 2.2.2
 
-appVersion: "2.2.1"
+appVersion: "2.2.2"
 
 home: https://github.com/pii-shield/pii-shield
 sources:

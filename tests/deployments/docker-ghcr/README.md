@@ -27,7 +27,7 @@ docker run -d --rm --name pii-shield-metrics \
   -v /tmp/pii-shield-manual:/var/log/app \
   -e PII_METRICS_ENABLED=true \
   -e PII_METRICS_PORT=9090 \
-  ghcr.io/pii-shield/pii-shield:2.2.1 \
+  ghcr.io/pii-shield/pii-shield:2.2.2 \
   --watch-file /var/log/app/output.log
 
 echo '{"token":"abc123secretXYZ","msg":"hello"}' >> /tmp/pii-shield-manual/output.log
