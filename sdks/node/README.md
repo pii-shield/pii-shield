@@ -26,6 +26,8 @@ console.log(redactedText);
 // Output will have the high entropy token redacted
 ```
 
+`redact()` accepts multi-line text. Each line is scanned independently and `\n` / `\r\n` endings are preserved, so the output has exactly as many lines as the input (the same contract the CLI gives stdin).
+
 ## Configuration
 
 `PiiShield.create(config)` accepts these overrides. Any field left unset keeps
