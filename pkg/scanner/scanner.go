@@ -1479,7 +1479,7 @@ func isSafe(token string) bool {
 		return true
 	}
 
-	if isPath(token) || isGitHash(token) || isGitHashRange(token) || isMongoObjectID(token) {
+	if isPath(token) || isFileName(token) || isGitHash(token) || isGitHashRange(token) || isMongoObjectID(token) {
 		return true
 	}
 
@@ -1593,6 +1593,63 @@ func isIPv6(token string) bool {
 	}
 	return false
 }
+
+// isFileName reports whether token has the shape of a file name or relative
+// path with an extension: report.csv, src/main.go, app/models/user.py,
+// invoice_2024.xlsx. isPath covers absolute and Windows paths only, so these
+// were scored on entropy, where "." "/" "_" add class bonus on top of the
+// letters and digits and push most real names over the threshold (#189).
+//
+// The shape is deliberately narrow so that no known secret format fits it:
+// only [A-Za-z0-9._/-] (no "=", "+", ":", "@"), a non-empty stem, and a last
+// "."-separated extension of 1 to 5 alphanumerics starting with a letter.
+// JWTs and SendGrid-style keys have long base64 segments after their last
+// dot, IPv4 addresses and version strings end in digits, e-mails carry "@",
+// URLs are handled before this rule. Extensionless names (Dockerfile,
+// Makefile) and dot-files with an empty stem (.gitignore) do not match.
+func isFileName(token string) bool {
+	if len(token) < 3 || len(token) > 256 || token[0] == '.' && token[1] == '/' {
+		return false // "./x" and "../x" are isPath's job
+	}
+	if strings.IndexByte(token, '.') < 0 {
+		return false // no extension possible; cheap exit for the common token
+	}
+	lastDot, lastSlash := -1, -1
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		case c == '.':
+			if i > 0 && token[i-1] == '.' {
+				return false // "file..txt", "../x"
+			}
+			lastDot = i
+		case c == '/':
+			if i == 0 || token[i-1] == '/' {
+				return false // absolute paths are isPath's job; "//" is not a path
+			}
+			lastSlash = i
+		default:
+			return false
+		}
+	}
+	if lastDot <= lastSlash+1 {
+		return false // no extension in the last segment, or a dot-file with an empty stem
+	}
+	ext := token[lastDot+1:]
+	if len(ext) == 0 || len(ext) > 5 || !isASCIILetter(ext[0]) {
+		return false
+	}
+	for i := 1; i < len(ext); i++ {
+		if !isASCIILetter(ext[i]) && !isASCIIDigit(ext[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
 
 func isPath(token string) bool {
 	// Unix Paths
