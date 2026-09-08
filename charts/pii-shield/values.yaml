@@ -6,7 +6,7 @@ image:
   # 2.1.0+ ships the scratch-based binary driven via `--watch-file` (see the
   # deployment template). Older tags (e.g. v1.2.3) predate that flag and won't
   # work with this chart.
-  tag: "2.2.0"
+  tag: "2.2.3"
 
 watchFile: /var/log/app/output.log
 

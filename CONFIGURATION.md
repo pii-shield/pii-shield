@@ -71,7 +71,7 @@ export PII_CUSTOM_REGEX_LIST='[{"pattern": "^[0-9a-fA-F-]{36}$", "name": "UUID"}
 ```
 
 > [!TIP]
-> **Priority:** Custom regexes are checked **before** entropy but **after** static safety whitelists. Use this to catch structured data like UUIDs or specific IDs that the entropy scanner might miss or consider "safe".
+> **Priority:** Custom regexes are checked **before** entropy but **after** static safety whitelists. The built-in static whitelists cover URLs, file paths and file names with an extension (`report.csv`, `src/main.go`), timestamps, UUIDs, git hashes and `abc1234..def5678` hash ranges, MongoDB ObjectIDs, SSH keys, plain decimal numbers, and whole `git diff` header lines (`diff --git`, `--- a/`, `+++ b/`, `rename`/`copy from|to`, `Binary files`); diff body lines are scanned normally. On a diff body line the leading `+` / `-` marker is treated as framing rather than data: it is emitted verbatim and the rest of the line is scored on its own, so `+report.csv` scores like `report.csv`. Use this to catch structured data like UUIDs or specific IDs that the entropy scanner might miss or consider "safe".
 > **Performance:** Regex checks are skipped for tokens shorter than 5 characters.
 
 > [!NOTE]
