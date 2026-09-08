@@ -815,6 +815,24 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 		return
 	}
 
+	// A diff body line carries its marker glued to the first token: "+" and
+	// "-" are not token separators, so "+report.csv" reached the scorer as one
+	// token and the marker contributed a character class to the class bonus
+	// ("Traceback" scores 1.73, "+Traceback" 3.92 against a 3.6 threshold).
+	// The marker is framing, not data: emit it verbatim and score the rest of
+	// the line on its own (#192). At most two, for combined diffs (diff --cc).
+	// Output stays byte-for-byte, so line counts and patch validity hold.
+	if depth == 0 {
+		n := 0
+		for n < 2 && n < len(logLine) && (logLine[n] == '+' || logLine[n] == '-') {
+			n++
+		}
+		if n > 0 && n < len(logLine) {
+			sb.WriteString(logLine[:n])
+			logLine = logLine[n:]
+		}
+	}
+
 	// JSON lines are handled by the tokenizer itself (quotes, braces, colon
 	// pairs) — deliberately no encoding/json parse here; see compact_json_test.go.
 
