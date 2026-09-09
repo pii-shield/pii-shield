@@ -32,11 +32,35 @@ func TestBigramNonASCII(t *testing.T) {
 		st := cfgState()
 		for _, tok := range []string{
 			"конфигурация", "маршрутизация", "пользователь", "Аутентификация",
-			"соединение", "テスト環境",
+			"соединение", "пароль", "テスト環境",
 		} {
 			if got := st.calculateBigramAdjustment(tok); got != 0.0 {
 				t.Errorf("default %v, token %q: adjustment %v, want 0", defaultScore, tok, got)
 			}
+		}
+	}
+
+	// 1b. Mixed ASCII + multibyte tokens are scored on their ASCII runs, with
+	//     the pair that straddles a multibyte rune skipped. These cases used to
+	//     live in bigramEquivCorpus (hotpath_equiv_test.go), whose oracle is the
+	//     pre-F5 byte-slicing implementation; pinned here with explicit values
+	//     instead, since that oracle is what this change replaces.
+	for _, tc := range []struct {
+		token        string
+		defaultScore float64
+		want         float64
+	}{
+		{"mixedПароль123", -7.0, 0.0}, // "mi ix xe ed" + "12 23": neutral band
+		{"mixedПароль123", -9.0, 0.5}, // the digit pairs are unknown: random-looking
+		{"emoji🙂token", -7.0, 0.0},
+		{"emoji🙂token", -9.0, 0.0},
+	} {
+		cfg := campaignConfig()
+		cfg.BigramDefaultScore = tc.defaultScore
+		UpdateConfig(cfg)
+		if got := cfgState().calculateBigramAdjustment(tc.token); got != tc.want {
+			t.Errorf("default %v, token %q: adjustment %v, want %v",
+				tc.defaultScore, tc.token, got, tc.want)
 		}
 	}
 
