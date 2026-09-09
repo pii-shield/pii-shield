@@ -5,7 +5,11 @@ package scanner
 //
 // LANGUAGE LIMITATION: This map is optimized for English text. Using this scanner
 // on non-English logs (German, Spanish, Chinese, etc.) or technical content (base64,
-// hex dumps) will result in higher false positive rates.
+// hex dumps) will result in higher false positive rates. Scoring covers pairs of
+// adjacent ASCII characters only: a word in a non-Latin script has no such pair and
+// therefore receives no adjustment in either direction, and an accented Latin word is
+// judged on the ASCII runs it does contain. The remaining false positives on such
+// text come from the entropy side, not from this table.
 //
 // CUSTOMIZATION: To support other languages, you have two options:
 // 1. Disable bigram checking entirely: Set PII_DISABLE_BIGRAM_CHECK=true

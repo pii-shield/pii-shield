@@ -632,8 +632,7 @@ func (st *configState) calculateBigramAdjustment(token string) float64 {
 	if isASCIIString(token) {
 		// For pure-ASCII tokens strings.ToLower only maps A-Z, so an inline
 		// byte lowercase produces the same bigrams without the per-token
-		// allocation. Non-ASCII tokens keep the ToLower path: multibyte
-		// lowercasing changes bytes and must stay byte-identical to before.
+		// allocation.
 		prev := lowerASCIIByte(token[0])
 		for i := 1; i < len(token); i++ {
 			cur := lowerASCIIByte(token[i])
@@ -642,11 +641,25 @@ func (st *configState) calculateBigramAdjustment(token string) float64 {
 			prev = cur
 		}
 	} else {
-		sLower := strings.ToLower(token)
-		for i := 0; i < len(sLower)-1; i++ {
-			bg := sLower[i : i+2]
-			sumProb += st.bigramProb(bg) // Using shared bigram table from bigrams.go
-			count++
+		// The bigram table is English and byte-indexed, so taking bigrams two
+		// bytes at a time cuts multibyte runes in half: every pair read out of
+		// a Cyrillic (or any non-Latin) word is unknown by construction and the
+		// token collapses onto BigramDefaultScore no matter what it says. Score
+		// only the pairs whose characters are both ASCII and adjacent; a token
+		// with no such pair leaves count at 0 and gets no adjustment at all.
+		var prev byte
+		havePrev := false
+		for _, r := range token {
+			if r >= utf8.RuneSelf {
+				havePrev = false
+				continue
+			}
+			cur := lowerASCIIByte(byte(r))
+			if havePrev {
+				sumProb += st.bigramProbBytes(prev, cur)
+				count++
+			}
+			prev, havePrev = cur, true
 		}
 	}
 

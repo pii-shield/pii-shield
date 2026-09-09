@@ -145,10 +145,10 @@ var bigramEquivCorpus = []string{
 	"1234567890",
 	"user_id=42;q",
 	"key:value/path",
-	"пароль",         // non-ASCII: ToLower path
-	"Аутентификация", // non-ASCII with uppercase
-	"mixedПароль123", // mixed ASCII + multibyte
-	"emoji🙂token",    // multibyte non-letter
+	// Non-ASCII tokens used to live here too. F5 deliberately changed what the
+	// scanner does with them — byte-sliced bigrams cut multibyte runes in half —
+	// so the pre-O3 ToLower implementation is no longer the oracle for them.
+	// Their behavior is pinned in TestBigramNonASCII instead.
 	"ends-with-upperZ",
 	"Z@#$%^&*()aa",
 }
@@ -156,7 +156,7 @@ var bigramEquivCorpus = []string{
 // TestBigramInlineLowerEquivalence covers O3: the inline ASCII lowercase path
 // must return exactly what the ToLower-based implementation returns, at the
 // default config and at a custom BigramDefaultScore that activates the +0.5
-// branch; the non-ASCII path must stay byte-identical to before.
+// branch. Pure-ASCII tokens only: see the note on bigramEquivCorpus.
 func TestBigramInlineLowerEquivalence(t *testing.T) {
 	oldCfg := activeCfg()
 	defer UpdateConfig(oldCfg)
