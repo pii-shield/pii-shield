@@ -698,7 +698,8 @@ func lowerASCIIByte(b byte) byte {
 // entityLabel returns the entity-type label to embed in the redaction marker
 // when EntityTypeLabels is enabled, or "" for the legacy unlabeled format.
 // The set of types is deliberately small and fixed: card, key, context, url,
-// regex, entropy (named custom rules keep their own name instead).
+// regex, entropy, plus the issuer names of the built-in signature detectors in
+// signatures.go (named custom rules keep their own name instead).
 func (st *configState) entityLabel(entityType string) string {
 	if st.config.EntityTypeLabels {
 		return entityType
@@ -825,6 +826,16 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 	// only: a header is a whole line, not a quoted fragment inside one.
 	if depth == 0 && isGitDiffHeader(logLine) {
 		sb.WriteString(logLine)
+		return
+	}
+
+	// The BEGIN/END framing of a PEM private key is a whole line with spaces in
+	// it, so no token ever carries the signature. Mark the line as a whole: it
+	// holds no secret itself, but it is what makes the event countable and
+	// attributable. The body lines are high-entropy base64 and are redacted by
+	// the entropy engine on their own.
+	if depth == 0 && isPrivateKeyMarker(logLine) {
+		st.redactWithHMAC(logLine, st.entityLabel("private-key"), "signature", sb)
 		return
 	}
 
@@ -1153,6 +1164,28 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 				}
 			}
 		}
+	}
+
+	// 2.5 Deterministic Check: built-in secret signatures. Runs after the user's
+	// own rules (so a custom rule or a safe rule still wins) but before the
+	// length, space and entropy heuristics, because a valid-format token with a
+	// low-entropy body — AKIA followed by sixteen A's — is a real key that the
+	// threshold would let through.
+	if label := matchSignature(content); label != "" {
+		quoteChar := byte(0)
+		if strings.HasPrefix(original, "\"") {
+			quoteChar = '"'
+		} else if strings.HasPrefix(original, "'") {
+			quoteChar = '\''
+		}
+		if quoteChar != 0 {
+			sb.WriteByte(quoteChar)
+		}
+		st.redactWithHMAC(content, st.entityLabel(label), "signature", sb)
+		if quoteChar != 0 {
+			sb.WriteByte(quoteChar)
+		}
+		return
 	}
 
 	// 3. Heuristics Check (Length & Spaces)
@@ -2063,6 +2096,8 @@ type segmentState struct {
 	// Generic KV Support
 	pendingGenericKey    bool // True if last key was "key", "name"
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
+
+	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 }
 
 func (st *configState) processAndAppend(token string, sb *strings.Builder, state *segmentState, depth int) {
@@ -2080,7 +2115,18 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
 
 	// 1. Process Token
-	isKey := st.processTokenLogic(token, state.pendingKeySensitive, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
+	//
+	// "Authorization: Bearer <token>" has no key=value pair around the credential
+	// itself: the sensitive key spends its one forced slot on the word "Bearer"
+	// and the token after it goes free. Force that token too — but only when it
+	// is long enough to be a credential, so prose like "the bearer of this note"
+	// keeps its next word (the B1 lesson: a bare keyword must not redact
+	// ordinary text after it).
+	forced := state.pendingKeySensitive
+	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
+		forced = true
+	}
+	isKey := st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
 	// sb is updated inside processTokenLogic
 
 	// 2. Update Context State
@@ -2115,6 +2161,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.pendingGenericKey = false
 		}
 	}
+
+	// Remember the auth scheme for exactly one token (see the forcing above).
+	state.pendingBearer = lowerClean == "bearer"
 
 	// Check if this token is a Context Keyword (e.g. "Error", "Failed")
 	if ContextKeywords[lowerClean] {
