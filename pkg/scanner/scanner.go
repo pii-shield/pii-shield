@@ -762,12 +762,75 @@ func (st *configState) ScanAndRedact(logLine string) string {
 	return sb.String()
 }
 
+// ScanAndRedactText redacts text that may span several lines, scanning each
+// line on its own. ScanAndRedact is a single-line engine: '\n' is not a token
+// separator, so a value at the end of a line would otherwise be scored
+// together with its newline (and the first token of the next line). That
+// defeats structural safe rules such as isPlainDecimal and swallows the
+// newline inside the redaction marker, changing the line count (#184). Line
+// endings ("\n" and "\r\n") are preserved, so the output has exactly as
+// many lines as the input — the same contract the CLI gives stdin.
+func ScanAndRedactText(text string) string {
+	return cfgState().ScanAndRedactText(text)
+}
+
+// ScanAndRedactText is the multi-line counterpart of ScanAndRedact; Scanner
+// embeds *configState, so it is promoted as (*Scanner).ScanAndRedactText.
+func (st *configState) ScanAndRedactText(text string) string {
+	if strings.IndexByte(text, '\n') == -1 {
+		return st.ScanAndRedact(text)
+	}
+	var sb strings.Builder
+	sb.Grow(len(text) + 100)
+	for len(text) > 0 {
+		line, ending := text, ""
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			line, ending, text = text[:i], "\n", text[i+1:]
+		} else {
+			text = ""
+		}
+		if strings.HasSuffix(line, "\r") {
+			line, ending = line[:len(line)-1], "\r"+ending
+		}
+		sb.WriteString(st.ScanAndRedact(line))
+		sb.WriteString(ending)
+	}
+	return sb.String()
+}
+
 // scanLine is the zero-allocation internal version of ScanAndRedact.
 // depth tracks nesting of the recursive token machinery (see
 // maxTokenRecursionDepth); top-level callers pass 0.
 func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) {
 	if len(logLine) == 0 {
 		return
+	}
+
+	// Git diff header lines carry file paths and object hashes only, never
+	// values, and their a/ b/ relative paths and abbreviated hash ranges
+	// score above the entropy threshold (#186). Structural rule, top level
+	// only: a header is a whole line, not a quoted fragment inside one.
+	if depth == 0 && isGitDiffHeader(logLine) {
+		sb.WriteString(logLine)
+		return
+	}
+
+	// A diff body line carries its marker glued to the first token: "+" and
+	// "-" are not token separators, so "+report.csv" reached the scorer as one
+	// token and the marker contributed a character class to the class bonus
+	// ("Traceback" scores 1.73, "+Traceback" 3.92 against a 3.6 threshold).
+	// The marker is framing, not data: emit it verbatim and score the rest of
+	// the line on its own (#192). At most two, for combined diffs (diff --cc).
+	// Output stays byte-for-byte, so line counts and patch validity hold.
+	if depth == 0 {
+		n := 0
+		for n < 2 && n < len(logLine) && (logLine[n] == '+' || logLine[n] == '-') {
+			n++
+		}
+		if n > 0 && n < len(logLine) {
+			sb.WriteString(logLine[:n])
+			logLine = logLine[n:]
+		}
 	}
 
 	// JSON lines are handled by the tokenizer itself (quotes, braces, colon
@@ -1434,7 +1497,7 @@ func isSafe(token string) bool {
 		return true
 	}
 
-	if isPath(token) || isGitHash(token) || isMongoObjectID(token) {
+	if isPath(token) || isFileName(token) || isGitHash(token) || isGitHashRange(token) || isMongoObjectID(token) {
 		return true
 	}
 
@@ -1549,6 +1612,63 @@ func isIPv6(token string) bool {
 	return false
 }
 
+// isFileName reports whether token has the shape of a file name or relative
+// path with an extension: report.csv, src/main.go, app/models/user.py,
+// invoice_2024.xlsx. isPath covers absolute and Windows paths only, so these
+// were scored on entropy, where "." "/" "_" add class bonus on top of the
+// letters and digits and push most real names over the threshold (#189).
+//
+// The shape is deliberately narrow so that no known secret format fits it:
+// only [A-Za-z0-9._/-] (no "=", "+", ":", "@"), a non-empty stem, and a last
+// "."-separated extension of 1 to 5 alphanumerics starting with a letter.
+// JWTs and SendGrid-style keys have long base64 segments after their last
+// dot, IPv4 addresses and version strings end in digits, e-mails carry "@",
+// URLs are handled before this rule. Extensionless names (Dockerfile,
+// Makefile) and dot-files with an empty stem (.gitignore) do not match.
+func isFileName(token string) bool {
+	if len(token) < 3 || len(token) > 256 || token[0] == '.' && token[1] == '/' {
+		return false // "./x" and "../x" are isPath's job
+	}
+	if strings.IndexByte(token, '.') < 0 {
+		return false // no extension possible; cheap exit for the common token
+	}
+	lastDot, lastSlash := -1, -1
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		case c == '.':
+			if i > 0 && token[i-1] == '.' {
+				return false // "file..txt", "../x"
+			}
+			lastDot = i
+		case c == '/':
+			if i == 0 || token[i-1] == '/' {
+				return false // absolute paths are isPath's job; "//" is not a path
+			}
+			lastSlash = i
+		default:
+			return false
+		}
+	}
+	if lastDot <= lastSlash+1 {
+		return false // no extension in the last segment, or a dot-file with an empty stem
+	}
+	ext := token[lastDot+1:]
+	if len(ext) == 0 || len(ext) > 5 || !isASCIILetter(ext[0]) {
+		return false
+	}
+	for i := 1; i < len(ext); i++ {
+		if !isASCIILetter(ext[i]) && !isASCIIDigit(ext[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
+
 func isPath(token string) bool {
 	// Unix Paths
 	if strings.HasPrefix(token, "/") || strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") {
@@ -1579,6 +1699,56 @@ func isPath(token string) bool {
 
 func isGitHash(token string) bool {
 	return len(token) == 40 && isHexStr(token)
+}
+
+// isGitHashRange reports whether token is a git object range such as
+// 3b18e51..a1c9f02 (the `index` line of a diff, `git log A..B`): two
+// hex runs of 7 to 40 characters joined by ".." or "...".
+func isGitHashRange(token string) bool {
+	i := strings.Index(token, "..")
+	if i < 7 {
+		return false
+	}
+	rest := strings.TrimPrefix(token[i+2:], ".")
+	return isAbbrevHash(token[:i]) && isAbbrevHash(rest)
+}
+
+func isAbbrevHash(s string) bool {
+	return len(s) >= 7 && len(s) <= 40 && isHexStr(s)
+}
+
+// gitDiffHeaderPrefixes are the line starts of the `git diff` header
+// grammar that carry paths or hashes: the file pair, the old/new markers
+// (prefixed or /dev/null), renames and copies, and the binary-file notice.
+// Body lines ("+", "-", " ") are deliberately absent — they are scanned.
+var gitDiffHeaderPrefixes = [...]string{
+	"diff --git ",
+	"diff --cc ",
+	"diff --combined ",
+	"--- a/",
+	"+++ b/",
+	"--- \"a/",
+	"+++ \"b/",
+	"--- /dev/null",
+	"+++ /dev/null",
+	"rename from ",
+	"rename to ",
+	"copy from ",
+	"copy to ",
+	"Binary files ",
+}
+
+// isGitDiffHeader reports whether line is a git diff header line (see
+// gitDiffHeaderPrefixes). The `index <hash>..<hash> <mode>` line is not
+// listed: its range token is covered by isGitHashRange and the rest is
+// low-entropy.
+func isGitDiffHeader(line string) bool {
+	for _, p := range gitDiffHeaderPrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func isMongoObjectID(token string) bool {

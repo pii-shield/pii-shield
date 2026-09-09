@@ -110,14 +110,15 @@ func loadCases(t *testing.T) []parityCase {
 	return cases
 }
 
-// TestGoParity asserts the Go API (scanner.ScanAndRedact) reproduces the golden
-// for every case. The Node and Python SDKs assert the same golden via WASM.
+// TestGoParity asserts the Go API (scanner.ScanAndRedactText, the entry point
+// the WASM kernel calls) reproduces the golden for every case. The Node and
+// Python SDKs assert the same golden via WASM.
 func TestGoParity(t *testing.T) {
 	for _, tc := range loadCases(t) {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
 			scanner.UpdateConfig(applyConfig(t, tc.Config))
-			got := scanner.ScanAndRedact(tc.Input)
+			got := scanner.ScanAndRedactText(tc.Input)
 			if got != tc.Expected {
 				t.Fatalf("parity mismatch\n input:    %q\n config:   %v\n expected: %q\n got:      %q",
 					tc.Input, tc.Config, tc.Expected, got)
