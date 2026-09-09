@@ -45,6 +45,7 @@ Developers often forget to mask sensitive data. Traditional regex filters in Flu
 - **Production-hardening Core Engine:** Optimized for Kubernetes sidecars with low memory allocations on hot paths and deterministic regex matching.
 - **Context-Aware Entropy Analysis:** Detected high-entropy secrets even without keys (e.g. `Error: ... 44saCk9...`) by analyzing context keywords.
 - **Custom Regex Rules:** Deterministic redaction for structured data (UUIDs, IDs) that overrides entropy checks for known patterns.
+- **Built-in Secret Signatures:** Issuer-prefixed credentials — AWS and Google API keys, GitHub, Slack and Stripe tokens, JWTs, `Bearer` credentials and PEM private-key blocks — are redacted on their format, so a valid key is caught even when its body is low-entropy or the threshold has been raised.
 - **Regression & Fuzz Coverage:** Tested against stress cases including binary garbage, JSON nesting, and multilingual logs.
 - **Deterministic Hashing:** Replaces secrets with unique hashes (e.g., `[HIDDEN:a1b2c]`), allowing QA to correlate errors without seeing the raw data.
 - **Drop-in:** No code changes required. Works with any language (Node, Python, Java, Go).

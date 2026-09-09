@@ -14,6 +14,7 @@ func TestIncrementRedaction(t *testing.T) {
 	IncrementRedaction("entropy")
 	IncrementRedaction("regex")
 	IncrementRedaction("luhn")
+	IncrementRedaction("signature")
 
 	// Test invalid strategy mapping to "unknown"
 	IncrementRedaction("malicious-label")
@@ -31,6 +32,11 @@ func TestIncrementRedaction(t *testing.T) {
 	// Validate count for "luhn"
 	if count := testutil.ToFloat64(RedactionEventsTotal.WithLabelValues("luhn")); count != 1 {
 		t.Errorf("Expected 1 for luhn, got %v", count)
+	}
+
+	// Validate count for "signature"
+	if count := testutil.ToFloat64(RedactionEventsTotal.WithLabelValues("signature")); count != 1 {
+		t.Errorf("Expected 1 for signature, got %v", count)
 	}
 
 	// Validate fallback count for "unknown"

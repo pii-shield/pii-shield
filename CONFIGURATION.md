@@ -48,7 +48,7 @@ See `docs/sidecar-failure-modes.md` for production failure-mode guidance.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. | `false` |
+| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. The `piishield_redaction_events_total` counter carries a `type` label bounded to `entropy`, `regex`, `luhn`, `signature` and `unknown`; `signature` counts the built-in issuer-prefix detectors (AWS, Google, GitHub, Slack, Stripe, JWT, Bearer, PEM private keys). | `false` |
 | `PII_METRICS_PORT` | Port for the metrics/health server (1–65535). | `9090` |
 | `PII_STATS_LOG_INTERVAL` | When set to a positive Go duration (e.g. `1h`, `30m`), log a periodic aggregated redaction summary — counts of high-entropy secrets, pattern matches, and card numbers, plus lines and bytes processed — and a final summary on shutdown. Empty or invalid disables it. Independent of `PII_METRICS_ENABLED`. | _(disabled)_ |
 
