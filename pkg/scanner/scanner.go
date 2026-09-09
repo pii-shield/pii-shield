@@ -4,6 +4,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -1807,21 +1809,58 @@ func isSSHKey(token string) bool {
 		return true
 	}
 
-	// SSH Public Key Body (starts with AAAA, high entropy, base64)
-	if strings.HasPrefix(token, "AAAA") && len(token) > 20 {
-		// Minimal Base64 check (just charset)
-		isBase64 := true
-		for _, r := range token {
-			if (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && r != '+' && r != '/' && r != '=' {
-				isBase64 = false
-				break
-			}
-		}
-		if isBase64 {
-			return true
-		}
+	return isSSHKeyBody(token)
+}
+
+// sshKeyTypes are the algorithm names an SSH public key carries inside its own
+// body. A real body is an SSH wire-format string list: a 4-byte big-endian
+// length followed by that many bytes of algorithm name, and the name always
+// repeats what stands in front of the blob ("ssh-rsa AAAAB3NzaC1yc2E...").
+var sshKeyTypes = map[string]bool{
+	"ssh-rsa":                            true,
+	"ssh-dss":                            true,
+	"ssh-ed25519":                        true,
+	"ssh-ed448":                          true,
+	"ecdsa-sha2-nistp256":                true,
+	"ecdsa-sha2-nistp384":                true,
+	"ecdsa-sha2-nistp521":                true,
+	"sk-ssh-ed25519@openssh.com":         true,
+	"sk-ecdsa-sha2-nistp256@openssh.com": true,
+}
+
+// isSSHKeyBody reports whether the token is the base64 body of an SSH public
+// key. The check used to be "starts with AAAA, looks like base64, longer than
+// 20" — a free pass for any blob whose first three bytes happen to be zero,
+// which is a recall hole rather than a whitelist (F2). Decoding the first field
+// and requiring a known algorithm name keeps real public keys readable and
+// gives everything else back to the scorer.
+func isSSHKeyBody(token string) bool {
+	if !strings.HasPrefix(token, "AAAA") || len(token) <= 20 {
+		return false
 	}
-	return false
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '+' || c == '/' || c == '=' {
+			continue
+		}
+		return false
+	}
+
+	// The algorithm name sits in the first bytes, so only the head is decoded.
+	head := token
+	if len(head) > 64 {
+		head = head[:64]
+	}
+	head = head[:len(head)/4*4]
+	raw, err := base64.StdEncoding.DecodeString(head)
+	if err != nil || len(raw) < 8 {
+		return false
+	}
+	n := int(binary.BigEndian.Uint32(raw[:4]))
+	if n < 7 || n > 40 || 4+n > len(raw) {
+		return false
+	}
+	return sshKeyTypes[string(raw[4:4+n])]
 }
 
 func isGeneratedUsername(token string) bool {
