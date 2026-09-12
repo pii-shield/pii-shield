@@ -33,7 +33,7 @@ Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail ins
 | `PII_ADAPTIVE_THRESHOLD` | Enable statistical learning. Scanner adjusts threshold based on traffic baseline. | `false` |
 | `PII_ADAPTIVE_SAMPLES` | Number of samples to collect before activating adaptive mode. | `100` |
 | `PII_DISABLE_BIGRAM_CHECK` | Disable English bigram validation. Set to `true` for non-English logs. | `false` |
-| `PII_BIGRAM_DEFAULT_SCORE` | Log-probability score for unknown bigrams. | `-7.0` |
+| `PII_BIGRAM_DEFAULT_SCORE` | Log-probability score for unknown bigrams. Only pairs of adjacent ASCII characters are scored, so text in a non-Latin script gets no bigram adjustment at all and this value cannot push it towards redaction. | `-7.0` |
 | `PII_ENTITY_TYPE_LABELS` | Emit `[HIDDEN:<type>:<hash>]` instead of `[HIDDEN:<hash>]`, where `<type>` names the detector that fired: `card` (Luhn), `key` (sensitive key), `context` (context keyword), `url` (URL parameter entropy), `regex` (unnamed custom rule), `entropy` (plain entropy). Named custom rules keep their own name as the label. The hash is unchanged, so enabling the flag does not break tag correlation. Accepts `1`/`true`/`yes`/`y`/`on`. | `false` |
 
 ## Runtime Failure Policy
@@ -48,7 +48,7 @@ See `docs/sidecar-failure-modes.md` for production failure-mode guidance.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. | `false` |
+| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. The `piishield_redaction_events_total` counter carries a `type` label bounded to `entropy`, `regex`, `luhn`, `signature` and `unknown`; `signature` counts the built-in issuer-prefix detectors (AWS, Google, GitHub, Slack, Stripe, JWT, Bearer, PEM private keys). | `false` |
 | `PII_METRICS_PORT` | Port for the metrics/health server (1–65535). | `9090` |
 | `PII_STATS_LOG_INTERVAL` | When set to a positive Go duration (e.g. `1h`, `30m`), log a periodic aggregated redaction summary — counts of high-entropy secrets, pattern matches, and card numbers, plus lines and bytes processed — and a final summary on shutdown. Empty or invalid disables it. Independent of `PII_METRICS_ENABLED`. | _(disabled)_ |
 
@@ -71,7 +71,7 @@ export PII_CUSTOM_REGEX_LIST='[{"pattern": "^[0-9a-fA-F-]{36}$", "name": "UUID"}
 ```
 
 > [!TIP]
-> **Priority:** Custom regexes are checked **before** entropy but **after** static safety whitelists. Use this to catch structured data like UUIDs or specific IDs that the entropy scanner might miss or consider "safe".
+> **Priority:** Custom regexes are checked **before** entropy but **after** static safety whitelists. The built-in static whitelists cover URLs, file paths and file names with an extension (`report.csv`, `src/main.go`), timestamps, UUIDs, git hashes and `abc1234..def5678` hash ranges, MongoDB ObjectIDs, SSH public keys (the `ssh-…` algorithm name and a body that decodes to a known SSH algorithm — a base64 blob that merely starts with `AAAA` is scored normally), plain decimal numbers, and whole `git diff` header lines (`diff --git`, `--- a/`, `+++ b/`, `rename`/`copy from|to`, `Binary files`); diff body lines are scanned normally. On a diff body line the leading `+` / `-` marker is treated as framing rather than data: it is emitted verbatim and the rest of the line is scored on its own, so `+report.csv` scores like `report.csv`. Use this to catch structured data like UUIDs or specific IDs that the entropy scanner might miss or consider "safe".
 > **Performance:** Regex checks are skipped for tokens shorter than 5 characters.
 
 > [!NOTE]

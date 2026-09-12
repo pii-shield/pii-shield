@@ -4,6 +4,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -632,8 +634,7 @@ func (st *configState) calculateBigramAdjustment(token string) float64 {
 	if isASCIIString(token) {
 		// For pure-ASCII tokens strings.ToLower only maps A-Z, so an inline
 		// byte lowercase produces the same bigrams without the per-token
-		// allocation. Non-ASCII tokens keep the ToLower path: multibyte
-		// lowercasing changes bytes and must stay byte-identical to before.
+		// allocation.
 		prev := lowerASCIIByte(token[0])
 		for i := 1; i < len(token); i++ {
 			cur := lowerASCIIByte(token[i])
@@ -642,11 +643,25 @@ func (st *configState) calculateBigramAdjustment(token string) float64 {
 			prev = cur
 		}
 	} else {
-		sLower := strings.ToLower(token)
-		for i := 0; i < len(sLower)-1; i++ {
-			bg := sLower[i : i+2]
-			sumProb += st.bigramProb(bg) // Using shared bigram table from bigrams.go
-			count++
+		// The bigram table is English and byte-indexed, so taking bigrams two
+		// bytes at a time cuts multibyte runes in half: every pair read out of
+		// a Cyrillic (or any non-Latin) word is unknown by construction and the
+		// token collapses onto BigramDefaultScore no matter what it says. Score
+		// only the pairs whose characters are both ASCII and adjacent; a token
+		// with no such pair leaves count at 0 and gets no adjustment at all.
+		var prev byte
+		havePrev := false
+		for _, r := range token {
+			if r >= utf8.RuneSelf {
+				havePrev = false
+				continue
+			}
+			cur := lowerASCIIByte(byte(r))
+			if havePrev {
+				sumProb += st.bigramProbBytes(prev, cur)
+				count++
+			}
+			prev, havePrev = cur, true
 		}
 	}
 
@@ -685,7 +700,8 @@ func lowerASCIIByte(b byte) byte {
 // entityLabel returns the entity-type label to embed in the redaction marker
 // when EntityTypeLabels is enabled, or "" for the legacy unlabeled format.
 // The set of types is deliberately small and fixed: card, key, context, url,
-// regex, entropy (named custom rules keep their own name instead).
+// regex, entropy, plus the issuer names of the built-in signature detectors in
+// signatures.go (named custom rules keep their own name instead).
 func (st *configState) entityLabel(entityType string) string {
 	if st.config.EntityTypeLabels {
 		return entityType
@@ -762,12 +778,85 @@ func (st *configState) ScanAndRedact(logLine string) string {
 	return sb.String()
 }
 
+// ScanAndRedactText redacts text that may span several lines, scanning each
+// line on its own. ScanAndRedact is a single-line engine: '\n' is not a token
+// separator, so a value at the end of a line would otherwise be scored
+// together with its newline (and the first token of the next line). That
+// defeats structural safe rules such as isPlainDecimal and swallows the
+// newline inside the redaction marker, changing the line count (#184). Line
+// endings ("\n" and "\r\n") are preserved, so the output has exactly as
+// many lines as the input — the same contract the CLI gives stdin.
+func ScanAndRedactText(text string) string {
+	return cfgState().ScanAndRedactText(text)
+}
+
+// ScanAndRedactText is the multi-line counterpart of ScanAndRedact; Scanner
+// embeds *configState, so it is promoted as (*Scanner).ScanAndRedactText.
+func (st *configState) ScanAndRedactText(text string) string {
+	if strings.IndexByte(text, '\n') == -1 {
+		return st.ScanAndRedact(text)
+	}
+	var sb strings.Builder
+	sb.Grow(len(text) + 100)
+	for len(text) > 0 {
+		line, ending := text, ""
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			line, ending, text = text[:i], "\n", text[i+1:]
+		} else {
+			text = ""
+		}
+		if strings.HasSuffix(line, "\r") {
+			line, ending = line[:len(line)-1], "\r"+ending
+		}
+		sb.WriteString(st.ScanAndRedact(line))
+		sb.WriteString(ending)
+	}
+	return sb.String()
+}
+
 // scanLine is the zero-allocation internal version of ScanAndRedact.
 // depth tracks nesting of the recursive token machinery (see
 // maxTokenRecursionDepth); top-level callers pass 0.
 func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) {
 	if len(logLine) == 0 {
 		return
+	}
+
+	// Git diff header lines carry file paths and object hashes only, never
+	// values, and their a/ b/ relative paths and abbreviated hash ranges
+	// score above the entropy threshold (#186). Structural rule, top level
+	// only: a header is a whole line, not a quoted fragment inside one.
+	if depth == 0 && isGitDiffHeader(logLine) {
+		sb.WriteString(logLine)
+		return
+	}
+
+	// The BEGIN/END framing of a PEM private key is a whole line with spaces in
+	// it, so no token ever carries the signature. Mark the line as a whole: it
+	// holds no secret itself, but it is what makes the event countable and
+	// attributable. The body lines are high-entropy base64 and are redacted by
+	// the entropy engine on their own.
+	if depth == 0 && isPrivateKeyMarker(logLine) {
+		st.redactWithHMAC(logLine, st.entityLabel("private-key"), "signature", sb)
+		return
+	}
+
+	// A diff body line carries its marker glued to the first token: "+" and
+	// "-" are not token separators, so "+report.csv" reached the scorer as one
+	// token and the marker contributed a character class to the class bonus
+	// ("Traceback" scores 1.73, "+Traceback" 3.92 against a 3.6 threshold).
+	// The marker is framing, not data: emit it verbatim and score the rest of
+	// the line on its own (#192). At most two, for combined diffs (diff --cc).
+	// Output stays byte-for-byte, so line counts and patch validity hold.
+	if depth == 0 {
+		n := 0
+		for n < 2 && n < len(logLine) && (logLine[n] == '+' || logLine[n] == '-') {
+			n++
+		}
+		if n > 0 && n < len(logLine) {
+			sb.WriteString(logLine[:n])
+			logLine = logLine[n:]
+		}
 	}
 
 	// JSON lines are handled by the tokenizer itself (quotes, braces, colon
@@ -1077,6 +1166,28 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 				}
 			}
 		}
+	}
+
+	// 2.5 Deterministic Check: built-in secret signatures. Runs after the user's
+	// own rules (so a custom rule or a safe rule still wins) but before the
+	// length, space and entropy heuristics, because a valid-format token with a
+	// low-entropy body — AKIA followed by sixteen A's — is a real key that the
+	// threshold would let through.
+	if label := matchSignature(content); label != "" {
+		quoteChar := byte(0)
+		if strings.HasPrefix(original, "\"") {
+			quoteChar = '"'
+		} else if strings.HasPrefix(original, "'") {
+			quoteChar = '\''
+		}
+		if quoteChar != 0 {
+			sb.WriteByte(quoteChar)
+		}
+		st.redactWithHMAC(content, st.entityLabel(label), "signature", sb)
+		if quoteChar != 0 {
+			sb.WriteByte(quoteChar)
+		}
+		return
 	}
 
 	// 3. Heuristics Check (Length & Spaces)
@@ -1434,7 +1545,7 @@ func isSafe(token string) bool {
 		return true
 	}
 
-	if isPath(token) || isGitHash(token) || isMongoObjectID(token) {
+	if isPath(token) || isFileName(token) || isGitHash(token) || isGitHashRange(token) || isMongoObjectID(token) {
 		return true
 	}
 
@@ -1549,6 +1660,63 @@ func isIPv6(token string) bool {
 	return false
 }
 
+// isFileName reports whether token has the shape of a file name or relative
+// path with an extension: report.csv, src/main.go, app/models/user.py,
+// invoice_2024.xlsx. isPath covers absolute and Windows paths only, so these
+// were scored on entropy, where "." "/" "_" add class bonus on top of the
+// letters and digits and push most real names over the threshold (#189).
+//
+// The shape is deliberately narrow so that no known secret format fits it:
+// only [A-Za-z0-9._/-] (no "=", "+", ":", "@"), a non-empty stem, and a last
+// "."-separated extension of 1 to 5 alphanumerics starting with a letter.
+// JWTs and SendGrid-style keys have long base64 segments after their last
+// dot, IPv4 addresses and version strings end in digits, e-mails carry "@",
+// URLs are handled before this rule. Extensionless names (Dockerfile,
+// Makefile) and dot-files with an empty stem (.gitignore) do not match.
+func isFileName(token string) bool {
+	if len(token) < 3 || len(token) > 256 || token[0] == '.' && token[1] == '/' {
+		return false // "./x" and "../x" are isPath's job
+	}
+	if strings.IndexByte(token, '.') < 0 {
+		return false // no extension possible; cheap exit for the common token
+	}
+	lastDot, lastSlash := -1, -1
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		case c == '.':
+			if i > 0 && token[i-1] == '.' {
+				return false // "file..txt", "../x"
+			}
+			lastDot = i
+		case c == '/':
+			if i == 0 || token[i-1] == '/' {
+				return false // absolute paths are isPath's job; "//" is not a path
+			}
+			lastSlash = i
+		default:
+			return false
+		}
+	}
+	if lastDot <= lastSlash+1 {
+		return false // no extension in the last segment, or a dot-file with an empty stem
+	}
+	ext := token[lastDot+1:]
+	if len(ext) == 0 || len(ext) > 5 || !isASCIILetter(ext[0]) {
+		return false
+	}
+	for i := 1; i < len(ext); i++ {
+		if !isASCIILetter(ext[i]) && !isASCIIDigit(ext[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
+
 func isPath(token string) bool {
 	// Unix Paths
 	if strings.HasPrefix(token, "/") || strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") {
@@ -1581,6 +1749,56 @@ func isGitHash(token string) bool {
 	return len(token) == 40 && isHexStr(token)
 }
 
+// isGitHashRange reports whether token is a git object range such as
+// 3b18e51..a1c9f02 (the `index` line of a diff, `git log A..B`): two
+// hex runs of 7 to 40 characters joined by ".." or "...".
+func isGitHashRange(token string) bool {
+	i := strings.Index(token, "..")
+	if i < 7 {
+		return false
+	}
+	rest := strings.TrimPrefix(token[i+2:], ".")
+	return isAbbrevHash(token[:i]) && isAbbrevHash(rest)
+}
+
+func isAbbrevHash(s string) bool {
+	return len(s) >= 7 && len(s) <= 40 && isHexStr(s)
+}
+
+// gitDiffHeaderPrefixes are the line starts of the `git diff` header
+// grammar that carry paths or hashes: the file pair, the old/new markers
+// (prefixed or /dev/null), renames and copies, and the binary-file notice.
+// Body lines ("+", "-", " ") are deliberately absent — they are scanned.
+var gitDiffHeaderPrefixes = [...]string{
+	"diff --git ",
+	"diff --cc ",
+	"diff --combined ",
+	"--- a/",
+	"+++ b/",
+	"--- \"a/",
+	"+++ \"b/",
+	"--- /dev/null",
+	"+++ /dev/null",
+	"rename from ",
+	"rename to ",
+	"copy from ",
+	"copy to ",
+	"Binary files ",
+}
+
+// isGitDiffHeader reports whether line is a git diff header line (see
+// gitDiffHeaderPrefixes). The `index <hash>..<hash> <mode>` line is not
+// listed: its range token is covered by isGitHashRange and the rest is
+// low-entropy.
+func isGitDiffHeader(line string) bool {
+	for _, p := range gitDiffHeaderPrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func isMongoObjectID(token string) bool {
 	return len(token) == 24 && isHexStr(token)
 }
@@ -1591,21 +1809,58 @@ func isSSHKey(token string) bool {
 		return true
 	}
 
-	// SSH Public Key Body (starts with AAAA, high entropy, base64)
-	if strings.HasPrefix(token, "AAAA") && len(token) > 20 {
-		// Minimal Base64 check (just charset)
-		isBase64 := true
-		for _, r := range token {
-			if (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && r != '+' && r != '/' && r != '=' {
-				isBase64 = false
-				break
-			}
-		}
-		if isBase64 {
-			return true
-		}
+	return isSSHKeyBody(token)
+}
+
+// sshKeyTypes are the algorithm names an SSH public key carries inside its own
+// body. A real body is an SSH wire-format string list: a 4-byte big-endian
+// length followed by that many bytes of algorithm name, and the name always
+// repeats what stands in front of the blob ("ssh-rsa AAAAB3NzaC1yc2E...").
+var sshKeyTypes = map[string]bool{
+	"ssh-rsa":                            true,
+	"ssh-dss":                            true,
+	"ssh-ed25519":                        true,
+	"ssh-ed448":                          true,
+	"ecdsa-sha2-nistp256":                true,
+	"ecdsa-sha2-nistp384":                true,
+	"ecdsa-sha2-nistp521":                true,
+	"sk-ssh-ed25519@openssh.com":         true,
+	"sk-ecdsa-sha2-nistp256@openssh.com": true,
+}
+
+// isSSHKeyBody reports whether the token is the base64 body of an SSH public
+// key. The check used to be "starts with AAAA, looks like base64, longer than
+// 20" — a free pass for any blob whose first three bytes happen to be zero,
+// which is a recall hole rather than a whitelist (F2). Decoding the first field
+// and requiring a known algorithm name keeps real public keys readable and
+// gives everything else back to the scorer.
+func isSSHKeyBody(token string) bool {
+	if !strings.HasPrefix(token, "AAAA") || len(token) <= 20 {
+		return false
 	}
-	return false
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '+' || c == '/' || c == '=' {
+			continue
+		}
+		return false
+	}
+
+	// The algorithm name sits in the first bytes, so only the head is decoded.
+	head := token
+	if len(head) > 64 {
+		head = head[:64]
+	}
+	head = head[:len(head)/4*4]
+	raw, err := base64.StdEncoding.DecodeString(head)
+	if err != nil || len(raw) < 8 {
+		return false
+	}
+	n := int(binary.BigEndian.Uint32(raw[:4]))
+	if n < 7 || n > 40 || 4+n > len(raw) {
+		return false
+	}
+	return sshKeyTypes[string(raw[4:4+n])]
 }
 
 func isGeneratedUsername(token string) bool {
@@ -1880,6 +2135,8 @@ type segmentState struct {
 	// Generic KV Support
 	pendingGenericKey    bool // True if last key was "key", "name"
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
+
+	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 }
 
 func (st *configState) processAndAppend(token string, sb *strings.Builder, state *segmentState, depth int) {
@@ -1897,7 +2154,18 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
 
 	// 1. Process Token
-	isKey := st.processTokenLogic(token, state.pendingKeySensitive, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
+	//
+	// "Authorization: Bearer <token>" has no key=value pair around the credential
+	// itself: the sensitive key spends its one forced slot on the word "Bearer"
+	// and the token after it goes free. Force that token too — but only when it
+	// is long enough to be a credential, so prose like "the bearer of this note"
+	// keeps its next word (the B1 lesson: a bare keyword must not redact
+	// ordinary text after it).
+	forced := state.pendingKeySensitive
+	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
+		forced = true
+	}
+	isKey := st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
 	// sb is updated inside processTokenLogic
 
 	// 2. Update Context State
@@ -1932,6 +2200,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.pendingGenericKey = false
 		}
 	}
+
+	// Remember the auth scheme for exactly one token (see the forcing above).
+	state.pendingBearer = lowerClean == "bearer"
 
 	// Check if this token is a Context Keyword (e.g. "Error", "Failed")
 	if ContextKeywords[lowerClean] {
