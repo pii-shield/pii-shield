@@ -5,7 +5,7 @@ Prevents data leaks (GDPR/SOC2) by redacting PII from logs *before* they leave t
 
 PII-Shield runs in-process — CLI, sidecar, or WASM. There is no hosted API and no server your data is sent to.
 
-[![Release](https://img.shields.io/badge/release-v2.2.0-blue)](https://github.com/pii-shield/pii-shield/releases/tag/v2.2.0) ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg) ![Docker Pulls](https://img.shields.io/docker/pulls/thelisdeep/pii-shield) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/pii-shield)](https://artifacthub.io/packages/search?repo=pii-shield)<br>
+[![Release](https://img.shields.io/badge/release-v2.2.3-blue)](https://github.com/pii-shield/pii-shield/releases/tag/v2.2.3) ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg) ![Docker Pulls](https://img.shields.io/docker/pulls/thelisdeep/pii-shield) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/pii-shield)](https://artifacthub.io/packages/search?repo=pii-shield)<br>
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12945/badge)](https://www.bestpractices.dev/projects/12945) ![Go Report Card](https://goreportcard.com/badge/github.com/pii-shield/pii-shield?v=1) ![Test Coverage](https://github.com/pii-shield/pii-shield/actions/workflows/test.yml/badge.svg) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors)](https://pii-shield.com/go/sponsors?utm_source=github&utm_medium=readme-badge&utm_campaign=sponsors)
 
 "Don't let PII poison your AI models." PII-Shield ensures that sensitive data never reaches your training dataset, saving you from GDPR-forced model retraining.
@@ -45,6 +45,7 @@ Developers often forget to mask sensitive data. Traditional regex filters in Flu
 - **Production-hardening Core Engine:** Optimized for Kubernetes sidecars with low memory allocations on hot paths and deterministic regex matching.
 - **Context-Aware Entropy Analysis:** Detected high-entropy secrets even without keys (e.g. `Error: ... 44saCk9...`) by analyzing context keywords.
 - **Custom Regex Rules:** Deterministic redaction for structured data (UUIDs, IDs) that overrides entropy checks for known patterns.
+- **Built-in Secret Signatures:** Issuer-prefixed credentials — AWS and Google API keys, GitHub, Slack and Stripe tokens, JWTs, `Bearer` credentials and PEM private-key blocks — are redacted on their format, so a valid key is caught even when its body is low-entropy or the threshold has been raised.
 - **Regression & Fuzz Coverage:** Tested against stress cases including binary garbage, JSON nesting, and multilingual logs.
 - **Deterministic Hashing:** Replaces secrets with unique hashes (e.g., `[HIDDEN:a1b2c]`), allowing QA to correlate errors without seeing the raw data.
 - **Drop-in:** No code changes required. Works with any language (Node, Python, Java, Go).
@@ -81,9 +82,9 @@ This deploys the PII-Shield Operator which automatically injects highly-secure, 
 ### Docker
 Get the latest lightweight image from Docker Hub or GHCR:
 ```bash
-docker pull thelisdeep/pii-shield:2.2.0
+docker pull thelisdeep/pii-shield:2.2.3
 # OR from GitHub Container Registry (Enterprise):
-docker pull ghcr.io/pii-shield/pii-shield:2.2.0
+docker pull ghcr.io/pii-shield/pii-shield:2.2.3
 ```
 
 ### Build from Source
@@ -118,7 +119,7 @@ You can pipe any log output through PII-Shield to see it in action immediately:
 
 ```bash
 # Emulate a log with a sensitive password
-echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm ghcr.io/pii-shield/pii-shield:2.2.0
+echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm ghcr.io/pii-shield/pii-shield:2.2.3
 
 # Output: Error: User password=[HIDDEN:8f3a11] failed login
 ```
