@@ -4,6 +4,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -632,8 +634,7 @@ func (st *configState) calculateBigramAdjustment(token string) float64 {
 	if isASCIIString(token) {
 		// For pure-ASCII tokens strings.ToLower only maps A-Z, so an inline
 		// byte lowercase produces the same bigrams without the per-token
-		// allocation. Non-ASCII tokens keep the ToLower path: multibyte
-		// lowercasing changes bytes and must stay byte-identical to before.
+		// allocation.
 		prev := lowerASCIIByte(token[0])
 		for i := 1; i < len(token); i++ {
 			cur := lowerASCIIByte(token[i])
@@ -642,11 +643,25 @@ func (st *configState) calculateBigramAdjustment(token string) float64 {
 			prev = cur
 		}
 	} else {
-		sLower := strings.ToLower(token)
-		for i := 0; i < len(sLower)-1; i++ {
-			bg := sLower[i : i+2]
-			sumProb += st.bigramProb(bg) // Using shared bigram table from bigrams.go
-			count++
+		// The bigram table is English and byte-indexed, so taking bigrams two
+		// bytes at a time cuts multibyte runes in half: every pair read out of
+		// a Cyrillic (or any non-Latin) word is unknown by construction and the
+		// token collapses onto BigramDefaultScore no matter what it says. Score
+		// only the pairs whose characters are both ASCII and adjacent; a token
+		// with no such pair leaves count at 0 and gets no adjustment at all.
+		var prev byte
+		havePrev := false
+		for _, r := range token {
+			if r >= utf8.RuneSelf {
+				havePrev = false
+				continue
+			}
+			cur := lowerASCIIByte(byte(r))
+			if havePrev {
+				sumProb += st.bigramProbBytes(prev, cur)
+				count++
+			}
+			prev, havePrev = cur, true
 		}
 	}
 
@@ -685,7 +700,8 @@ func lowerASCIIByte(b byte) byte {
 // entityLabel returns the entity-type label to embed in the redaction marker
 // when EntityTypeLabels is enabled, or "" for the legacy unlabeled format.
 // The set of types is deliberately small and fixed: card, key, context, url,
-// regex, entropy (named custom rules keep their own name instead).
+// regex, entropy, plus the issuer names of the built-in signature detectors in
+// signatures.go (named custom rules keep their own name instead).
 func (st *configState) entityLabel(entityType string) string {
 	if st.config.EntityTypeLabels {
 		return entityType
@@ -812,6 +828,16 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 	// only: a header is a whole line, not a quoted fragment inside one.
 	if depth == 0 && isGitDiffHeader(logLine) {
 		sb.WriteString(logLine)
+		return
+	}
+
+	// The BEGIN/END framing of a PEM private key is a whole line with spaces in
+	// it, so no token ever carries the signature. Mark the line as a whole: it
+	// holds no secret itself, but it is what makes the event countable and
+	// attributable. The body lines are high-entropy base64 and are redacted by
+	// the entropy engine on their own.
+	if depth == 0 && isPrivateKeyMarker(logLine) {
+		st.redactWithHMAC(logLine, st.entityLabel("private-key"), "signature", sb)
 		return
 	}
 
@@ -1140,6 +1166,28 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 				}
 			}
 		}
+	}
+
+	// 2.5 Deterministic Check: built-in secret signatures. Runs after the user's
+	// own rules (so a custom rule or a safe rule still wins) but before the
+	// length, space and entropy heuristics, because a valid-format token with a
+	// low-entropy body — AKIA followed by sixteen A's — is a real key that the
+	// threshold would let through.
+	if label := matchSignature(content); label != "" {
+		quoteChar := byte(0)
+		if strings.HasPrefix(original, "\"") {
+			quoteChar = '"'
+		} else if strings.HasPrefix(original, "'") {
+			quoteChar = '\''
+		}
+		if quoteChar != 0 {
+			sb.WriteByte(quoteChar)
+		}
+		st.redactWithHMAC(content, st.entityLabel(label), "signature", sb)
+		if quoteChar != 0 {
+			sb.WriteByte(quoteChar)
+		}
+		return
 	}
 
 	// 3. Heuristics Check (Length & Spaces)
@@ -1761,21 +1809,58 @@ func isSSHKey(token string) bool {
 		return true
 	}
 
-	// SSH Public Key Body (starts with AAAA, high entropy, base64)
-	if strings.HasPrefix(token, "AAAA") && len(token) > 20 {
-		// Minimal Base64 check (just charset)
-		isBase64 := true
-		for _, r := range token {
-			if (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && r != '+' && r != '/' && r != '=' {
-				isBase64 = false
-				break
-			}
-		}
-		if isBase64 {
-			return true
-		}
+	return isSSHKeyBody(token)
+}
+
+// sshKeyTypes are the algorithm names an SSH public key carries inside its own
+// body. A real body is an SSH wire-format string list: a 4-byte big-endian
+// length followed by that many bytes of algorithm name, and the name always
+// repeats what stands in front of the blob ("ssh-rsa AAAAB3NzaC1yc2E...").
+var sshKeyTypes = map[string]bool{
+	"ssh-rsa":                            true,
+	"ssh-dss":                            true,
+	"ssh-ed25519":                        true,
+	"ssh-ed448":                          true,
+	"ecdsa-sha2-nistp256":                true,
+	"ecdsa-sha2-nistp384":                true,
+	"ecdsa-sha2-nistp521":                true,
+	"sk-ssh-ed25519@openssh.com":         true,
+	"sk-ecdsa-sha2-nistp256@openssh.com": true,
+}
+
+// isSSHKeyBody reports whether the token is the base64 body of an SSH public
+// key. The check used to be "starts with AAAA, looks like base64, longer than
+// 20" — a free pass for any blob whose first three bytes happen to be zero,
+// which is a recall hole rather than a whitelist (F2). Decoding the first field
+// and requiring a known algorithm name keeps real public keys readable and
+// gives everything else back to the scorer.
+func isSSHKeyBody(token string) bool {
+	if !strings.HasPrefix(token, "AAAA") || len(token) <= 20 {
+		return false
 	}
-	return false
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '+' || c == '/' || c == '=' {
+			continue
+		}
+		return false
+	}
+
+	// The algorithm name sits in the first bytes, so only the head is decoded.
+	head := token
+	if len(head) > 64 {
+		head = head[:64]
+	}
+	head = head[:len(head)/4*4]
+	raw, err := base64.StdEncoding.DecodeString(head)
+	if err != nil || len(raw) < 8 {
+		return false
+	}
+	n := int(binary.BigEndian.Uint32(raw[:4]))
+	if n < 7 || n > 40 || 4+n > len(raw) {
+		return false
+	}
+	return sshKeyTypes[string(raw[4:4+n])]
 }
 
 func isGeneratedUsername(token string) bool {
@@ -2050,6 +2135,8 @@ type segmentState struct {
 	// Generic KV Support
 	pendingGenericKey    bool // True if last key was "key", "name"
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
+
+	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 }
 
 func (st *configState) processAndAppend(token string, sb *strings.Builder, state *segmentState, depth int) {
@@ -2067,7 +2154,18 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
 
 	// 1. Process Token
-	isKey := st.processTokenLogic(token, state.pendingKeySensitive, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
+	//
+	// "Authorization: Bearer <token>" has no key=value pair around the credential
+	// itself: the sensitive key spends its one forced slot on the word "Bearer"
+	// and the token after it goes free. Force that token too — but only when it
+	// is long enough to be a credential, so prose like "the bearer of this note"
+	// keeps its next word (the B1 lesson: a bare keyword must not redact
+	// ordinary text after it).
+	forced := state.pendingKeySensitive
+	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
+		forced = true
+	}
+	isKey := st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
 	// sb is updated inside processTokenLogic
 
 	// 2. Update Context State
@@ -2102,6 +2200,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.pendingGenericKey = false
 		}
 	}
+
+	// Remember the auth scheme for exactly one token (see the forcing above).
+	state.pendingBearer = lowerClean == "bearer"
 
 	// Check if this token is a Context Keyword (e.g. "Error", "Failed")
 	if ContextKeywords[lowerClean] {

@@ -16,7 +16,7 @@ var (
 	RedactionEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "piishield_redaction_events_total",
 		Help: "Total number of secrets redacted",
-	}, []string{"type"}) // Strictly using "entropy", "regex", "luhn" to avoid high cardinality
+	}, []string{"type"}) // Strictly using "entropy", "regex", "luhn", "signature" to avoid high cardinality
 
 	// ProcessingDuration seconds tracks the time spent sanitizing logs.
 	ProcessingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -35,7 +35,9 @@ var (
 // IncrementRedaction provides a safe interface to increment redactions
 // strictly bounding to specific values to avoid OOM or cardinality explosions.
 func IncrementRedaction(strategyType string) {
-	if strategyType != "entropy" && strategyType != "regex" && strategyType != "luhn" {
+	switch strategyType {
+	case "entropy", "regex", "luhn", "signature":
+	default:
 		strategyType = "unknown"
 	}
 	RedactionEventsTotal.WithLabelValues(strategyType).Inc()
