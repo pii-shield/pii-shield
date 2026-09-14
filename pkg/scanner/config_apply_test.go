@@ -1,6 +1,10 @@
 package scanner
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 // These tests cover the shared config-compile helpers introduced so the SDK/WASM
 // entrypoint derives the same matching state as the CLI (issue #48). The error
@@ -118,5 +122,64 @@ func TestApplySafeRegexes(t *testing.T) {
 
 	if err := cfg.ApplySafeRegexes([]CustomRegexConfig{{Pattern: "(", Name: "bad"}}); err == nil {
 		t.Fatal("expected error for invalid safe regex, got nil")
+	}
+}
+
+// TestApplyRegexesSkipsInvalidRuleKeepsRest covers B14: one rule that does not
+// compile must not take the whole list with it. Before this, the first bad
+// pattern made ApplyCustomRegexes/ApplySafeRegexes return early with nothing
+// applied, and init_config (WASM/SDK path) discards that error — so one stray
+// bracket in a client's rules file silently switched off every client rule.
+func TestApplyRegexesSkipsInvalidRuleKeepsRest(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+
+	cfg := campaignConfig()
+	err := cfg.ApplyCustomRegexes([]CustomRegexConfig{
+		{Pattern: `^[0-9]{4,5}/[0-9]{2}$`, Name: "case-no"},
+		{Pattern: `^\(?(?(`, Name: "broken"},
+	})
+	var skipped *SkippedRegexRulesError
+	if !errors.As(err, &skipped) {
+		t.Fatalf("expected *SkippedRegexRulesError, got %v", err)
+	}
+	if len(skipped.Skipped) != 1 || skipped.Skipped[0].Name != "broken" || skipped.List != "custom regex list" {
+		t.Errorf("wrong skipped report: %+v", skipped)
+	}
+	// The error text is what an SDK user sees in a log: it must name the list,
+	// the count and the offending pattern.
+	if msg := err.Error(); !strings.Contains(msg, "custom regex list") || !strings.Contains(msg, "1 invalid rule") ||
+		!strings.Contains(msg, "(?(") {
+		t.Errorf("unhelpful error text: %q", msg)
+	}
+	if len(cfg.CustomRegexes) != 1 || cfg.CombinedCustomRegex == nil || len(cfg.CustomRegexNames) != 1 {
+		t.Fatalf("valid rule not applied alongside the skipped one: rules=%d combined=%v names=%v",
+			len(cfg.CustomRegexes), cfg.CombinedCustomRegex != nil, cfg.CustomRegexNames)
+	}
+	UpdateConfig(cfg)
+	if out := ScanAndRedact("ref 12345/06 filed"); strings.Contains(out, "12345/06") {
+		t.Errorf("valid custom rule stopped working next to an invalid one: %q", out)
+	}
+
+	cfg = campaignConfig()
+	err = cfg.ApplySafeRegexes([]CustomRegexConfig{
+		{Pattern: `^[0-9]{1,3}-year-old$`, Name: "age"},
+		{Pattern: `^\(?(?(`, Name: "broken"},
+	})
+	if !errors.As(err, &skipped) || skipped.List != "safe regex list" {
+		t.Fatalf("expected safe-list skip report, got %v", err)
+	}
+	if len(cfg.SafeRegexes) != 1 {
+		t.Fatalf("valid safe rule not applied: %d", len(cfg.SafeRegexes))
+	}
+	UpdateConfig(cfg)
+	if out := ScanAndRedact("a 55-year-old man"); !strings.Contains(out, "55-year-old") {
+		t.Errorf("valid safe rule stopped working next to an invalid one: %q", out)
+	}
+
+	// A fully valid list still reports no error at all.
+	cfg = campaignConfig()
+	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Pattern: `^[0-9]{4,5}/[0-9]{2}$`, Name: "case-no"}}); err != nil {
+		t.Errorf("valid list reported an error: %v", err)
 	}
 }

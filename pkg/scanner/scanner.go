@@ -224,19 +224,54 @@ func compileSensitiveKeyPatterns(patterns []string) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-// compileRegexRules compiles raw pattern/name pairs into runtime rules. It
-// returns an error instead of terminating, so an invalid pattern supplied by an
-// SDK caller cannot kill the embedding host process.
-func compileRegexRules(raw []CustomRegexConfig) ([]CustomRegexRule, error) {
+// SkippedRegexRulesError reports rules that did not compile and were left out
+// of a list that was otherwise applied. Callers that only check err != nil
+// still learn that something was wrong; callers that want to keep going can
+// inspect Skipped. The valid rules are in effect either way.
+type SkippedRegexRulesError struct {
+	List    string              // "custom regex list" or "safe regex list"
+	Skipped []CustomRegexConfig // the rules that were dropped
+	Errs    []error             // one compile error per skipped rule
+}
+
+func (e *SkippedRegexRulesError) Error() string {
+	parts := make([]string, 0, len(e.Errs))
+	for _, err := range e.Errs {
+		parts = append(parts, err.Error())
+	}
+	return fmt.Sprintf("%s: skipped %d invalid rule(s): %s", e.List, len(e.Skipped), strings.Join(parts, "; "))
+}
+
+// compileRegexRules compiles raw pattern/name pairs into runtime rules. A rule
+// that does not compile is skipped, reported on stderr and returned inside a
+// *SkippedRegexRulesError; the rest of the list is still returned as compiled
+// rules. Before this (B14) the first bad pattern made the whole list vanish on
+// the SDK/WASM path — silently, because init_config discards the error — so one
+// stray bracket in a client's rules file switched off every client rule. The
+// env path already filtered per rule (#166); this makes every path behave the
+// same way.
+func compileRegexRules(list string, raw []CustomRegexConfig) ([]CustomRegexRule, []CustomRegexConfig, error) {
 	rules := make([]CustomRegexRule, 0, len(raw))
+	valid := make([]CustomRegexConfig, 0, len(raw))
+	var skipped *SkippedRegexRulesError
 	for _, r := range raw {
 		compiled, err := regexp.Compile(r.Pattern)
 		if err != nil {
-			return nil, fmt.Errorf("invalid regex %q: %w", r.Pattern, err)
+			fmt.Fprintf(os.Stderr, "WARNING: %s: skipping invalid regex %q: %v\n", list, r.Pattern, err)
+			if skipped == nil {
+				skipped = &SkippedRegexRulesError{List: list}
+			}
+			skipped.Skipped = append(skipped.Skipped, r)
+			skipped.Errs = append(skipped.Errs, fmt.Errorf("invalid regex %q: %w", r.Pattern, err))
+			continue
 		}
 		rules = append(rules, CustomRegexRule{Regexp: compiled, Name: r.Name})
+		valid = append(valid, r)
 	}
-	return rules, nil
+	if skipped != nil {
+		return rules, valid, skipped
+	}
+	return rules, valid, nil
 }
 
 // ApplySensitiveKeyPatterns stores regex patterns for sensitive key detection.
@@ -257,16 +292,15 @@ func (c *Config) ApplySensitiveKeyPatterns(patterns []string) error {
 // ApplyCustomRegexes compiles custom redaction rules into c, including the
 // combined "mega-regex" fast path. Returns an error for an invalid pattern.
 func (c *Config) ApplyCustomRegexes(raw []CustomRegexConfig) error {
-	rules, err := compileRegexRules(raw)
-	if err != nil {
-		return fmt.Errorf("custom regex list: %w", err)
-	}
+	// skipErr is non-nil when some rules were dropped; the valid ones are
+	// applied below regardless and skipErr is returned at the end.
+	rules, raw, skipErr := compileRegexRules("custom regex list", raw)
 	c.CustomRegexes = rules
 
 	if len(raw) == 0 {
 		c.CombinedCustomRegex = nil
 		c.CustomRegexNames = nil
-		return nil
+		return skipErr
 	}
 
 	patterns := make([]string, 0, len(raw))
@@ -282,21 +316,19 @@ func (c *Config) ApplyCustomRegexes(raw []CustomRegexConfig) error {
 		log.Printf("WARNING: Failed to compile combined custom regex: %v. Fallback to individual checks.", err)
 		c.CombinedCustomRegex = nil
 		c.CustomRegexNames = nil
-		return nil
+		return skipErr
 	}
 	c.CombinedCustomRegex = combined
 	c.CustomRegexNames = names
-	return nil
+	return skipErr
 }
 
-// ApplySafeRegexes compiles whitelist rules into c.
+// ApplySafeRegexes compiles whitelist rules into c. Invalid rules are skipped
+// and reported, the rest are applied (see compileRegexRules).
 func (c *Config) ApplySafeRegexes(raw []CustomRegexConfig) error {
-	rules, err := compileRegexRules(raw)
-	if err != nil {
-		return fmt.Errorf("safe regex list: %w", err)
-	}
+	rules, _, skipErr := compileRegexRules("safe regex list", raw)
 	c.SafeRegexes = rules
-	return nil
+	return skipErr
 }
 
 // DefaultConfig returns the built-in defaults (no env vars, no salt). Embedders
