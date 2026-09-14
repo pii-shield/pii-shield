@@ -50,10 +50,14 @@ scanner default, so redaction matches the CLI for the same config.
 
 ### Invalid regex handling
 
-The CLI fails fast on an invalid pattern at startup. The SDK deliberately does
-**not**: an invalid `sensitive_key_patterns`, `custom_regexes`, or `safe_regexes`
-entry is ignored and the default is kept, so a bad pattern can never terminate
-your Python process. Validate patterns before passing them if you need strictness.
+A bad pattern can never terminate your Python process. An invalid
+`custom_regexes` or `safe_regexes` entry is **skipped and the rest of the list is
+applied**; each skipped rule is reported with a `WARNING` on stderr. (Before
+version 2.2.4 one invalid entry silently dropped the *whole* list, so a single
+stray bracket switched off every rule in it.) An invalid `sensitive_key_patterns`
+entry disables that pattern list with a warning. The CLI behaves the same way
+for its environment-variable lists. Validate patterns before rollout if you need
+strictness — a skipped custom rule means its matches are no longer force-redacted.
 
 ## Features
 
