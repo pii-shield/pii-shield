@@ -436,4 +436,3 @@ func TestIsAllLetters(t *testing.T) {
 		}
 	}
 }
-
