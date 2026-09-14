@@ -146,6 +146,12 @@ func TestApplyRegexesSkipsInvalidRuleKeepsRest(t *testing.T) {
 	if len(skipped.Skipped) != 1 || skipped.Skipped[0].Name != "broken" || skipped.List != "custom regex list" {
 		t.Errorf("wrong skipped report: %+v", skipped)
 	}
+	// The error text is what an SDK user sees in a log: it must name the list,
+	// the count and the offending pattern.
+	if msg := err.Error(); !strings.Contains(msg, "custom regex list") || !strings.Contains(msg, "1 invalid rule") ||
+		!strings.Contains(msg, `^\(?(?(`) {
+		t.Errorf("unhelpful error text: %q", msg)
+	}
 	if len(cfg.CustomRegexes) != 1 || cfg.CombinedCustomRegex == nil || len(cfg.CustomRegexNames) != 1 {
 		t.Fatalf("valid rule not applied alongside the skipped one: rules=%d combined=%v names=%v",
 			len(cfg.CustomRegexes), cfg.CombinedCustomRegex != nil, cfg.CustomRegexNames)
