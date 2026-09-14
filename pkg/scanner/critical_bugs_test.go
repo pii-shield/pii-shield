@@ -427,3 +427,13 @@ func TestBareKeyKeepsMinLength(t *testing.T) {
 		}
 	}
 }
+
+func TestIsAllLetters(t *testing.T) {
+	cases := map[string]bool{"": false, "an": true, "Güler": true, "ab1": false, "O'Brien": false, "12345": false}
+	for in, want := range cases {
+		if got := isAllLetters(in); got != want {
+			t.Errorf("isAllLetters(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
