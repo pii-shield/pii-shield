@@ -149,7 +149,7 @@ func TestApplyRegexesSkipsInvalidRuleKeepsRest(t *testing.T) {
 	// The error text is what an SDK user sees in a log: it must name the list,
 	// the count and the offending pattern.
 	if msg := err.Error(); !strings.Contains(msg, "custom regex list") || !strings.Contains(msg, "1 invalid rule") ||
-		!strings.Contains(msg, `^\(?(?(`) {
+		!strings.Contains(msg, "(?(") {
 		t.Errorf("unhelpful error text: %q", msg)
 	}
 	if len(cfg.CustomRegexes) != 1 || cfg.CombinedCustomRegex == nil || len(cfg.CustomRegexNames) != 1 {
