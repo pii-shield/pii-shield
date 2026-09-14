@@ -146,6 +146,19 @@ func isSepRune(r rune) bool {
 	return r >= 0 && r < utf8.RuneSelf && sepTable[r]
 }
 
+// isAllLetters reports whether s is non-empty and made of letters only.
+func isAllLetters(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // apostropheCloses reports whether a single quote at position j-1 can end a
 // quoted value: the value must be followed by the end of the segment, a
 // separator, or closing punctuation. An apostrophe glued to a letter on its
@@ -2231,6 +2244,16 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// keeps its next word (the B1 lesson: a bare keyword must not redact
 	// ordinary text after it).
 	forced := state.pendingKeySensitive
+	// A bare sensitive word in prose ("password was rejected", "pass an
+	// extraordinary resolution", "token to the") forces its next token, and the
+	// forced path skips MinSecretLength — so two-letter words got redacted
+	// (B12). Keep the force for anything that can be a secret: long enough, or
+	// carrying a digit or symbol ("password: 12345"). A short all-letter word
+	// cannot be one, so it keeps its text. key=value pairs never come through
+	// here (processEqualPair) and stay fully forced.
+	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) {
+		forced = false
+	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
 		forced = true
 	}

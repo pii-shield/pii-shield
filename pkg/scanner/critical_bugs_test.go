@@ -391,3 +391,48 @@ func TestPossessiveApostropheDoesNotOpenQuote(t *testing.T) {
 		}
 	}
 }
+
+// TestBareKeyKeepsMinLength covers B12: the token after a bare sensitive word
+// is forced, and the forced path used to skip MinSecretLength, so "pass an
+// extraordinary resolution" hid "an" and "token to the" hid "to". A short
+// all-letter word cannot be a secret and must keep its text; anything long
+// enough or carrying a digit stays forced, and key=value pairs are untouched.
+func TestBareKeyKeepsMinLength(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	keep := map[string]string{
+		"password an extraordinary resolution was required": "an",
+		"token to the holder":                               "to",
+		"the secret of the trade":                           "of",
+	}
+	for in, word := range keep {
+		out := ScanAndRedact(in)
+		if !strings.Contains(out, " "+word+" ") {
+			t.Errorf("short word after a bare key was redacted: in=%q out=%q", in, out)
+		}
+	}
+
+	hide := map[string]string{
+		"password hunter2 was used": "hunter2",
+		"password: 12345 was used":  "12345",
+		"password=an":               "=an",
+		"token: ab1 given":          "ab1",
+	}
+	for in, secret := range hide {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("secret after a key survived: in=%q out=%q", in, out)
+		}
+	}
+}
+
+func TestIsAllLetters(t *testing.T) {
+	cases := map[string]bool{"": false, "an": true, "Güler": true, "ab1": false, "O'Brien": false, "12345": false}
+	for in, want := range cases {
+		if got := isAllLetters(in); got != want {
+			t.Errorf("isAllLetters(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
