@@ -79,5 +79,22 @@
     "config": {},
     "input": "line one\npassword=SuperSecretValue123\r\n4532015112.830366\n",
     "expected": "line one\npassword=[HIDDEN:8836e2]\r\n4532015112.830366\n"
+  },
+  {
+    "name": "invalid_rule_does_not_drop_the_list",
+    "config": {
+      "custom_regexes": [
+        {
+          "pattern": "^[0-9]{4,5}/[0-9]{2}$",
+          "name": "case-no"
+        },
+        {
+          "pattern": "^\\(?(?(",
+          "name": "broken"
+        }
+      ]
+    },
+    "input": "ref 12345/06 filed",
+    "expected": "ref [HIDDEN:case-no:987a12] filed"
   }
 ]

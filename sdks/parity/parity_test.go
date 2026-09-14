@@ -82,14 +82,12 @@ func applyConfig(t *testing.T, c map[string]interface{}) scanner.Config {
 		}
 	}
 	if len(sdk.CustomRegexes) > 0 {
-		if err := cfg.ApplyCustomRegexes(sdk.CustomRegexes); err != nil {
-			t.Fatalf("apply custom regexes: %v", err)
-		}
+		// init_config discards this error: an invalid rule is skipped, the rest apply (B14).
+		_ = cfg.ApplyCustomRegexes(sdk.CustomRegexes)
 	}
 	if len(sdk.SafeRegexes) > 0 {
-		if err := cfg.ApplySafeRegexes(sdk.SafeRegexes); err != nil {
-			t.Fatalf("apply safe regexes: %v", err)
-		}
+		// init_config discards this error: an invalid rule is skipped, the rest apply (B14).
+		_ = cfg.ApplySafeRegexes(sdk.SafeRegexes)
 	}
 	return cfg
 }
