@@ -373,4 +373,21 @@ func TestPossessiveApostropheDoesNotOpenQuote(t *testing.T) {
 	if strings.Contains(out, secret) || strings.Count(out, "'") != 3 {
 		t.Errorf("inner apostrophe handling regressed: %q", out)
 	}
+	// Closing quote followed by punctuation rather than a space.
+	out = ScanAndRedact("he said 'leak " + secret + " now', then left")
+	if strings.Contains(out, secret) || strings.Count(out, "'") != 2 {
+		t.Errorf("closer before punctuation regressed: %q", out)
+	}
+	// The look-ahead skips an escaped quote inside a quoted value and still
+	// finds the real closer; a trailing backslash at the very end is harmless.
+	for _, in := range []string{
+		"he said 'it\\'s " + secret + " now' end",
+		"note='" + secret + "\\",
+		"John's " + secret + " \\",
+	} {
+		out = ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("secret survived with escapes: in=%q out=%q", in, out)
+		}
+	}
 }
