@@ -146,6 +146,43 @@ func isSepRune(r rune) bool {
 	return r >= 0 && r < utf8.RuneSelf && sepTable[r]
 }
 
+// apostropheCloses reports whether a single quote at position j-1 can end a
+// quoted value: the value must be followed by the end of the segment, a
+// separator, or closing punctuation. An apostrophe glued to a letter on its
+// right ("don't", "O'Brien") is part of the word, not a closing quote.
+func apostropheCloses(segment string, j int) bool {
+	if j >= len(segment) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(segment[j:])
+	return isSepRune(r) || strings.ContainsRune(",.;:)]}", r)
+}
+
+// apostropheOpens reports whether a single quote at position j-1 starts a
+// quoted value. English prose is full of lone apostrophes — "John's",
+// "patient's", "can't" — and treating each as an opening quote swallowed the
+// rest of the line as one unscanned "value": a secret after "John's" passed
+// untouched (B13). A single quote opens a value only when a closing one exists
+// later in the same segment, sitting before a separator or the end.
+func apostropheOpens(segment string, j int) bool {
+	for k := j; k < len(segment); {
+		r, w := utf8.DecodeRuneInString(segment[k:])
+		if r == '\\' {
+			k += w
+			if k < len(segment) {
+				_, w2 := utf8.DecodeRuneInString(segment[k:])
+				k += w2
+			}
+			continue
+		}
+		if r == '\'' && apostropheCloses(segment, k+w) {
+			return true
+		}
+		k += w
+	}
+	return false
+}
+
 // parseFloat parses a float from string, returns error if invalid.
 // Strict: trailing junk ("9.9junk") is an error, unlike fmt.Sscanf which
 // silently stops at the first non-numeric character.
@@ -936,14 +973,14 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 				}
 				continue
 			}
-			if r == quoteChar {
+			if r == quoteChar && (r != '\'' || apostropheCloses(segment, i+width)) {
 				inQuote = false
 			}
 			i += width
 			continue
 		}
 
-		if r == '"' || r == '\'' {
+		if r == '"' || (r == '\'' && apostropheOpens(segment, i+width)) {
 			inQuote = true
 			quoteChar = r
 			i += width

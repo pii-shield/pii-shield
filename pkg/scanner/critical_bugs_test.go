@@ -328,3 +328,49 @@ func TestSafeRegexWhitelistAppliesToLuhnAndURL(t *testing.T) {
 		t.Errorf("SafeRegexes did not exempt URL param: %q", urlOut)
 	}
 }
+
+// TestPossessiveApostropheDoesNotOpenQuote covers B13: a lone apostrophe in
+// prose ("John's", "patient's", "O'Brien's") used to be read as an opening
+// quote, so everything after it to the end of the line became one unscanned
+// "value" and a secret or identifier there passed through. Real quoted values
+// (token='...') and quoted phrases with inner apostrophes ('don't ...') must
+// keep today's behaviour.
+func TestPossessiveApostropheDoesNotOpenQuote(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	const secret = "AbC9xY2kQ8pLmN0rZq7"
+	const secret2 = "Zq7AbC9xY2kQ8pLmN0r"
+
+	mustHide := []string{
+		"John's token " + secret + " leaked",
+		"the patient's key " + secret + " and the doctor's key " + secret2,
+		"O'Brien's key " + secret + " ok",
+		"[HIDDEN:person:d56c6f]'s report lists " + secret,
+	}
+	for _, in := range mustHide {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) || strings.Contains(out, secret2) {
+			t.Errorf("secret survived after an apostrophe: in=%q out=%q", in, out)
+		}
+		// The possessive itself must survive as text (the token "John's" is a
+		// plain word). "O'Brien's" is a high-entropy token and was already
+		// redacted before this fix, so it is not checked here.
+		if strings.HasPrefix(in, "John") && !strings.Contains(out, "John's") {
+			t.Errorf("possessive word damaged: in=%q out=%q", in, out)
+		}
+	}
+
+	// A genuine single-quoted value still redacts and keeps both quotes (B8).
+	out := ScanAndRedact("token='abc123def456gh' and 'def'")
+	if strings.Contains(out, "abc123def456gh") || strings.Count(out, "'") != 4 {
+		t.Errorf("quoted value handling regressed: %q", out)
+	}
+	// A quoted phrase with an inner apostrophe: the inner one is not a closer,
+	// the phrase is still scanned token by token and both quotes survive.
+	out = ScanAndRedact("he said 'don't leak " + secret + " now' end")
+	if strings.Contains(out, secret) || strings.Count(out, "'") != 3 {
+		t.Errorf("inner apostrophe handling regressed: %q", out)
+	}
+}
