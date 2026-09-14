@@ -62,7 +62,7 @@ The stats summary is a single log line per interval, e.g.
 | `PII_CUSTOM_REGEX_LIST` | JSON array of regex objects to enforce redaction regardless of entropy. Supports named placeholders. |
 
 > [!WARNING]
-> **Invalid input is skipped, not fatal:** malformed JSON in `PII_CUSTOM_REGEX_LIST` or `PII_SAFE_REGEX_LIST` disables that list, and an invalid regex pattern disables that rule only — each with a startup `WARNING` on stderr, while scanning continues with the remaining rules. A skipped **custom** rule means its matches are no longer force-redacted, and a skipped **safe** rule means its matches lose their whitelist protection — so still validate patterns before rollout and watch startup logs. (Earlier versions terminated the process at startup instead, which showed up as a crash loop in a sidecar.)
+> **Invalid input is skipped, not fatal:** malformed JSON in `PII_CUSTOM_REGEX_LIST` or `PII_SAFE_REGEX_LIST` disables that list, and an invalid regex pattern disables that rule only — each with a startup `WARNING` on stderr, while scanning continues with the remaining rules. The same per-rule skip applies to `custom_regexes` / `safe_regexes` passed through the Node and Python SDKs (before 2.2.4 the SDK path dropped the whole list on the first invalid rule). A skipped **custom** rule means its matches are no longer force-redacted, and a skipped **safe** rule means its matches lose their whitelist protection — so still validate patterns before rollout and watch startup logs. (Earlier versions terminated the process at startup instead, which showed up as a crash loop in a sidecar.)
 
 ### Example
 

@@ -34,6 +34,7 @@ type ConfigFromSDK struct {
 var allocations = make(map[uint32][]byte)
 
 // allocate reserves memory for the host to write strings into.
+//
 //go:wasmexport allocate
 func allocate(size uint32) uint32 {
 	if size == 0 {
@@ -46,12 +47,14 @@ func allocate(size uint32) uint32 {
 }
 
 // free releases memory allocated by allocate or redact.
+//
 //go:wasmexport free
 func free(ptr uint32, size uint32) {
 	delete(allocations, ptr)
 }
 
 // init_config receives JSON representing the config payload.
+//
 //go:wasmexport init_config
 func init_config(ptr uint32, length uint32) {
 	if ptr == 0 || length == 0 {
@@ -107,6 +110,9 @@ func init_config(ptr uint32, length uint32) {
 				cfg.SensitiveKeyPatterns = nil
 			}
 		}
+		// An invalid rule is skipped and reported on stderr by the scanner
+		// itself (B14); the valid rules are applied, so the error carries no
+		// extra action here.
 		if len(sdkCfg.CustomRegexes) > 0 {
 			_ = cfg.ApplyCustomRegexes(sdkCfg.CustomRegexes)
 		}
@@ -121,6 +127,7 @@ func init_config(ptr uint32, length uint32) {
 }
 
 // redact reads a string from memory, redacts it, and returns a packed uint64 (ptr << 32 | length).
+//
 //go:wasmexport redact
 func redact(ptr uint32, length uint32) uint64 {
 	if ptr == 0 || length == 0 {
@@ -135,7 +142,7 @@ func redact(ptr uint32, length uint32) uint64 {
 	// log batch), and the single-line engine would otherwise score the last
 	// token of every line together with its newline (#184).
 	redacted := scanner.ScanAndRedactText(input)
-	
+
 	outBytes := []byte(redacted)
 	var ptr32 uint32
 	var len32 uint32 = uint32(len(outBytes))
