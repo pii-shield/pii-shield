@@ -1143,6 +1143,19 @@ func trimQuotes(s string) string {
 	return s
 }
 
+// isPaddedBase64Blob reports whether s is a long base64 payload whose only '='
+// characters are its trailing padding. Such a token is not a key=value pair:
+// splitting it on the padding emits the whole body as a "key", which is written
+// out verbatim and never scored — which is why a padded blob survived while the
+// same blob with the padding stripped was redacted by entropy.
+func isPaddedBase64Blob(s string) bool {
+	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
+		return false
+	}
+	body := strings.TrimRight(s, "=")
+	return len(s)-len(body) <= 2 && strings.IndexByte(body, '=') == -1
+}
+
 func isRedacted(content string) bool {
 	return strings.HasPrefix(content, "[HIDDEN") && strings.HasSuffix(content, "]")
 }
@@ -1297,13 +1310,19 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 			}
 		}
 
-		// Fast heuristic for standard Base64 payloads/blobs
+		// A long, clean, padded base64 blob is a payload — a token, a key, an
+		// encoded document — far more often than it is something safe to keep,
+		// so at the default confidence it is a reason to redact rather than to
+		// skip (F3). Raising ConfidenceThreshold above 1.2 is a request for
+		// fewer redactions, and there it keeps the old skip: the same boundary
+		// the Luhn card-context gate uses, and the one TestFalsePositives
+		// asserts at 1.5.
 		if len(content) > 64 && strings.HasSuffix(content, "=") && !strings.ContainsAny(content, "-_ \t\n") {
-			if !contextSensitive {
+			if contextSensitive || cfg.ConfidenceThreshold <= 1.2 {
+				forcedSensitive = true
+			} else {
 				sb.WriteString(original)
 				return
-			} else {
-				forcedSensitive = true
 			}
 		}
 	}
@@ -1366,6 +1385,11 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool, handled bool) {
 	idx := strings.IndexByte(rawToken, '=')
 	if idx == -1 {
+		return false, false
+	}
+	// Base64 padding is not a key/value separator — let the token through to
+	// single-token scoring, which is where the base64 rule lives.
+	if isPaddedBase64Blob(rawToken) {
 		return false, false
 	}
 	// Handle quoted strings: "key=value". Require a *matching* closing quote —
