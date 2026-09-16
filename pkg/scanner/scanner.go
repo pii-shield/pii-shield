@@ -1164,30 +1164,61 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 	// so a single token is never scored against a mix of two configs.
 	cfg := st.config
 
-	// 1. Whitelist Check: Safe Regexes
-	if len(content) >= 3 {
-		for _, rule := range cfg.SafeRegexes {
-			if rule.Regexp.MatchString(content) {
-				sb.WriteString(original)
-				return
-			}
+	// 1. Whitelist Check: Safe Regexes.
+	// No minimum-length gate: both lists are empty unless the operator
+	// configured them, so a length check saves nothing on the default path and
+	// only silences rules that were written for short tokens — `^ok$` or
+	// `^[A-Z]{4}$` could never fire (B5).
+	for _, rule := range cfg.SafeRegexes {
+		if rule.Regexp.MatchString(content) {
+			sb.WriteString(original)
+			return
 		}
 	}
 
 	// 2. Deterministic Check: Custom Regexes
-	if len(content) >= 5 {
-		if cfg.CombinedCustomRegex != nil {
-			loc := cfg.CombinedCustomRegex.FindStringSubmatchIndex(content)
-			if loc != nil {
-				matchName := ""
-				for i := 0; i < len(cfg.CustomRegexNames); i++ {
-					idx := 2 + (i * 2)
-					if idx < len(loc) && loc[idx] != -1 {
-						matchName = cfg.CustomRegexNames[i]
-						break
-					}
+	if cfg.CombinedCustomRegex != nil {
+		loc := cfg.CombinedCustomRegex.FindStringSubmatchIndex(content)
+		if loc != nil {
+			matchName := ""
+			for i := 0; i < len(cfg.CustomRegexNames); i++ {
+				idx := 2 + (i * 2)
+				if idx < len(loc) && loc[idx] != -1 {
+					matchName = cfg.CustomRegexNames[i]
+					break
 				}
+			}
 
+			quoteChar := byte(0)
+			if strings.HasPrefix(original, "\"") {
+				quoteChar = '"'
+			} else if strings.HasPrefix(original, "'") {
+				quoteChar = '\''
+			} else if autoQuote {
+				lower := strings.ToLower(content)
+				if isDigits(content) || lower == "true" || lower == "false" || lower == "null" {
+					quoteChar = '"'
+				}
+			}
+
+			if quoteChar != 0 {
+				sb.WriteByte(quoteChar)
+			}
+
+			// Use hashed redaction for Custom Regex
+			if matchName == "" {
+				matchName = st.entityLabel("regex")
+			}
+			st.redactWithHMAC(content, matchName, "regex", sb)
+
+			if quoteChar != 0 {
+				sb.WriteByte(quoteChar)
+			}
+			return
+		}
+	} else {
+		for _, rule := range cfg.CustomRegexes {
+			if rule.Regexp.MatchString(content) {
 				quoteChar := byte(0)
 				if strings.HasPrefix(original, "\"") {
 					quoteChar = '"'
@@ -1205,47 +1236,16 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 				}
 
 				// Use hashed redaction for Custom Regex
-				if matchName == "" {
-					matchName = st.entityLabel("regex")
+				ruleName := rule.Name
+				if ruleName == "" {
+					ruleName = st.entityLabel("regex")
 				}
-				st.redactWithHMAC(content, matchName, "regex", sb)
+				st.redactWithHMAC(content, ruleName, "regex", sb)
 
 				if quoteChar != 0 {
 					sb.WriteByte(quoteChar)
 				}
 				return
-			}
-		} else {
-			for _, rule := range cfg.CustomRegexes {
-				if rule.Regexp.MatchString(content) {
-					quoteChar := byte(0)
-					if strings.HasPrefix(original, "\"") {
-						quoteChar = '"'
-					} else if strings.HasPrefix(original, "'") {
-						quoteChar = '\''
-					} else if autoQuote {
-						lower := strings.ToLower(content)
-						if isDigits(content) || lower == "true" || lower == "false" || lower == "null" {
-							quoteChar = '"'
-						}
-					}
-
-					if quoteChar != 0 {
-						sb.WriteByte(quoteChar)
-					}
-
-					// Use hashed redaction for Custom Regex
-					ruleName := rule.Name
-					if ruleName == "" {
-						ruleName = st.entityLabel("regex")
-					}
-					st.redactWithHMAC(content, ruleName, "regex", sb)
-
-					if quoteChar != 0 {
-						sb.WriteByte(quoteChar)
-					}
-					return
-				}
 			}
 		}
 	}
