@@ -1,0 +1,1000 @@
+1706608800 [WARN] Process crash data=Error: 192.168.1.5 WBmWF9iljTupbSu connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "username=user_8841", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "api_key=NOCxKCrjaRRCyYNJrH", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=api_key=aSJDR1jaJlTrANqyWZvI context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "custom_var_7d75=LOYnhKL1tO0Y7RZYK1AA", "id": 12345}
+1706608800 [ERROR] Health check data=request_id=EB1FEED2-4EA4-4513-B1EA-9CEC65169D7E context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "request_id=060AEAD4-5ADF-4D8A-AD60-026897EC0717", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=custom_var_326c=hqw55CTBeUqNyfgG89hHmA context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] Health check data=username=user_6ba0 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "Error: 192.168.1.5 D6VQgND4LtaAvJ2B connection failed", "id": 12345}
+1706608800 [INFO] Process crash data=username=user_69c1 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "api_key=mNiqdVJbes7m5F2YtzH", "id": 12345}
+1706608800 [ERROR] DB timeout data=api_key=R5PLZtpuLG4fz060GcaB context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "username=user_b9af", "id": 12345}
+1706608800 [DEBUG] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Binary dump", "pl": "api_key=4bpoD0l1Ez5uSwwwGGuZ", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [INFO] Health check data=commit_sha=ec001ff545cd3a8a6d334da719abaf375622b15a context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "api_key=EDsuADPMbpfSUeLfWzor", "id": 12345}
+1706608800 [DEBUG] Render complete data=Error: 192.168.1.5 SqbraEbsrpdI7lt connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "Error: 192.168.1.5 A3g7QcdAeabxWxrR connection failed", "id": 12345}
+1706608800 [ERROR] Health check data=Error: 192.168.1.5 7AjtaPnqO2rx3Ee connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "username=user_b9d0", "id": 12345}
+1706608800 [INFO] Health check data=commit_sha=869ab1a92395e499b287c29da4652bb64e0f8e8b context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=api_key=yadZElhNiYbpulvbp8VV context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "DB timeout", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [ERROR] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "Error: 192.168.1.5 YyP6VWrqQd4D59Rh connection failed", "id": 12345}
+1706608800 [WARN] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=username=user_c747 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "Error: 192.168.1.5 Q2knypG7QJ0vVzQY connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=request_id=77BCA65F-091F-4972-B8B4-459D4F3A722A context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "request_id=11E98411-19EE-46ED-A6DD-862E92FC4D71", "id": 12345}
+1706608800 [INFO] Binary dump data=username=user_5d89 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "Error: 192.168.1.5 52PqtjWDtBuURFF connection failed", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=Error: 192.168.1.5 QNRIKmOWO1fYxo9 connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "Error: 192.168.1.5 0nRpKxt1mnZWxPjG connection failed", "id": 12345}
+1706608800 [DEBUG] Process crash data=Error: 192.168.1.5 vj9iy08Qw2jdZcfi connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "api_key=8etlBKPq7zPF2s4f8gO7", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Process crash data=api_key=LCx48Gi383RccPr7rkrG context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "api_key=7FWFZa5DW5pifhL5Zuy", "id": 12345}
+1706608800 [DEBUG] DB timeout data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "custom_var_90af=jprkSJaQZqdOcx90F5R9OQ", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=Error: 192.168.1.5 vtXelC42LDyG9TJJ connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "commit_sha=bd36c90c7f19c3c33b1ea70e8ff4a8da0006ca34", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "username=user_6260", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=api_key=mdZPaG0PGdv2tPxgyNR context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "custom_var_eb3d=Lc6QA4qSatYdRsf2byrig", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "username=user_4623", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=commit_sha=be3ec62d60cfa280971fd90a9968931f115be9f8 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "api_key=fEHR49W172p3uuGllPck", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=commit_sha=b04e5c1640abebece0100aabc2b2b658f0c1243d context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "username=user_9b08", "id": 12345}
+1706608800 [ERROR] DB timeout data=username=user_0af9 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [FATAL] Process crash data=custom_var_3413=aWNyGkpZCh293rn6Hm9coQ context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "api_key=6eNVb8MYy3bn1ngcGJOu", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=api_key=tdPvg98iirbKpn6HuCi context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Process crash data=custom_var_c98e=iGLHmhUPL07IFywGArw4cQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "username=user_2720", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=Error: 192.168.1.5 cKRvJ9jMExupx6 connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] Process crash data=api_key=KzuLN3ZV6BAjysN5D0 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "custom_var_ec8b=V1YUvKv7KETwmDOB127maw", "id": 12345}
+1706608800 [DEBUG] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [DEBUG] Binary dump data=api_key=F3XyLlVFvGX0UB1SEyF context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=custom_var_6564=P9sldZN3SJmU3yLQhby12g context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [WARN] DB timeout data=api_key=lfEiRo0ty0k6O6tt34gr context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] Binary dump data=Error: 192.168.1.5 EprG5oag9LN3am5r connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "api_key=mqOJm4SnH67CSc5Wr4R9", "id": 12345}
+1706608800 [ERROR] Binary dump data=commit_sha=341369412dce4f60df35563a7d8417c7b0b31a6c context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "custom_var_7a96=0jmZ7BlL2eh7tLJRPxKeYg", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=Error: 192.168.1.5 sSwDXz9dHxCJHTVc connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_d1d7=CPLBtSBfpc4sA2FzerOgA", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "api_key=wtwVcRlOePGi5lwtOc8", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=Error: 192.168.1.5 jf8vpwoKAYzx2py connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=Error: 192.168.1.5 uIbhtARZcoT873Oc connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] DB timeout data=api_key=1KEMG9Upc9q8S2H3f0QU context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "api_key=w1LWJbTHMWzCkRSN3nhc", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_216e=XXYSNHLuVEIDZ5681DyKWQ", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=username=user_e533 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "username=user_a932", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=username=user_ba7a context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "username=user_c521", "id": 12345}
+1706608800 [DEBUG] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Health check", "pl": "api_key=4wwl2GOsrzflzwQan0yV", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=username=user_1209 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=api_key=v0Zu1ofvApTnj01JRJ context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [WARN] DB timeout data=request_id=D7D57698-2D69-4FEA-B2DF-D11C6A21ADE5 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "Error: 192.168.1.5 RQzH2CUgroaqI6f connection failed", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=Error: 192.168.1.5 3Bcs6cRR8OxMI07 connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "username=user_ad03", "id": 12345}
+1706608800 [ERROR] Health check data=commit_sha=e00125ba581092f9cd0a7f67b26e52361f4a020b context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "DB timeout", "pl": "username=user_34b2", "id": 12345}
+1706608800 [ERROR] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "custom_var_6c69=SLbQyqvgtFvPKJRuHhg", "id": 12345}
+1706608800 [WARN] DB timeout data=request_id=700B7EC6-2698-472D-A02D-40D448725544 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "custom_var_8a95=4T9IdxNLAVZMKTK0B7YZYA", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=Error: 192.168.1.5 XE9RK38NtP2EDDEZ connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "Error: 192.168.1.5 1Qh0n3EJN6G6pxuO connection failed", "id": 12345}
+1706608800 [INFO] Process crash data=custom_var_a571=7z4UBHFH8r5opouattZdOg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "api_key=SqdzRdW3bZWjhcL8B9J", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=request_id=4395EA9A-ED57-47AF-808A-9EA0BD02391F context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "api_key=r4Z3AYtiubqBEKxp7M5", "id": 12345}
+1706608800 [ERROR] Health check data=custom_var_0654=NtM4MpPRS8mdukvLIs9Hg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "username=user_64e9", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "username=user_51e2", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=custom_var_7624=LkXC2Q0YcEzGnuz8SAdw context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "custom_var_238d=3SeSIIjMU5heM0N3vEYzzw", "id": 12345}
+1706608800 [FATAL] Binary dump data=commit_sha=ac2589109e08fe6015297dad4f8440f9c042e102 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=username=user_541e context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "request_id=CEB18ED7-7BC6-4B91-AC02-16A2787E4867", "id": 12345}
+1706608800 [INFO] Render complete data=Error: 192.168.1.5 87hTEJdyzyLV5E4 connection failed context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "commit_sha=49fcb5b285a9e5798aa98b566159406f9ff54e62", "id": 12345}
+1706608800 [INFO] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "username=user_84c1", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=api_key=jL2U7615ITLhB7kAIjbb context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "custom_var_a867=BO5eS6oVa2y58tKxv7n2cg", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=custom_var_d51b=obCUGiF2SIhflPgsc2Bbw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "Error: 192.168.1.5 WXMUV42fDh4qPHko connection failed", "id": 12345}
+1706608800 [DEBUG] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=custom_var_58a0=mRvI0iBKbbkqi5diLvKuw context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "request_id=F4D9D83B-BA88-415F-99C0-82DE5BE537FE", "id": 12345}
+1706608800 [INFO] Health check data=Error: 192.168.1.5 ASa97Ht8y9gaEPf8 connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "custom_var_d851=MbARjyDD08aUmYXaNOZA", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=custom_var_3dbd=6wh9JiHSLIwnoeWeQIKw context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=api_key=5ikHdF09dHz6mrQ6iRux context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "Error: 192.168.1.5 9NhFcYRormWy9Tf connection failed", "id": 12345}
+1706608800 [FATAL] Render complete data=api_key=lSnzhn0atFhWgoZv7Ha context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "custom_var_baae=GYt6QWM0JOwOAwN3CpMlg", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "custom_var_e025=zWg3trGsj8q1lqZ2uOKRMw", "id": 12345}
+1706608800 [DEBUG] Process crash data=username=user_84f0 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "commit_sha=0863933fbee8b1098d2a502c1728f5e0398c4656", "id": 12345}
+1706608800 [INFO] Process crash data=request_id=DC356F30-E74B-415E-B83D-8E8C0C3721A1 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "api_key=HACXdm0QgqR7RoC8XrXo", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=Error: 192.168.1.5 ufojxnHwE7YKJy1J connection failed context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "api_key=ifiUp6STpTI92VaaseU", "id": 12345}
+1706608800 [INFO] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Process crash data=api_key=0qE4GZP21tCySjyJF7C context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=custom_var_8ab8=2bEMO1UjjYMrxx8nwCwBkg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "Error: 192.168.1.5 jWl2qt6SAycuJanP connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=Error: 192.168.1.5 lmJbTBfptoLHfBT connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "api_key=jsjLrxXneh0NjmkRIH7", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Process crash data=custom_var_a344=HUjS1mUT1Hxbr8oC59JEg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] Process crash data=custom_var_70c1=5nAeHrkE5qRYqqSxwtD7gg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "api_key=1kizxuhWN3bLiuZE5agX", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_bd36=8LCLlvT6SVdvFiIv0UuFhg", "id": 12345}
+1706608800 [WARN] Process crash data=custom_var_696d=ysaLX2Ge4Qedqk1kU6a2pQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "username=user_e1ba", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=request_id=B9268105-44DE-4B7A-A926-57FC3780B559 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "api_key=6YiDUgpioRo7hKMAJm5i", "id": 12345}
+1706608800 [WARN] Binary dump data=Error: 192.168.1.5 LqxDOc5RLI1rCm2s connection failed context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Binary dump", "pl": "commit_sha=73bb80ffbdec6a6b07140451beec903951786b3d", "id": 12345}
+1706608800 [DEBUG] Binary dump data=custom_var_6c58=Tvj26cqdwhVA0nD41kNtAg context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Render complete data=username=user_d732 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "username=user_c6b9", "id": 12345}
+1706608800 [WARN] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "commit_sha=196403f56e95ef9b64fd134186371fedfa90e4c7", "id": 12345}
+1706608800 [ERROR] Process crash data=api_key=UpKDhNoYlHZzxlHBt7j context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "DB timeout", "pl": "commit_sha=5d265abf6024dcddc76d78f0d2fe5c9d08b78600", "id": 12345}
+1706608800 [ERROR] Health check data=Error: 192.168.1.5 46Stv0aLzwSyiCZM connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "username=user_58b1", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "request_id=1B24904A-C546-46EC-8F6D-82EAD2AB171A", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=Error: 192.168.1.5 ROByvfW5HWnz2hq7 connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "api_key=vbGPtA7mpbjiAipSAiqu", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=api_key=DTSLPehmOA0otk9uQbc context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "Error: 192.168.1.5 iCyYcf7DolTkGDlM connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=username=user_d177 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "Error: 192.168.1.5 JVa1MqshzX5FW3C connection failed", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=commit_sha=ed5005b4522dcb8a0cd9670cd4735e2c06ffdce2 context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Process crash", "pl": "api_key=05nnhjp2EpoEJcr3qk", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "api_key=AJhbWkPu2jFqdlM3vUi6", "id": 12345}
+1706608800 [DEBUG] Binary dump data=Error: 192.168.1.5 zFDQwtredzeEmkjr connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=api_key=T6hm8GjI2R1mCveZxjpR context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "Error: 192.168.1.5 6IyzJAeK3zHjyKP0 connection failed", "id": 12345}
+1706608800 [INFO] Binary dump data=custom_var_709d=HLYxk6cOdmxikl70HqBPQQ context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_ed8d=rjPAKs2yLgV3MKr4PuhPQ", "id": 12345}
+1706608800 [INFO] DB timeout data=commit_sha=076b3b886e609f487d91705863e125fa7ad0af01 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=Error: 192.168.1.5 xGPfpxVFz4WKOL connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [ERROR] Process crash data=username=user_c618 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "api_key=YAN491I6nkcQeF7YDJt", "id": 12345}
+1706608800 [WARN] Binary dump data=request_id=CA5FEF14-A518-4DB0-9DC5-3F9423252FD9 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "commit_sha=0c5adba9e1161819f702635c4dfd70eb80656c09", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=custom_var_ed85=ovylrGZf556ZFXLEAZNlw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=Error: 192.168.1.5 hwWsf8yHXDLfSADO connection failed context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Process crash", "pl": "username=user_2fca", "id": 12345}
+1706608800 [DEBUG] Binary dump data=commit_sha=b26fa177b33efe3c6a6473b0906b84e97741b5d3 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=api_key=GPpjjGtS6nS2THyQRm context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "Error: 192.168.1.5 lVVQCGfKu0yuJsM connection failed", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [WARN] DB timeout data=custom_var_2f30=TosakM8tNw9qx4JwWiHFw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "custom_var_f2d7=n32wOEaY5txuGMhfhRinVw", "id": 12345}
+1706608800 [DEBUG] Binary dump data=request_id=006EEE1E-023E-4948-A682-E9DF85D7AA0A context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "custom_var_f97a=DIfggHpWgwbzaeY4VPZBw", "id": 12345}
+1706608800 [ERROR] Process crash data=username=user_1611 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "Error: 192.168.1.5 hUjnkEJhtjzIO4yb connection failed", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "username=user_cca0", "id": 12345}
+1706608800 [ERROR] Health check data=custom_var_76c5=GpOyq8t46bXUsmqo5FDqgA context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "custom_var_d607=hiFDPtsm9FEnNRp2W4ggw", "id": 12345}
+1706608800 [INFO] Process crash data=username=user_bf03 context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "username=user_9df6", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=custom_var_0316=DyFinrov9zyEiU2YBb2vLA context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=username=user_0874 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "Error: 192.168.1.5 WCNxQgaXpHI94h5n connection failed", "id": 12345}
+1706608800 [WARN] DB timeout data=commit_sha=87babdf52376361a2de058a8f9ebc7f4c69349f5 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "username=user_c950", "id": 12345}
+1706608800 [INFO] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "custom_var_b81e=0jK31PzsJyDZUxYJHBBQ", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "Error: 192.168.1.5 ikYcRvm96rf1y connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=Error: 192.168.1.5 sn1dLoO8LLBulK connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Process crash data=api_key=OcWdJdHFLCCTlFpZVDY context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=custom_var_9153=a5Pgs57p0AQFtIo6X4og context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Health check data=custom_var_7fef=IAOUbu7RIsbsITGIBL3qQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "api_key=RO01F5bkBRgXlUGZOJzQ", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=Error: 192.168.1.5 X1yskuEkLaqrV4Nq connection failed context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "DB timeout", "pl": "commit_sha=e8c17acdf75e5a2980f8237e6f303728c7d81274", "id": 12345}
+1706608800 [WARN] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "api_key=uEH5cXGVfGKYQNlJgKVA", "id": 12345}
+1706608800 [FATAL] Process crash data=commit_sha=4ee1f47cc204c5889f8489d16785372e3ae8fd26 context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] Render complete data=custom_var_7042=04X7BjVba1XjQIzXWIQSbw context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Health check", "pl": "request_id=FDB160FA-9302-4299-A73A-E56F8AD4604F", "id": 12345}
+1706608800 [ERROR] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "Error: 192.168.1.5 RcNsiNGsPTyoCdvf connection failed", "id": 12345}
+1706608800 [ERROR] Render complete data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=custom_var_026e=criQ4E7sKZcFo8yzBMpw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=username=user_b1ba context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "api_key=CF8SXbgQsQNnfkx0J0B4", "id": 12345}
+1706608800 [FATAL] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] DB timeout data=api_key=UKG0FdkM4JgQxZtjQv context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "api_key=0g4xNCPJvt6lG1n5KKq", "id": 12345}
+1706608800 [DEBUG] Render complete data=custom_var_a0a5=rXHaIpd7iRJuYJnAmIkUQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "username=user_e6b5", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "custom_var_644f=U6WY3vvCUpdzWkA4tSaXw", "id": 12345}
+1706608800 [WARN] DB timeout data=username=user_de30 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "username=user_d0b2", "id": 12345}
+1706608800 [ERROR] Health check data=Error: 192.168.1.5 372uqLJE3KDDmCOY connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "username=user_9ac7", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=custom_var_c74f=8aLYVJDF9apuUxImxc2ahA context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Health check", "pl": "api_key=g2K50i6fBFvG6WzkzF", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=custom_var_5e53=9ZjQojdvv8dRowJBvTCxKw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] DB timeout data=api_key=dL5imzRZMGe6hHwSNAik context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=username=user_4822 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] DB timeout data=custom_var_e054=Dtt9WCxU5HefboTFrvzrPw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Process crash data=username=user_293f context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] Render complete data=api_key=WsRvIpkg17sKIexC0Yp context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [DEBUG] Health check data=username=user_6e49 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=Error: 192.168.1.5 PJqSkSkDpT5yOgiC connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=username=user_a04c context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "api_key=V1GfUCsSDSA8h55rn", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=custom_var_7f60=mODWTU5f77p2BY1G2ecoGA context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "Error: 192.168.1.5 Aqbj2hCyhzvY5sL connection failed", "id": 12345}
+1706608800 [INFO] Health check data=Error: 192.168.1.5 YwgIgSSjXmxHmPh connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [WARN] Render complete data=Error: 192.168.1.5 5N7OAsfWLBzw6z8W connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "api_key=ttTj0XbEEfZXpcCmKRH", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=api_key=QHyOMVGA1v0ntjiqNo9p context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Binary dump", "pl": "commit_sha=b5b56b47a9f794d5662802bd698160e43a61fac3", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "api_key=ueURQR7YnQO7M5k2UQg", "id": 12345}
+1706608800 [FATAL] Render complete data=Error: 192.168.1.5 4cx3yCBzWmFEoF connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "api_key=CuhufD3yxL58p6NXQ7", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=Error: 192.168.1.5 cCLiyqLaPcPTNrw6 connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "DB timeout", "pl": "commit_sha=4a25ff4d55a6232bdd47135de64d81ed5396a7e7", "id": 12345}
+1706608800 [DEBUG] DB timeout data=custom_var_bc06=AqbT5e8PU87cNNvD3pk9Eg context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=commit_sha=a325c97ad38f159f3598c28160f5fcfbd0ad3fd2 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "username=user_03d3", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=custom_var_0fb8=0s4G8YNKXOv17DC2lqJiw context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "api_key=gFxY6mb9j3pYgyXjeo7T", "id": 12345}
+1706608800 [DEBUG] Render complete data=Error: 192.168.1.5 EJ9DcAFGlObIrIB connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "Error: 192.168.1.5 tb9YAVKSleq37RUT connection failed", "id": 12345}
+1706608800 [FATAL] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "custom_var_7a08=n7YWJ3kPT3Pwgx0Pd5OSQ", "id": 12345}
+1706608800 [WARN] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "username=user_cf1a", "id": 12345}
+1706608800 [INFO] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "commit_sha=2e951264d422073e28c4863c4d6c22679135614c", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=custom_var_2249=8JVoXdxS410o5gKXqCjXmw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "api_key=wBS4ZZjbPBs8KUsIxqwz", "id": 12345}
+1706608800 [WARN] Render complete data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "custom_var_1af4=2tLgUJqXVMalagm8gWzerQ", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=username=user_9fc1 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "api_key=Bmd1v4GHkaOPhOM689MO", "id": 12345}
+1706608800 [ERROR] Process crash data=Error: 192.168.1.5 R5npFDv8f6gyArD connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=username=user_a24f context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "api_key=9fPRvbcjgnv65uIapf2m", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=Error: 192.168.1.5 jtjyMT4eMDkcvq3 connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_226a=LW1fnoe0yL2gbIS6oN8cFw", "id": 12345}
+1706608800 [INFO] DB timeout data=Error: 192.168.1.5 WJLuLohf9MQDYYXM connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Process crash data=api_key=JLR5sNDvoRFUAJ33oIqL context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Process crash data=api_key=BG7pLV2rTWU1IE1VvRL context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Render complete", "pl": "Error: 192.168.1.5 mn48GZS7GH8GZL connection failed", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "username=user_73fa", "id": 12345}
+1706608800 [INFO] DB timeout data=commit_sha=a8fd34c42851730b67afe24b8e5f8135700d1b4d context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "custom_var_0f6d=HSDx1Q6tXrutPOF0l95MlQ", "id": 12345}
+1706608800 [INFO] DB timeout data=request_id=A53CC4BE-0E0D-4693-AED0-43C761A7E952 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "username=user_f0a1", "id": 12345}
+1706608800 [ERROR] Render complete data=username=user_f91f context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "username=user_b0ee", "id": 12345}
+1706608800 [INFO] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "Error: 192.168.1.5 PvjTGpX5An8EXvW connection failed", "id": 12345}
+1706608800 [ERROR] Render complete data=commit_sha=b52341b02b93953e22a42db7e6fbffd468b7951f context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [DEBUG] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=api_key=6Sv0Ue8WwtCQ49jy4ChL context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] DB timeout data=request_id=2354AF3E-8803-44D9-B5E3-8621893C0778 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "api_key=nD2TpbT7tRTbXWFw6nh7", "id": 12345}
+1706608800 [WARN] Render complete data=request_id=ED60A32F-EE4B-4CF9-9753-52C262390A79 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "api_key=hCHZZg2Reqyvvo4cN0Yq", "id": 12345}
+1706608800 [WARN] Process crash data=api_key=tlC0fh0rKbCV5HQgwFXg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] Process crash data=custom_var_9ff3=gX4Gbp7ibU2DYZn0PyWiw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "commit_sha=db41a1dde607f4123a6ca91293abd1326644c41d", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Process crash data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "custom_var_ce9d=f0BDIdduLhZ804ikdkmrw", "id": 12345}
+1706608800 [DEBUG] Health check data=Error: 192.168.1.5 nMVmlzzwoN1Nohek connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "custom_var_6d65=FZQsf5gRWebId4o12Aamg", "id": 12345}
+1706608800 [FATAL] DB timeout data=custom_var_f3e1=12jCpcqD3NLHzLlePpZg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "username=user_f343", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Health check", "pl": "Error: 192.168.1.5 L1oOkeETfh7LRax9 connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "username=user_e8cb", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Process crash data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "Error: 192.168.1.5 eM6zoHrysFsQYrlP connection failed", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=api_key=DaVgcQdX4PPZxOam25Yb context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "commit_sha=e881bfc960887cac58d08459f43189e0525761cd", "id": 12345}
+1706608800 [DEBUG] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "username=user_09e5", "id": 12345}
+1706608800 [INFO] Process crash data=commit_sha=99f4a9725442b23f6791094c211500b3605b76f2 context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "api_key=T2l3vohzxMGvU0URE6M", "id": 12345}
+1706608800 [WARN] Render complete data=username=user_d9e9 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "custom_var_4839=0a6WH8HFBRM8tePRSTRYA", "id": 12345}
+1706608800 [ERROR] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_6db4=NN71tEgoV389PvtqiLG07A", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=api_key=8RtmKsz9egnLOq1Kq8x context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "Error: 192.168.1.5 zGPLw3NHQf61tZDy connection failed", "id": 12345}
+1706608800 [WARN] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=custom_var_a135=GXJjv0abuDsaCe3r3HpXg context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "Error: 192.168.1.5 J3zOy9eYsUr3YAC connection failed", "id": 12345}
+1706608800 [WARN] Binary dump data=request_id=C551A5DA-DE4F-4DBE-A1C0-DC8CAB2C5BF3 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Render complete data=username=user_30d7 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "username=user_0236", "id": 12345}
+1706608800 [WARN] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "custom_var_e12a=WUEXfizSBhvkowweY0kUTA", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=username=user_4068 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [FATAL] Render complete data=api_key=3OCI3mdTIGX8i8TjQtl context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "username=user_9a16", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=Error: 192.168.1.5 Tg5ZCXPQdbl5fM0U connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "Error: 192.168.1.5 FmJGYr7eicc4PKPs connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "api_key=4ytiZm9HCSqxzlAWN5f", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=Error: 192.168.1.5 dsjiMU87bDCgfMZQ connection failed context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "custom_var_e78d=zUfyG2kcvO3zdOVZ7gfXKg", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Render complete", "pl": "api_key=w9YMLyFKrUbmQOkGB8xt", "id": 12345}
+1706608800 [WARN] Binary dump data=api_key=w5LyLLOgBDqy5aebR7MB context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "commit_sha=30e5fe5b4adb364b46c58794077aba0e0ff9ef69", "id": 12345}
+1706608800 [INFO] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [DEBUG] Process crash data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "username=user_b3ca", "id": 12345}
+1706608800 [ERROR] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [ERROR] Health check data=api_key=MLqgZIwFz7nYslJE3h4X context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "username=user_2e72", "id": 12345}
+1706608800 [DEBUG] Render complete data=Error: 192.168.1.5 ft5Qr2DyBtT4Ot2M connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] Process crash data=request_id=5FDFDD16-CB5F-4DAF-925E-A555DBD3ACAB context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=custom_var_1596=nk9NgDQBSTjorNf6AR9meA context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "custom_var_fa01=4Vh2NS3lN6bSH5VKQRXVhQ", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=custom_var_992b=L98VQeoEYvJSaaetFKrmw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=custom_var_0cb5=uqqcjDZGbbbFOmeRkeSVnQ context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "custom_var_b4e4=nZ3Co3DtYpdZdvciKvqdtQ", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "api_key=byCYipzwkjZmM3jXCCzB", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "Error: 192.168.1.5 MWYmTL81xuH2G connection failed", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=username=user_3025 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "commit_sha=0d7c226461502b1ff01be4c37d584b431402491a", "id": 12345}
+1706608800 [FATAL] DB timeout data=username=user_5b80 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "api_key=IxaX0lHKKvBYgXz3pdB", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "custom_var_bbec=kUT7z4JRUofGsaCoV03IXA", "id": 12345}
+1706608800 [ERROR] Binary dump data=commit_sha=991f8c384d620443c99ccb13e28cac450b47f304 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [INFO] Process crash data=request_id=58AE7CA5-C931-4876-8EF3-137F47B1AF59 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] Health check data=api_key=k8YuXCJMz0Neeqv3AWo3 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "username=user_efa7", "id": 12345}
+1706608800 [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "request_id=99C81AF6-B487-4801-B19F-CB3B3E470C90", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=api_key=jyFKK1qZI4M5aT3dygiq context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "api_key=BcLMLj4510jgIxkVFH4I", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=custom_var_3caf=36DSBFnxd9R3f66bQWsmXg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "username=user_7429", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "custom_var_a343=Qt014eaW9tMsO8H37QVtiA", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=api_key=MMqtEsbhaoWP3Ygt37H context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Render complete", "pl": "username=user_9f96", "id": 12345}
+1706608800 [DEBUG] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "custom_var_2127=06ISmQfoPrdsrFaZDLGCxw", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=Error: 192.168.1.5 rnu9Ip0AZqACtNu connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] Render complete data=commit_sha=01604259e309f20f9922c265d6908018d7e303b5 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "Error: 192.168.1.5 PQwHvmCmEW8hIbXV connection failed", "id": 12345}
+1706608800 [FATAL] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "Error: 192.168.1.5 VU6YiDJHvvo0j0jQ connection failed", "id": 12345}
+1706608800 [ERROR] Health check data=username=user_ed6f context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "api_key=eQVhCG9Xi3g4hTO48ouF", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=api_key=TWrFJQu4aIV9zInRM8Qa context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "username=user_a2c7", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "custom_var_3cb5=cG5ZPUdW5e9dk8b1R6KpA", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=api_key=33ZexkzkDx3lmXPVSRkr context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Render complete", "pl": "username=user_d7f7", "id": 12345}
+1706608800 [INFO] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "custom_var_e1ea=zMe1JNImNn4XNayhLLwruQ", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=request_id=3489D186-C995-41C6-9EEC-D0434EAA5E43 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "username=user_9959", "id": 12345}
+1706608800 [ERROR] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [INFO] Health check data=custom_var_73c2=Av6Y6rg0zXNhjpQXvvpGA context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "custom_var_247a=uAHtBczsFlczmS47shDA", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=Error: 192.168.1.5 Q2xyFWwuF0wG86gs connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [DEBUG] Process crash data=api_key=Jg62sPrbnFwuKjfmGT2 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "custom_var_1bdd=ZZtKlhk1h3Rvpa25KiHAZg", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=api_key=zO4jsF3sAyKs47S2I context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] Health check data=username=user_db5a context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "Error: 192.168.1.5 SI4ovX8TOfbjUS connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=request_id=D54A652E-9B0C-461C-B9D1-A47B8FC6BAC4 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "username=user_7990", "id": 12345}
+1706608800 [FATAL] Render complete data=custom_var_0eec=TfoIes7QMtJf9Xotun0dA context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "api_key=b6TcKPCwlZUckD4Ozma", "id": 12345}
+1706608800 [DEBUG] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "api_key=QzSTg1B1Pii4KpNMc", "id": 12345}
+1706608800 [DEBUG] DB timeout data=api_key=ar2TeIvGfofSlJdjd9f context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "api_key=oEABCVUCet5QxNuUcA0", "id": 12345}
+1706608800 [FATAL] DB timeout data=api_key=J31o6H0iI7NrfM9kLb0 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=Error: 192.168.1.5 2jbHTPxmPiPRyIEe connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "Error: 192.168.1.5 WLnIh5DHEi7MVubz connection failed", "id": 12345}
+1706608800 [INFO] DB timeout data=api_key=SDDqtajboVPlkV9MKRhy context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "username=user_0927", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "username=user_e476", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Binary dump data=username=user_03eb context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "username=user_ad35", "id": 12345}
+1706608800 [WARN] Process crash data=custom_var_46f6=PH6RVL1TQETse4A4As6rtg context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "username=user_30dc", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=custom_var_72c7=P37SzoTRiiOQLs7GtpJL2Q context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "custom_var_f515=yrzLCyNpvLT8oS3J4SFkw", "id": 12345}
+1706608800 [DEBUG] Health check data=custom_var_5e89=XhcU6rs0bxBWxE1TvuQ context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "custom_var_e9b4=SUX7A5M1HWsXzptAjTXA", "id": 12345}
+1706608800 [DEBUG] Binary dump data=api_key=Rt4v6Grw9mHjXqJwBh3 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "Error: 192.168.1.5 5wM2Bq1eNi3R56n connection failed", "id": 12345}
+1706608800 [FATAL] Render complete data=api_key=K4Xjg62XFO2IsrObhKA context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "username=user_71e0", "id": 12345}
+1706608800 [WARN] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "Error: 192.168.1.5 Habntp6l7delz129 connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=Error: 192.168.1.5 72WLhAqyXTJYssX connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "api_key=R7rfDhPfHcqscy9nEk7", "id": 12345}
+1706608800 [ERROR] Process crash data=custom_var_85f6=s59DuJKrJM3QG6RK47oA context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "api_key=6tfPd8seIA8qf7Zoc1B", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=request_id=6BC87F6F-EB97-43AE-B990-1928BADB82F8 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "request_id=389E8D33-A1B2-46E2-847D-1719EAEA4F7B", "id": 12345}
+1706608800 [INFO] Render complete data=api_key=gLkYy0EJLx9Gj8EWqP4D context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=username=user_0b6c context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "DB timeout", "pl": "commit_sha=a4e34adf3a6e3d78b3b7ca7d309000d0a2c70cc1", "id": 12345}
+1706608800 [ERROR] DB timeout data=Error: 192.168.1.5 EYmQeeBEsvh2EB2O connection failed context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=api_key=9QJdeIEoNVVGCJ0S8E context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=username=user_9910 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "commit_sha=9f219635f26829ac28fbb74896a73064d952e495", "id": 12345}
+1706608800 [DEBUG] DB timeout data=request_id=0EF56A8C-2245-4332-A52B-8B757319D3F2 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "custom_var_d1e8=8JByKeyCnWHt4wiQsVA3A", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=Error: 192.168.1.5 Lmau5L5EEnJTmNwd connection failed context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_895e=LTriUiDrUBKgpeRCWKw", "id": 12345}
+1706608800 [FATAL] Process crash data=api_key=o6zkaCT52bDLNPogbHGS context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=custom_var_0f12=yeYmvNo7G9aMPomMrZJag context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "custom_var_68e9=vJrURujf0kBTXMtyh50yaQ", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=custom_var_338a=dKdYvYbyKPNgDaPA0mXplQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [INFO] Binary dump data=api_key=rfmEH6ujNQYIQGNlqR8s context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [INFO] Health check data=Error: 192.168.1.5 gFWKmFF0XHnmhip connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "username=user_0bfe", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=username=user_9494 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=api_key=qu6ZjphbkFTjGw8EZEf context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [WARN] Render complete data=Error: 192.168.1.5 j4wvo302OnvJb1hs connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "username=user_b543", "id": 12345}
+1706608800 [FATAL] Process crash data=username=user_c192 context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Binary dump", "pl": "api_key=3clnMS7Q3ak74np2pF1", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=Error: 192.168.1.5 w7BErewaqrds6TDb connection failed context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Binary dump", "pl": "api_key=b8eutatpgL5T3neSPEL7", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=username=user_9f64 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Render complete data=Error: 192.168.1.5 BwTCEV1UiHl2Qrps connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "api_key=u35pTHFYJRGib4axh2", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "Error: 192.168.1.5 JZHIGdWg8pErH3W connection failed", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=api_key=BiomQO6wq052WS1O5NzA context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "Error: 192.168.1.5 3PqYjnOuOGWKWV9y connection failed", "id": 12345}
+1706608800 [WARN] Render complete data=commit_sha=ccea259fa054c441d62b00869a7d4336a37813eb context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "custom_var_4905=oqG8UoQvahyZlIlRIvQbA", "id": 12345}
+1706608800 [INFO] DB timeout data=api_key=j4GyiCQlu1Rv7RV8gfuy context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "api_key=XjAwASB2sKDsfi2lAjuP", "id": 12345}
+1706608800 [DEBUG] Render complete data=api_key=auPrRBblvJnVMWE6ZhKz context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "username=user_d8e8", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=custom_var_4243=MqnmrESNC3AdjAp5ZXJyQQ context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "commit_sha=9c50219d1f15b8d513b61aae74d5752edc327566", "id": 12345}
+1706608800 [FATAL] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "api_key=IypPY4knGYjtM6ml8eK", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [FATAL] Health check data=username=user_59da context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "custom_var_2e41=xR17nJN8XeQty6HMYfsupQ", "id": 12345}
+1706608800 [ERROR] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [FATAL] Health check data=commit_sha=3913f86e4131bc57ef867102f3e6aae768f05dd3 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Health check", "pl": "username=user_c21d", "id": 12345}
+1706608800 [FATAL] Render complete data=api_key=gDwtrGYroIXEcdpn2CJ context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Health check", "pl": "Error: 192.168.1.5 rYy0l6VWE6qrqWoQ connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=Error: 192.168.1.5 EHeUYLuI1RyfOtDX connection failed context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "Error: 192.168.1.5 J5TOTxalVkJwQRW7 connection failed", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=custom_var_da63=IWlPQladAAFg3hUE7LM7w context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Health check", "pl": "username=user_aab1", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=request_id=34F5D074-E906-4828-9532-97F1523A02EC context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] Render complete data=api_key=GADMqFcrOQFdBRypfmQ context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "Error: 192.168.1.5 VyMzWk3DVXQiUXiO connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "request_id=8FF5AC72-CCF2-4BEE-A355-F751919F856A", "id": 12345}
+1706608800 [ERROR] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "custom_var_975e=VIEHbMa95G1WsG4TerWnw", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=custom_var_e00f=nksQl2s8fakcvjkFj6l2QA context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=api_key=g6II0sWcFxk5Tyw4VbrK context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "custom_var_4883=bHniK17WSL5QUB5jlDCwg", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=request_id=5802DE08-BA0E-463C-BE7B-4807BD20745E context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "username=user_1306", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=api_key=ohoaSz62pvCqwiOk8c context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "username=user_a233", "id": 12345}
+1706608800 [DEBUG] Health check data=custom_var_dc57=RDCrBekdRQrUdpeeevMARQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "api_key=zs7AY33rh3AUS32sWYqd", "id": 12345}
+1706608800 [WARN] Process crash data=custom_var_7e0a=cW692vzE1GO83kBEyrelJQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "custom_var_6d31=rraj40GOw40wNfVAwYk0Xw", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=api_key=8JCQTXhb5wpk6djEMPBH context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=api_key=mPLbQgriQ2zL63iOySY context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=Error: 192.168.1.5 ihQjGA8ep8vwBzpY connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "username=user_1069", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=api_key=RzZZzt1G2J3hhUt6Ca5 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=commit_sha=72e621a19bce08044bf2466070b877424437f62d context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Health check data=commit_sha=3816f7f5c779d9f087633d4219cc6d958cbe4da2 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [WARN] Process crash data=commit_sha=5fa1df96164f04379df411c0f879273c1e423b98 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "custom_var_6ace=VvHqLzn2rXTJCpUMru0eA", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=username=user_e5ed context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "api_key=TcChlb273Wi8NXV8qL0K", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=username=user_01d1 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "api_key=9S0hFOw2mRqR0wvd6UZu", "id": 12345}
+1706608800 [DEBUG] DB timeout data=custom_var_da14=TdU3Xwm10IeTMeE7V6G9xw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "Error: 192.168.1.5 LCZI7RcRP5cP1bo4 connection failed", "id": 12345}
+1706608800 [INFO] Health check data=Error: 192.168.1.5 Lfkg8dDOgFJTqUza connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=api_key=UzQGTz0fxqNCQqqJ85cW context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "Error: 192.168.1.5 TDDlhQw5hnSCRVVW connection failed", "id": 12345}
+1706608800 [ERROR] Render complete data=api_key=oRzCV0f8dHWMvMPYCqT context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "Error: 192.168.1.5 DNulTWrLDfBgDifV connection failed", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=Error: 192.168.1.5 5eMnjyswXuT62mJ connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "api_key=0ygb6e0BwfifzFEaPcf", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Process crash data=username=user_f26e context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "request_id=2E40A59F-6C47-4EDE-B188-905B5A2F93DF", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Process crash data=username=user_c67e context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "custom_var_b5b2=u46wwD1Go8Xzw5NROpw", "id": 12345}
+1706608800 [FATAL] Render complete data=custom_var_4c74=32utfk6CNbi2sgMRAGsKEA context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Render complete data=username=user_ced5 context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Health check", "pl": "Error: 192.168.1.5 sagdf5bU96AkKcH connection failed", "id": 12345}
+1706608800 [WARN] Health check data=request_id=94996D2C-9310-4740-9FB9-C8ECC950451E context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "request_id=BBBE95FF-DCC4-4A7E-B552-10CC4ED09E2B", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=custom_var_7f10=g3dAOJnNmmA6Z5PJJSI8Q context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=username=user_a1ad context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "username=user_57c0", "id": 12345}
+2026-01-30T10:00:00Z [INFO] DB timeout data=username=user_d749 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "custom_var_3ca9=Jy90TKdfSaD0XgSxCpVtxw", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Health check", "pl": "custom_var_3e23=L99HNVqiZDua3dT0JiHLrA", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=api_key=8EAesvTWz1t0LS9RzKHv context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "custom_var_a6b2=RyRYBbncM60kUerMXqmMw", "id": 12345}
+1706608800 [WARN] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "api_key=RvGljAY5EpsuSgnwK", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=username=user_43eb context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "username=user_4674", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=Error: 192.168.1.5 fRxzfjHy1aROxvMa connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "Error: 192.168.1.5 8UIRYmBi2VIlGt connection failed", "id": 12345}
+1706608800 [DEBUG] Binary dump data=custom_var_5221=5sHGgDOnVXhTVF5CBhr5A context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=username=user_1bce context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "commit_sha=ee57990f400c32f83d03afa57a25169f37429f42", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=Error: 192.168.1.5 EsuN2lixNtEAQvG connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Render complete data=custom_var_da5b=1gJYW2Mk4RHy8KsWnRkCEQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "custom_var_e1b5=LN8igkhrjSV8uu4kEzbxRw", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=api_key=E5bUqpB5IQiE4drAPQs context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=Error: 192.168.1.5 bFMNRyN3HOZY6H connection failed context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=custom_var_fe66=yea7pityzhA0BIQlYIKlhg context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "username=user_9970", "id": 12345}
+1706608800 [FATAL] Binary dump data=custom_var_4593=wHzExnteNPkLta97zm9BYw context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=request_id=57C1CBF8-481A-457A-8946-4006B4F0C7C1 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] Process crash data=request_id=23D337A3-BB74-446A-822D-B63B20D1C3D0 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "username=user_a2ea", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Process crash data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "username=user_d878", "id": 12345}
+1706608800 [DEBUG] Process crash data=Error: 192.168.1.5 GReQ6hcwQxi8MR9a connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "api_key=6rYjr1alZnoUSHyP4cus", "id": 12345}
+1706608800 [ERROR] DB timeout data=request_id=B6EF06B7-E801-489A-9D27-055685180D30 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [INFO] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Process crash", "pl": "request_id=0A98F0F1-4CC8-4382-8ABC-0A6E43A047E3", "id": 12345}
+1706608800 [WARN] DB timeout data=username=user_5659 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "api_key=yk8MDK3Omg7GVxfsbK8w", "id": 12345}
+1706608800 [ERROR] DB timeout data=commit_sha=2745740b482fcadb5cc03d214d79dcc882ab09dd context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "Error: 192.168.1.5 pfmfmbJoCo7EsanH connection failed", "id": 12345}
+1706608800 [INFO] Binary dump data=custom_var_6a9e=ww28UkTr33B2Fqs8CojzHg context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "custom_var_d437=maCanHS7eE5015g4VsPA", "id": 12345}
+1706608800 [INFO] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "custom_var_fda7=c90tv3Knuhs861zGCoWFxw", "id": 12345}
+1706608800 [DEBUG] Process crash data=commit_sha=bdc8871bab3da834759130f44ff8ead4ba985c40 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Binary dump", "pl": "custom_var_4cfa=B2ByhddpE0rcgGzBL1c2Q", "id": 12345}
+1706608800 [FATAL] DB timeout data=custom_var_7eed=Wspg8mvC4A93zeDgz3Qyg context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "Error: 192.168.1.5 owPfgz9RfO3q2HY connection failed", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "api_key=pcOmSzPaKZQYN9wxjSyx", "id": 12345}
+1706608800 [ERROR] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "Error: 192.168.1.5 B7attA8HAbmqlI3Z connection failed", "id": 12345}
+1706608800 [DEBUG] DB timeout data=username=user_ee78 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Render complete", "pl": "custom_var_0cd6=w0lmlMmqct92q9YCae9RA", "id": 12345}
+1706608800 [DEBUG] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "custom_var_5b2c=mndOkowHcCm7gIKDmGxXg", "id": 12345}
+1706608800 [DEBUG] Binary dump data=api_key=WR9f4kKaqe9yHhPP06pZ context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "commit_sha=d789c41756120102a06a33c56a5e11f551b751e2", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=api_key=I2yskxr5ljUc51NqndYa context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [ERROR] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "api_key=e3nJfO0pTF1ZkguWxTIh", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "Error: 192.168.1.5 SugdWorBiwte6dCb connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=custom_var_368f=h2TV911g20IURoz2Dsrxg context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "api_key=0NQwGbkWsHSaUZZ2PAh", "id": 12345}
+1706608800 [INFO] Render complete data=Error: 192.168.1.5 QKdTav9TkpLuU3IM connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "Error: 192.168.1.5 ZyRXbFMUdrOApNs7 connection failed", "id": 12345}
+1706608800 [ERROR] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "username=user_2594", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=username=user_c65e context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Render complete", "pl": "api_key=njBrz2DmFYOn0V1r8JJ", "id": 12345}
+1706608800 [DEBUG] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "username=user_b4f0", "id": 12345}
+1706608800 [INFO] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [ERROR] Process crash data=api_key=oIf53WH6EyUa0YdI8J context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Health check", "pl": "api_key=QbWLN5zU4LWXHtJc3Ir", "id": 12345}
+1706608800 [INFO] Process crash data=username=user_4729 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "custom_var_a15d=5Z7rfN95voIy7QwgDpxsGw", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=request_id=2239E3EB-969B-41B9-ADF3-1CCA5E3F62A1 context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "request_id=28441D05-23F6-4EFC-8DCA-AC14105E7744", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=Error: 192.168.1.5 ucXhGxNvh5vjQPgC connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "custom_var_4264=Z4HA4aScxqEH0u2HFczZKA", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=username=user_59f0 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [ERROR] Render complete data=api_key=xHrQ6lYlYBsXEgoJDlb context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "username=user_be7a", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Binary dump", "pl": "custom_var_1365=23j4axwvW5xKfV2oGkjflg", "id": 12345}
+1706608800 [INFO] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "custom_var_2559=JPjg5MwoTsuECyewTAABA", "id": 12345}
+1706608800 [DEBUG] Render complete data=api_key=evVhaguDxbtJ2yZLiHtt context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [INFO] Binary dump data=Error: 192.168.1.5 gaDUfs60rZV6uF connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "username=user_ae70", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=api_key=f0cpoing3gIP1ufWnAM context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "DB timeout", "pl": "commit_sha=69f46e2b25d18aa7dde412b00e977feae7e26ae9", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [DEBUG] DB timeout data=custom_var_96d3=RptN8FuNE2FFbLKJ6ZQ7tA context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "custom_var_6a4b=TLk3ErziZyrooRNZ9Vzug", "id": 12345}
+1706608800 [WARN] Health check data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "request_id=32FFEA88-6826-427D-ACAF-112830559521", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=custom_var_17a7=sqzSXhIghQBTENc3QNZAwA context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "api_key=EN0LVaAeNnrpFvAA70Ib", "id": 12345}
+1706608800 [WARN] Render complete data=api_key=ZzGnYYztYzMiF2RzmJQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "DB timeout", "pl": "username=user_5016", "id": 12345}
+1706608800 [FATAL] Process crash data=username=user_93ff context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "username=user_9acf", "id": 12345}
+1706608800 [FATAL] Binary dump data=custom_var_c43f=byzCsjUF9dSGypXlIW6zNg context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Health check", "pl": "Error: 192.168.1.5 sDyT7BJ1LTQE4LP connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=api_key=Ejo3Lvk2n9WxcJCXb9 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=username=user_74f0 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=username=user_9779 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=username=user_4262 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [DEBUG] Binary dump data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "DB timeout", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [WARN] Render complete data=username=user_0e3a context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [FATAL] DB timeout data=Error: 192.168.1.5 htVzNEtrM5NMlKzM connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Process crash", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+1706608800 [INFO] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Render complete", "pl": "Error: 192.168.1.5 5xa6KijyHRmPlHk connection failed", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=request_id=285B9D9A-C4FC-4E1F-A71F-229E5ABC83F0 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=api_key=Pyuul3X0yYrHOR1WUG0d context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Binary dump", "pl": "Error: 192.168.1.5 GGkAjwzglUWY3v connection failed", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=api_key=kzb0Ww7or29JylB5OVJ context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "custom_var_0589=kkOidrMadizkOgKuLEFg", "id": 12345}
+1706608800 [WARN] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "username=user_4a34", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Binary dump", "pl": "api_key=7oH98TaMM6BS6bHpFU", "id": 12345}
+1706608800 [INFO] Health check data=request_id=DE0FA98F-15FF-4098-9DC9-48D1CC5781C7 context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=custom_var_d953=mmmXj0sjXdegmqfGtrao4Q context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Process crash", "pl": "api_key=9GNPQ1HzAOmX4QjShRx", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=Error: 192.168.1.5 3UsgnD9v20UxZfdA connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [ERROR] Process crash data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Health check", "pl": "custom_var_8afd=ZhJkKTEGNzOpoe9fSpf4w", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Process crash data=api_key=cqgWwbnuZZSKxCWHlODw context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "username=user_13df", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=Error: 192.168.1.5 ERQgbFbMb9Fw8gh connection failed context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Binary dump", "pl": "Error: 192.168.1.5 MYkB3YvI8udYKTsM connection failed", "id": 12345}
+1706608800 [INFO] Binary dump data=api_key=p40BYM0o7DpvIUbPile context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [INFO] Render complete data=username=user_f117 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "username=user_c8e7", "id": 12345}
+1706608800 [WARN] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+1706608800 [FATAL] DB timeout data=custom_var_bbcd=nh06sKcarUJLgpc4COxq1g context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Render complete data=Error: 192.168.1.5 dBA5AAqjKU9yjIC connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "Error: 192.168.1.5 azAR6r15NBdOJtKy connection failed", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Binary dump", "pl": "commit_sha=5cf9ca3c1f62bcfcec86bfef2e5235c8bb453ee9", "id": 12345}
+1706608800 [DEBUG] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Health check data=custom_var_da0a=XTWIAPZvWACDB9PnQ149w context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Binary dump", "pl": "custom_var_74c6=ZLgRqivpeyL6WiXI7Psqg", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Health check data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=api_key=FGG6ElRDAtMzJFPNJefL context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Process crash data=api_key=bKOyGPKPHYjBjg1ZXB1m context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "DB timeout", "pl": "Error: 192.168.1.5 R69mKtqKoQxtyej connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=username=user_6834 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "request_id=265C9876-FA0C-430A-9F6D-11075B9BDB8D", "id": 12345}
+1706608800 [INFO] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "api_key=KRlDRiMbEAFgNShR9eM", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] DB timeout data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "request_id=C300E63B-9399-40FA-9BE1-711CEDAC963C", "id": 12345}
+1706608800 [INFO] Render complete data=commit_sha=bc3eed93441601542aefc3a96783ddca1ebf0282 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Binary dump", "pl": "request_id=FE087FB2-CEDE-40CB-BB85-C6FE56B62B4B", "id": 12345}
+1706608800 [FATAL] Binary dump data=commit_sha=485a3d99e364903dac9bcbb1bb33c2af44945591 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Render complete", "pl": "Error: 192.168.1.5 1CaHQ8NusXxzz9j connection failed", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=api_key=IAxggJt9iqYhITNmMBj context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "commit_sha=39efab2ba136261af7e9e46f6df83f779bcd253c", "id": 12345}
+1706608800 [WARN] Health check data=Error: 192.168.1.5 7k8zs4NJvfJCte connection failed context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Process crash", "pl": "Error: 192.168.1.5 hZT8g1ArWHeFIWLK connection failed", "id": 12345}
+1706608800 [DEBUG] Health check data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "request_id=4FED5422-09F0-410C-BB89-C170F568A9CF", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Health check data=api_key=paXBH6wYYitTL2UnYh01 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Render complete", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [INFO] Health check data=api_key=qnzr8lDI7coWjaT3HyQs context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Process crash", "pl": "request_id=DB39CF37-A4A5-418B-86AA-5CC724C7664A", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=custom_var_7d78=a5CzdalTVomIaikpFtCQ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "DB timeout", "pl": "api_key=DmaNCHP6UFNvtyADoizY", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=username=user_492d context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] DB timeout data=api_key=40Uq6HkyWQmd8MoP4e7 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "custom_var_31c2=NkZEjipGQku3rMVeXtpwA", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=request_id=4F45AD74-B113-4A41-9EA1-5DE15CC9A8B0 context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Process crash", "pl": "username=user_9833", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Binary dump data=custom_var_eca1=laqEEbocdyuv47PRH03bg context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Binary dump data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "WARN", "msg": "Health check", "pl": "username=user_5eb8", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=api_key=8UltHaSIsB0oPGTPS28g context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Render complete", "pl": "username=user_7bde", "id": 12345}
+2026-01-30T10:00:00Z [WARN] Render complete data=api_key=bphDAaQaSC8V9P68sfk context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "DB timeout", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Binary dump data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "Error: 192.168.1.5 lZDFB04mzeP2qM connection failed", "id": 12345}
+1706608800 [INFO] Render complete data=custom_var_b846=kNvrpINmnUedZZzkEMTzg context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Binary dump", "pl": "request_id=662B7ED7-6E08-4BDE-B25B-05B48FAB47E9", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Health check data=Error: 192.168.1.5 TLclCjSWhNXBF4F connection failed context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+2026-01-30T10:00:00Z [ERROR] Binary dump data=commit_sha=62a1343826276ea7870725a7652ee9d2646aa267 context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Process crash", "pl": "Error: 192.168.1.5 6Rgp1Zq3nnooqHHc connection failed", "id": 12345}
+1706608800 [ERROR] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "FATAL", "msg": "Health check", "pl": "username=user_038f", "id": 12345}
+2026-01-30T10:00:00Z [WARN] DB timeout data=Error: 192.168.1.5 bFuscG3TpZiaLYHu connection failed context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "request_id=51A4C677-8D4A-4510-910D-71DFB65080EC", "id": 12345}
+1706608800 [FATAL] Render complete data=binary_data=BrokenUTF8_ÿþ_End context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "Render complete", "pl": "username=user_0336", "id": 12345}
+1706608800 [ERROR] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Render complete", "pl": "api_key=OznMO7G3T3Q2s6qtfzIY", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Process crash data=api_key=EgnmQRACc53eyKcb9jth context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "INFO", "msg": "Process crash", "pl": "username=user_e20a", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] DB timeout data=api_key=Tx4lGwjGNKNiLwz4nisz context_id=12345
+{"time": "1706608800", "lvl": "DEBUG", "msg": "Render complete", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [FATAL] Render complete data=request_id=86CDAB13-8B06-48CD-8339-F1A503FAB23A context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Health check", "pl": "custom_var_27a5=gc9p5mq5Onk5Hw4ZF1BqA", "id": 12345}
+1706608800 [FATAL] Process crash data=username=user_3d61 context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Health check", "pl": "request_id=EF93A22F-D235-4C7E-B1F7-FC6A2FEFD0D9", "id": 12345}
+2026-01-30T10:00:00Z [DEBUG] Process crash data=api_key=zBOpkiorTZV6c7fA5mzZ context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "ERROR", "msg": "Health check", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
+1706608800 [WARN] Process crash data=username=user_56eb context_id=12345
+{"time": "1706608800", "lvl": "INFO", "msg": "DB timeout", "pl": "binary_data=BrokenUTF8_ÿþ_End", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Health check data=api_key=5B1YA9Ih7Q4Oi47N9AhD context_id=12345
+{"time": "1706608800", "lvl": "WARN", "msg": "Binary dump", "pl": "pub_key=ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+Z", "id": 12345}
+2026-01-30T10:00:00Z [INFO] Render complete data=memory_dump: [0a 1b 3c 4d 5e 6f 90 21] context_id=12345
+{"time": "1706608800", "lvl": "ERROR", "msg": "Binary dump", "pl": "request_id=2FD82FB2-7809-471A-9A5F-CB627FD0201A", "id": 12345}
+1706608800 [INFO] DB timeout data=api_key=hEhL2yCijsdCSFhCAjl context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "DEBUG", "msg": "Binary dump", "pl": "username=user_4c08", "id": 12345}
+1706608800 [INFO] Binary dump data=username=user_f926 context_id=12345
+{"time": "2026-01-30T10:00:00Z", "lvl": "FATAL", "msg": "Process crash", "pl": "memory_dump: [0a 1b 3c 4d 5e 6f 90 21]", "id": 12345}
