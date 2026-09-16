@@ -18,6 +18,7 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 - Set a persistent `PII_SALT` in production if deterministic hashes must remain stable across restarts.
 - Adaptive entropy thresholding is experimental and should be validated against representative log traffic before enabling.
 - Custom regex and safe regex rules should be tested with real log samples to avoid false positives or false negatives.
+- **A rule can never match a phrase that spans two words.** Rules are applied in `processSingleToken` (`pkg/scanner/scanner.go`) to one whitespace-separated token at a time, so a pattern like `British Asian` is never tested against anything containing a space, however it is written — the scanner has already split the line before the rule is reached. Single-word patterns (`^Asian$`) work normally. This is a boundary of the design, not a gap in the rule list: matching phrases in the core would mean carrying multi-token state through the tokenizer, and free-text semantics is reserved for the selective PII model plan. Handle multi-word categories — GDPR Article 9 special-category phrases, for instance — before the text reaches the scanner.
 
 ## Roadmap Boundaries
 
