@@ -286,6 +286,60 @@ func TestQuotedMultiWordValueRedacted(t *testing.T) {
 	}
 }
 
+// TestQuotedMultiWordValueAfterEquals covers B15: B9 taught only the colon path
+// to re-tokenize a quoted multi-word value. The '=' path kept handing the value
+// to processSingleToken with its quotes still attached, so the inner spaces hit
+// the space heuristic and `msg="user 42 token <secret>"` — an everyday log line
+// — came back verbatim.
+func TestQuotedMultiWordValueAfterEquals(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	const secret = "AbC9xY2kQ8pLmN0rZq7"
+
+	leaky := []string{
+		`note='leak ` + secret + `' end`,
+		`note="leak ` + secret + `" end`,
+		`msg="user 42 token ` + secret + `"`,
+	}
+	for _, in := range leaky {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("secret leaked: in=%q out=%q", in, out)
+		}
+		if !strings.Contains(out, "[HIDDEN") {
+			t.Errorf("expected redaction: in=%q out=%q", in, out)
+		}
+	}
+
+	// Shapes that already worked must keep working, quotes and all.
+	for _, in := range []string{`note='` + secret + `' end`, `he said 'leak ` + secret + ` now'`} {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("regression: secret leaked: in=%q out=%q", in, out)
+		}
+		if strings.Count(out, "'") != strings.Count(in, "'") {
+			t.Errorf("quote count changed: in=%q out=%q", in, out)
+		}
+	}
+
+	// Ordinary quoted prose must not start getting redacted.
+	for _, in := range []string{`note='hello world' end`, `msg="ok fine"`} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("over-redaction: in=%q out=%q", in, out)
+		}
+	}
+
+	// The same secret now hashes identically whether or not it arrived quoted,
+	// because the quotes are stripped before hashing on both paths.
+	bare := ScanAndRedact(`note=` + secret)
+	quoted := ScanAndRedact(`note='` + secret + `'`)
+	if want := strings.TrimPrefix(bare, "note="); !strings.Contains(quoted, want) {
+		t.Errorf("quoted and bare markers differ: bare=%q quoted=%q", bare, quoted)
+	}
+}
+
 // TestSafeRegexWhitelistAppliesToLuhnAndURL covers B10: cfg.SafeRegexes
 // (PII_SAFE_REGEX_LIST) is a no-op for the Luhn credit-card path and the URL
 // query-parameter path. Both call redactWithHMAC directly in scanLine /
@@ -434,5 +488,45 @@ func TestIsAllLetters(t *testing.T) {
 		if got := isAllLetters(in); got != want {
 			t.Errorf("isAllLetters(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+// TestCustomRegexShortToken covers B5: custom rules were gated behind
+// len(content) >= 5 and safe rules behind len(content) >= 3, so a rule written
+// for a short token could never fire and the operator got no warning. Both
+// lists are empty unless configured, so the gates bought nothing on the
+// default path.
+func TestCustomRegexShortToken(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+
+	cfg := campaignConfig()
+	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Pattern: `^[A-Z]{4}$`, Name: "code"}}); err != nil {
+		t.Fatalf("ApplyCustomRegexes: %v", err)
+	}
+	if err := cfg.ApplySafeRegexes([]CustomRegexConfig{{Pattern: `^ok$`, Name: "okword"}}); err != nil {
+		t.Fatalf("ApplySafeRegexes: %v", err)
+	}
+	UpdateConfig(cfg)
+
+	// A 4-character custom rule fires and carries its name.
+	out := ScanAndRedact("status ABCD ok")
+	if strings.Contains(out, "ABCD") {
+		t.Errorf("custom rule did not fire on a 4-char token: %q", out)
+	}
+	if !strings.Contains(out, "[HIDDEN:code:") {
+		t.Errorf("expected the rule name in the marker: %q", out)
+	}
+
+	// A 2-character safe rule protects its token even under a sensitive key,
+	// where the forced path would otherwise redact it.
+	if out := ScanAndRedact("password=ok"); out != "password=ok" {
+		t.Errorf("safe rule did not protect a 2-char token: %q", out)
+	}
+
+	// The safe rule wins over the custom rule for the token it names, and
+	// tokens no rule mentions are untouched.
+	if out := ScanAndRedact("state ok done"); out != "state ok done" {
+		t.Errorf("unexpected redaction on unmatched short tokens: %q", out)
 	}
 }
