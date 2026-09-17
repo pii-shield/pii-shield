@@ -1156,6 +1156,13 @@ func isPaddedBase64Blob(s string) bool {
 	return len(s)-len(body) <= 2 && strings.IndexByte(body, '=') == -1
 }
 
+func isBalancedQuoted(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	return (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0]
+}
+
 func isRedacted(content string) bool {
 	return strings.HasPrefix(content, "[HIDDEN") && strings.HasSuffix(content, "]")
 }
@@ -1177,30 +1184,61 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 	// so a single token is never scored against a mix of two configs.
 	cfg := st.config
 
-	// 1. Whitelist Check: Safe Regexes
-	if len(content) >= 3 {
-		for _, rule := range cfg.SafeRegexes {
-			if rule.Regexp.MatchString(content) {
-				sb.WriteString(original)
-				return
-			}
+	// 1. Whitelist Check: Safe Regexes.
+	// No minimum-length gate: both lists are empty unless the operator
+	// configured them, so a length check saves nothing on the default path and
+	// only silences rules that were written for short tokens — `^ok$` or
+	// `^[A-Z]{4}$` could never fire (B5).
+	for _, rule := range cfg.SafeRegexes {
+		if rule.Regexp.MatchString(content) {
+			sb.WriteString(original)
+			return
 		}
 	}
 
 	// 2. Deterministic Check: Custom Regexes
-	if len(content) >= 5 {
-		if cfg.CombinedCustomRegex != nil {
-			loc := cfg.CombinedCustomRegex.FindStringSubmatchIndex(content)
-			if loc != nil {
-				matchName := ""
-				for i := 0; i < len(cfg.CustomRegexNames); i++ {
-					idx := 2 + (i * 2)
-					if idx < len(loc) && loc[idx] != -1 {
-						matchName = cfg.CustomRegexNames[i]
-						break
-					}
+	if cfg.CombinedCustomRegex != nil {
+		loc := cfg.CombinedCustomRegex.FindStringSubmatchIndex(content)
+		if loc != nil {
+			matchName := ""
+			for i := 0; i < len(cfg.CustomRegexNames); i++ {
+				idx := 2 + (i * 2)
+				if idx < len(loc) && loc[idx] != -1 {
+					matchName = cfg.CustomRegexNames[i]
+					break
 				}
+			}
 
+			quoteChar := byte(0)
+			if strings.HasPrefix(original, "\"") {
+				quoteChar = '"'
+			} else if strings.HasPrefix(original, "'") {
+				quoteChar = '\''
+			} else if autoQuote {
+				lower := strings.ToLower(content)
+				if isDigits(content) || lower == "true" || lower == "false" || lower == "null" {
+					quoteChar = '"'
+				}
+			}
+
+			if quoteChar != 0 {
+				sb.WriteByte(quoteChar)
+			}
+
+			// Use hashed redaction for Custom Regex
+			if matchName == "" {
+				matchName = st.entityLabel("regex")
+			}
+			st.redactWithHMAC(content, matchName, "regex", sb)
+
+			if quoteChar != 0 {
+				sb.WriteByte(quoteChar)
+			}
+			return
+		}
+	} else {
+		for _, rule := range cfg.CustomRegexes {
+			if rule.Regexp.MatchString(content) {
 				quoteChar := byte(0)
 				if strings.HasPrefix(original, "\"") {
 					quoteChar = '"'
@@ -1218,47 +1256,16 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 				}
 
 				// Use hashed redaction for Custom Regex
-				if matchName == "" {
-					matchName = st.entityLabel("regex")
+				ruleName := rule.Name
+				if ruleName == "" {
+					ruleName = st.entityLabel("regex")
 				}
-				st.redactWithHMAC(content, matchName, "regex", sb)
+				st.redactWithHMAC(content, ruleName, "regex", sb)
 
 				if quoteChar != 0 {
 					sb.WriteByte(quoteChar)
 				}
 				return
-			}
-		} else {
-			for _, rule := range cfg.CustomRegexes {
-				if rule.Regexp.MatchString(content) {
-					quoteChar := byte(0)
-					if strings.HasPrefix(original, "\"") {
-						quoteChar = '"'
-					} else if strings.HasPrefix(original, "'") {
-						quoteChar = '\''
-					} else if autoQuote {
-						lower := strings.ToLower(content)
-						if isDigits(content) || lower == "true" || lower == "false" || lower == "null" {
-							quoteChar = '"'
-						}
-					}
-
-					if quoteChar != 0 {
-						sb.WriteByte(quoteChar)
-					}
-
-					// Use hashed redaction for Custom Regex
-					ruleName := rule.Name
-					if ruleName == "" {
-						ruleName = st.entityLabel("regex")
-					}
-					st.redactWithHMAC(content, ruleName, "regex", sb)
-
-					if quoteChar != 0 {
-						sb.WriteByte(quoteChar)
-					}
-					return
-				}
 			}
 		}
 	}
@@ -1449,6 +1456,14 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		if containsSep := strings.Contains(val, "=") || strings.Contains(val, ":"); containsSep && !keySensitive {
 			// Recursive handling for "data=key=val" where "data" is safe.
 			st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
+		} else if isBalancedQuoted(val) {
+			// A quoted value keeps its inner spaces, so processSingleToken's
+			// space heuristic would wave the whole blob through and a secret
+			// inside `msg="user 42 token <secret>"` would survive. Route it
+			// through the same isValuePos re-tokenize path processColonPair
+			// uses, which unwraps the quotes and scores each word on its own
+			// (B15; B9 fixed only the colon path).
+			st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
 		} else {
 			st.processSingleToken(val, val, keySensitive, false, false, sb)
 		}
