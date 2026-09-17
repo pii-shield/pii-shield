@@ -286,6 +286,60 @@ func TestQuotedMultiWordValueRedacted(t *testing.T) {
 	}
 }
 
+// TestQuotedMultiWordValueAfterEquals covers B15: B9 taught only the colon path
+// to re-tokenize a quoted multi-word value. The '=' path kept handing the value
+// to processSingleToken with its quotes still attached, so the inner spaces hit
+// the space heuristic and `msg="user 42 token <secret>"` — an everyday log line
+// — came back verbatim.
+func TestQuotedMultiWordValueAfterEquals(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	const secret = "AbC9xY2kQ8pLmN0rZq7"
+
+	leaky := []string{
+		`note='leak ` + secret + `' end`,
+		`note="leak ` + secret + `" end`,
+		`msg="user 42 token ` + secret + `"`,
+	}
+	for _, in := range leaky {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("secret leaked: in=%q out=%q", in, out)
+		}
+		if !strings.Contains(out, "[HIDDEN") {
+			t.Errorf("expected redaction: in=%q out=%q", in, out)
+		}
+	}
+
+	// Shapes that already worked must keep working, quotes and all.
+	for _, in := range []string{`note='` + secret + `' end`, `he said 'leak ` + secret + ` now'`} {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("regression: secret leaked: in=%q out=%q", in, out)
+		}
+		if strings.Count(out, "'") != strings.Count(in, "'") {
+			t.Errorf("quote count changed: in=%q out=%q", in, out)
+		}
+	}
+
+	// Ordinary quoted prose must not start getting redacted.
+	for _, in := range []string{`note='hello world' end`, `msg="ok fine"`} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("over-redaction: in=%q out=%q", in, out)
+		}
+	}
+
+	// The same secret now hashes identically whether or not it arrived quoted,
+	// because the quotes are stripped before hashing on both paths.
+	bare := ScanAndRedact(`note=` + secret)
+	quoted := ScanAndRedact(`note='` + secret + `'`)
+	if want := strings.TrimPrefix(bare, "note="); !strings.Contains(quoted, want) {
+		t.Errorf("quoted and bare markers differ: bare=%q quoted=%q", bare, quoted)
+	}
+}
+
 // TestSafeRegexWhitelistAppliesToLuhnAndURL covers B10: cfg.SafeRegexes
 // (PII_SAFE_REGEX_LIST) is a no-op for the Luhn credit-card path and the URL
 // query-parameter path. Both call redactWithHMAC directly in scanLine /

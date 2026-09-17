@@ -1143,6 +1143,13 @@ func trimQuotes(s string) string {
 	return s
 }
 
+func isBalancedQuoted(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	return (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0]
+}
+
 func isRedacted(content string) bool {
 	return strings.HasPrefix(content, "[HIDDEN") && strings.HasSuffix(content, "]")
 }
@@ -1425,6 +1432,14 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		if containsSep := strings.Contains(val, "=") || strings.Contains(val, ":"); containsSep && !keySensitive {
 			// Recursive handling for "data=key=val" where "data" is safe.
 			st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
+		} else if isBalancedQuoted(val) {
+			// A quoted value keeps its inner spaces, so processSingleToken's
+			// space heuristic would wave the whole blob through and a secret
+			// inside `msg="user 42 token <secret>"` would survive. Route it
+			// through the same isValuePos re-tokenize path processColonPair
+			// uses, which unwraps the quotes and scores each word on its own
+			// (B15; B9 fixed only the colon path).
+			st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
 		} else {
 			st.processSingleToken(val, val, keySensitive, false, false, sb)
 		}
