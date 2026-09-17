@@ -19,12 +19,15 @@ Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail ins
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PII_ENTROPY_THRESHOLD` | Shannon entropy threshold (3.0 - 8.0). Higher = fewer false positives, but might miss simple passwords. | `3.6` |
-| `PII_CONFIDENCE_THRESHOLD` | Multiplier applied to the effective entropy threshold. Values above `1.2` also restrict credit-card (Luhn) matches to lines containing card context words (`card`, `cc`, `pan`, `visa`). | `1.0` |
+| `PII_CONFIDENCE_THRESHOLD` | Multiplier applied to the effective entropy threshold. Values above `1.2` also restrict credit-card (Luhn) matches to lines containing card context words (`card`, `cc`, `pan`, `visa`), and let long padded base64 blobs through instead of redacting them. | `1.0` |
 | `PII_MIN_SECRET_LENGTH` | Minimum length of a string to be considered a candidate token. | `6` |
 | `PII_SENSITIVE_KEYS` | Comma-separated list of keys to *always* redact values for (case-insensitive, substring match). **Replaces** the default list instead of extending it. | `pass,secret,token,key,cvv,cvc,auth,sign,password,passwd,api_key,apikey,access_token,client_secret,aws_access_key_id,aws_secret_access_key,gcp_credentials,slack_token` |
 | `PII_SENSITIVE_KEY_PATTERNS` | Comma-separated list of regex patterns for key detection. | (empty) |
 
 > **Strict numeric parsing:** an invalid value in `PII_ENTROPY_THRESHOLD`, `PII_CONFIDENCE_THRESHOLD`, or `PII_BIGRAM_DEFAULT_SCORE` — including trailing junk like `3.6junk` — is rejected with a startup `WARNING` and the default is kept. Earlier versions silently applied the numeric prefix of such values.
+
+> [!WARNING]
+> **Base64 payloads are redacted by default.** A token longer than 64 characters that ends in `=` padding and holds nothing but base64 characters is treated as a payload and hidden. Up to 2.2.4 it was skipped, so encoded tokens, keys and documents passed through in the clear. If your logs carry benign base64 — thumbnails, protobuf frames, tracing payloads — those lines are now redacted too; framing around the blob is kept, so `src=data:image/png;base64,<blob>` keeps its prefix and loses only the payload. Set `PII_CONFIDENCE_THRESHOLD` above `1.2` to restore the old pass-through. A blob under a sensitive key was already redacted and is unaffected either way.
 
 ## Advanced Features
 
