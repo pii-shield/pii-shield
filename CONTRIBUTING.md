@@ -41,9 +41,17 @@ Before making a PR, please run tests to make sure you didn't break the pipeline:
 # Run unit and fuzzing tests
 go test ./... -v -fuzz=Fuzz
 
-# Run stress and smoke tests
+# Run stress and smoke tests against the frozen corpus (deterministic)
 ./scripts/test-smoke.sh
+
+# Optional: score a freshly generated random corpus instead
+./scripts/test-smoke.sh --fuzz
 ```
+
+The default run scores the corpus committed under `scripts/testdata/`, so the
+same code always produces the same numbers and a red run means a real change.
+`--regenerate` rebuilds that corpus; review the diff and re-run the smoke test
+before committing it.
 
 For performance-sensitive changes, compare CLI throughput against the baseline branch:
 ```bash
