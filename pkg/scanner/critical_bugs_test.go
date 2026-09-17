@@ -490,3 +490,43 @@ func TestIsAllLetters(t *testing.T) {
 		}
 	}
 }
+
+// TestCustomRegexShortToken covers B5: custom rules were gated behind
+// len(content) >= 5 and safe rules behind len(content) >= 3, so a rule written
+// for a short token could never fire and the operator got no warning. Both
+// lists are empty unless configured, so the gates bought nothing on the
+// default path.
+func TestCustomRegexShortToken(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+
+	cfg := campaignConfig()
+	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Pattern: `^[A-Z]{4}$`, Name: "code"}}); err != nil {
+		t.Fatalf("ApplyCustomRegexes: %v", err)
+	}
+	if err := cfg.ApplySafeRegexes([]CustomRegexConfig{{Pattern: `^ok$`, Name: "okword"}}); err != nil {
+		t.Fatalf("ApplySafeRegexes: %v", err)
+	}
+	UpdateConfig(cfg)
+
+	// A 4-character custom rule fires and carries its name.
+	out := ScanAndRedact("status ABCD ok")
+	if strings.Contains(out, "ABCD") {
+		t.Errorf("custom rule did not fire on a 4-char token: %q", out)
+	}
+	if !strings.Contains(out, "[HIDDEN:code:") {
+		t.Errorf("expected the rule name in the marker: %q", out)
+	}
+
+	// A 2-character safe rule protects its token even under a sensitive key,
+	// where the forced path would otherwise redact it.
+	if out := ScanAndRedact("password=ok"); out != "password=ok" {
+		t.Errorf("safe rule did not protect a 2-char token: %q", out)
+	}
+
+	// The safe rule wins over the custom rule for the token it names, and
+	// tokens no rule mentions are untouched.
+	if out := ScanAndRedact("state ok done"); out != "state ok done" {
+		t.Errorf("unexpected redaction on unmatched short tokens: %q", out)
+	}
+}
