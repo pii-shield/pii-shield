@@ -41,6 +41,18 @@ func TestQuotedSensitiveValueWithEquals(t *testing.T) {
 		t.Errorf("part of a forced value survived: %q", out)
 	}
 
+	// The same defect through the other sensitivity flag: a {"key": "password",
+	// "value": …} pair marks the value sensitive via overrideSensitivity, and
+	// the quoted branch used to ignore that flag too, so a value containing
+	// '=' was re-parsed and its tail scored on its own.
+	out4 := ScanAndRedact(`{"key": "password", "value": "x=hunter2"}`)
+	if strings.Contains(out4, "hunter2") {
+		t.Errorf("value under a password-typed pair leaked: %q", out4)
+	}
+	if !json.Valid([]byte(out4)) {
+		t.Errorf("output is no longer valid JSON: %q", out4)
+	}
+
 	// Regression (B3): an inner key under a NON-sensitive outer key stays
 	// readable and only its value is hidden, quotes intact.
 	if out := ScanAndRedact(`data="password=hunter2"`); out != `data="password=[HIDDEN:3920d5]"` {
