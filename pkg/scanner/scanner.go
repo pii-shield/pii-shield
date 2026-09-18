@@ -1409,13 +1409,33 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		quote := string(rawToken[0])
 		trimmed := trimQuotes(rawToken)
 
+		// Same guard as the one on the raw token, applied to the quoted content:
+		// base64 padding is not a separator, and re-parsing on it hands the
+		// body back as an unscored "key".
+		if isPaddedBase64Blob(trimmed) {
+			sb.WriteString(quote)
+			st.processSingleToken(trimmed, trimmed, forcedSensitive, false, false, sb)
+			sb.WriteString(quote)
+			return false, true
+		}
+
 		tIdx := strings.IndexByte(trimmed, '=')
 		if tIdx != -1 {
+			// The caller already knows this whole value is secret (it sat under
+			// a sensitive key). Re-parsing it into key=value here would hand
+			// half of it back unredacted, so hide it as one blob instead (B7).
+			if forcedSensitive {
+				sb.WriteString(quote)
+				st.processSingleToken(trimmed, trimmed, true, false, false, sb)
+				sb.WriteString(quote)
+				return false, true
+			}
+
 			// Logic: key is trimmed[:tIdx], val is trimmed[tIdx+1:]
 			key := trimmed[:tIdx]
 			val := trimmed[tIdx+1:]
 
-			keySensitive := st.isSensitiveKey(key)
+			keySensitive := st.isSensitiveKey(key) || overrideSensitivity
 
 			sb.WriteString(quote)
 			sb.WriteString(key)
