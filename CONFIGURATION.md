@@ -26,6 +26,9 @@ Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail ins
 
 > **Strict numeric parsing:** an invalid value in `PII_ENTROPY_THRESHOLD`, `PII_CONFIDENCE_THRESHOLD`, or `PII_BIGRAM_DEFAULT_SCORE` — including trailing junk like `3.6junk` — is rejected with a startup `WARNING` and the default is kept. Earlier versions silently applied the numeric prefix of such values.
 
+> [!NOTE]
+> **A card number needs a real issuer, not just a checksum.** The card detector accepts a 13–19 digit run only when it passes Luhn **and** starts with an issuer prefix at a length that issuer uses: Visa (4; 13/16/19), Mastercard (51–55, 2221–2720; 16), American Express (34, 37; 15), Discover (6011, 65, 644–649, 622126–622925; 16/19), JCB (3528–3589; 16–19), Diners Club (300–305, 36, 38–39; 14–19) and UnionPay (62; 16–19). Luhn alone accepts one random digit string in ten, and up to 2.2.4 every 13-digit millisecond timestamp in a web-server log had that chance of being hidden and labelled a card — on a 300k-line access log all 374 "cards" the checksum found were timestamps. A number that fails the issuer check is no longer treated as a card; it may still be redacted by entropy, in which case it carries the `entropy` label rather than `card`. Maestro is deliberately not in the list: its range (50, 56–69, 12–19 digits) would admit most of the numeric IDs the check exists to reject. The `PII_CONFIDENCE_THRESHOLD > 1.2` card-context rule above applies on top of this.
+
 > [!WARNING]
 > **Base64 payloads are redacted by default.** A token longer than 64 characters that ends in `=` padding and holds nothing but base64 characters is treated as a payload and hidden. Up to 2.2.4 it was skipped, so encoded tokens, keys and documents passed through in the clear. If your logs carry benign base64 — thumbnails, protobuf frames, tracing payloads — those lines are now redacted too; framing around the blob is kept, so `src=data:image/png;base64,<blob>` keeps its prefix and loses only the payload. Set `PII_CONFIDENCE_THRESHOLD` above `1.2` to restore the old pass-through. A blob under a sensitive key was already redacted and is unaffected either way.
 
@@ -37,7 +40,7 @@ Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail ins
 | `PII_ADAPTIVE_SAMPLES` | Number of samples to collect before activating adaptive mode. | `100` |
 | `PII_DISABLE_BIGRAM_CHECK` | Disable English bigram validation. Set to `true` for non-English logs. | `false` |
 | `PII_BIGRAM_DEFAULT_SCORE` | Log-probability score for unknown bigrams. Only pairs of adjacent ASCII characters are scored, so text in a non-Latin script gets no bigram adjustment at all and this value cannot push it towards redaction. | `-7.0` |
-| `PII_ENTITY_TYPE_LABELS` | Emit `[HIDDEN:<type>:<hash>]` instead of `[HIDDEN:<hash>]`, where `<type>` names the detector that fired: `card` (Luhn), `key` (sensitive key), `context` (context keyword), `url` (URL parameter entropy), `regex` (unnamed custom rule), `entropy` (plain entropy). Named custom rules keep their own name as the label. The hash is unchanged, so enabling the flag does not break tag correlation. Accepts `1`/`true`/`yes`/`y`/`on`. | `false` |
+| `PII_ENTITY_TYPE_LABELS` | Emit `[HIDDEN:<type>:<hash>]` instead of `[HIDDEN:<hash>]`, where `<type>` names the detector that fired: `card` (Luhn checksum plus a real issuer prefix and length), `key` (sensitive key), `context` (context keyword), `url` (URL parameter entropy), `regex` (unnamed custom rule), `entropy` (plain entropy). Named custom rules keep their own name as the label. The hash is unchanged, so enabling the flag does not break tag correlation. Accepts `1`/`true`/`yes`/`y`/`on`. | `false` |
 
 ## Runtime Failure Policy
 

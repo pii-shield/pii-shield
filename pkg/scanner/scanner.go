@@ -2081,6 +2081,14 @@ func FindLuhnSequences(line string) []Range {
 				continue
 			}
 
+			// A checksum alone accepts one random digit string in ten; require
+			// an issuer prefix and a length that issuer uses (F7, see bin.go).
+			// Checked before the Luhn sum because it is cheaper and rejects
+			// most candidates.
+			if !matchesCardBIN(line, digitIndices[i:i+L]) {
+				continue
+			}
+
 			if validLuhnFromIndices(line, digitIndices[i:i+L]) {
 				ranges = append(ranges, Range{Start: startIdx, End: endIdx})
 			}
