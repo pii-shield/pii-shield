@@ -1072,7 +1072,7 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	}
 
 	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
-		st.maskURLParameters(rawToken, sb)
+		st.maskURLParameters(rawToken, sb, depth)
 		return false
 	}
 
@@ -1579,13 +1579,59 @@ func (st *configState) isSensitiveKey(key string) bool {
 	return false
 }
 
-func (st *configState) maskURLParameters(url string, sb *strings.Builder) {
-	parts := strings.Split(url, "?")
-	if len(parts) < 2 {
+// indexWhitespace returns the index of the first space or tab in s, or -1.
+// Two IndexByte calls beat strings.IndexAny on the hot path, and the common
+// case (a token already split on whitespace) returns -1 after two scans.
+func indexWhitespace(s string) int {
+	i := strings.IndexByte(s, ' ')
+	if j := strings.IndexByte(s, '\t'); j >= 0 && (i < 0 || j < i) {
+		i = j
+	}
+	return i
+}
+
+func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth int) {
+	// No query text: nothing to mask. This guard must come first, and it is
+	// load-bearing. A quoted User-Agent carries tokens like
+	// `+http://www.bing.com/bingbot.htm`, which arrive here on the `://`
+	// branch with no '?' at all; letting those reach the whitespace cut below
+	// would hand the rest of the User-Agent to the segment scanner and redact
+	// ordinary bot strings (measured: +39 077 changed lines on 300k real
+	// access-log lines). Whatever that verbatim path costs in recall, it is
+	// not B17's to change.
+	if !strings.Contains(url, "?") {
 		sb.WriteString(url)
 		return
 	}
 
+	// A trailing quote closes the enclosing quoted token; it is structure,
+	// not URL text. Peel it off first so it neither lands inside a parameter
+	// value nor reaches the segment scanner as a lone unbalanced quote.
+	if n := len(url); n > 0 && (url[n-1] == '"' || url[n-1] == '\'') {
+		st.maskURLParameters(url[:n-1], sb, depth)
+		sb.WriteByte(url[n-1])
+		return
+	}
+
+	// A URL ends at the first whitespace. Inside a quoted request line
+	// (`"GET /a?x=1 HTTP/1.1"`) the token runs on to the closing quote, so
+	// without this cut the last parameter value swallows the space, the
+	// protocol and the quote into one hash: `_=12345 HTTP/1.1"` scores as a
+	// secret because it is 13+ mixed characters, while `_=12345` on its own
+	// is not. Both the protocol text and the source quote count were lost
+	// that way on 98.8% of real request lines carrying a query (B17). Cut at
+	// the whitespace and hand the remainder to the ordinary segment scanner,
+	// so the trailing text comes back verbatim and anything secret inside it
+	// is still scored.
+	if i := indexWhitespace(url); i >= 0 {
+		st.maskURLParameters(url[:i], sb, depth)
+		st.scanSegment(url[i:], sb, depth)
+		return
+	}
+
+	// The guard at the top proves there is at least one '?', so parts always
+	// has two or more elements here.
+	parts := strings.Split(url, "?")
 	sb.WriteString(parts[0])
 	entropyThreshold := st.config.EntropyThreshold
 
