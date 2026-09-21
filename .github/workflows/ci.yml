@@ -33,18 +33,18 @@ jobs:
       uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
 
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
+      uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
       with:
         platforms: amd64,arm64
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
 
     - name: Verify Dependencies
       run: go mod verify
 
     - name: Run actionlint
-      uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae
+      uses: reviewdog/action-actionlint@320fcdd9c860767cf17fab3b20e22e739d5d02b8
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
