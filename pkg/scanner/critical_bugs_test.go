@@ -530,3 +530,68 @@ func TestCustomRegexShortToken(t *testing.T) {
 		t.Errorf("unexpected redaction on unmatched short tokens: %q", out)
 	}
 }
+
+// TestQuotedRequestLineKeepsProtocol covers B17: inside a quoted request line
+// the last query parameter's value used to run on to the closing quote, so
+// ` HTTP/1.1"` was swallowed into the hash. That is over-redaction (it fires
+// on `_=12345`, which is no secret) and it changes the quote count, which is
+// the B3 family invariant. Measured exposure before the fix: 55 624 of 56 274
+// request lines with a query string on 300k real access-log lines.
+func TestQuotedRequestLineKeepsProtocol(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	// Nothing in these lines is a secret, so each must come back byte-identical.
+	unchanged := []string{
+		`"GET /a?_=12345 HTTP/1.1" 200 5`,
+		`"GET /a?_=12345&b=1 HTTP/1.1" 200 5`,
+		`"GET /a?_=abc HTTP/1.1" 200 5`,
+		`GET /a?_=12345 HTTP/1.1 200 5`,
+		`"GET /a?x=1"`,
+		`"POST /p?a=1&b=2 HTTP/1.1" 404 0`,
+	}
+	for _, in := range unchanged {
+		out := ScanAndRedact(in)
+		if out != in {
+			t.Errorf("benign request line changed:\n in=%q\nout=%q", in, out)
+		}
+	}
+
+	// A real secret in the query still redacts, and the protocol and the
+	// closing quote survive alongside it.
+	in := `"GET /cb?token=AbC123XyZ987qwerty HTTP/1.1" 200 5`
+	out := ScanAndRedact(in)
+	if strings.Contains(out, "AbC123XyZ987qwerty") {
+		t.Errorf("secret leaked: %q", out)
+	}
+	if !strings.Contains(out, "token=[HIDDEN") {
+		t.Errorf("secret not redacted in place: %q", out)
+	}
+	if !strings.Contains(out, ` HTTP/1.1"`) {
+		t.Errorf("protocol or closing quote lost: %q", out)
+	}
+	if strings.Count(out, `"`) != strings.Count(in, `"`) {
+		t.Errorf("quote count changed: in=%q out=%q", in, out)
+	}
+
+	// Pre-existing false positive, deliberately pinned rather than fixed here:
+	// `HTTP/1.0` scores above the threshold as a standalone token (6 distinct
+	// characters in 8) while `HTTP/1.1` (5 distinct) does not. That is true on
+	// main for an UNQUOTED request line too, with the identical hash, so it is
+	// threshold behaviour and belongs to F6, not to B17. What B17 owes is that
+	// the quoted line now behaves exactly like the unquoted one: the protocol
+	// token is judged on its own, `b=2` keeps its value, and the quote count
+	// holds.
+	in10 := `"POST /p?a=1&b=2 HTTP/1.0" 404 0`
+	out10 := ScanAndRedact(in10)
+	if !strings.Contains(out10, "b=2") {
+		t.Errorf("query parameter swallowed: %q", out10)
+	}
+	if strings.Count(out10, `"`) != strings.Count(in10, `"`) {
+		t.Errorf("quote count changed: in=%q out=%q", in10, out10)
+	}
+	if got, want := ScanAndRedact(`GET /p?a=1&b=2 HTTP/1.0 404 0`), `GET /p?a=1&b=2 `; !strings.HasPrefix(got, want) {
+		t.Errorf("unquoted control changed shape: %q", got)
+	}
+}
