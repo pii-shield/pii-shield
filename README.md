@@ -170,7 +170,7 @@ The Operator will automatically inject the `pii-shield-agent` using the Native S
 This project is verified with a growing testing suite intended to raise confidence before production hardening:
 1. **Unit Tests**: Cover edge cases, multilingual support, and JSON integrity with >85% coverage.
 2. **Fuzzing**: Native Go fuzzing ensures crash safety against invalid and random binary inputs.
-3. **Smoke Testing**: `./scripts/test-smoke.sh` runs a frozen 1000-line mixed-workload corpus end to end through the container and reports detection accuracy. A secret counts as caught only when its value is absent from the output, and the run fails on any false positive or false negative. Keyless secrets in prose are tracked separately as known gaps against a budget, because detecting them rests on entropy alone.
+3. **Smoke Testing**: `./scripts/test-smoke.sh` runs a frozen 1000-line mixed-workload corpus end to end through the container and reports detection accuracy. A secret counts as caught only when its value is absent from the output and a redaction marker took its place; a safe line must come back unchanged. The run fails on any false positive or false negative, and also when the container exits non-zero or returns a different number of lines than it was given. Keyless secrets in prose are tracked separately as known gaps, because detecting them rests on entropy alone: the frozen corpus allows none, a fresh random corpus (`--fuzz`) allows two.
 4. **End-to-End (E2E) Testing**: The `operator/tests/run_e2e.sh` suite performs full-stack validation using Minikube and Helm. It builds local images, provisions the Operator without cert-manager, deploys target Jobs, and verifies actual log redaction by intercepting sidecar outputs.
 
 ### Performance Benchmarks
