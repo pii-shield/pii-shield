@@ -1194,8 +1194,11 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
-	// Not a key. Process as value.
-	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, true, sb)
+	// Not a key. Process as value. A hidden bare number or literal is quoted
+	// only in value position, where it keeps a JSON value valid ({"pin":
+	// 123456} -> {"pin": "[HIDDEN:x]"}); in prose ("password 123456") the
+	// quotes would be text that was never there.
+	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, isValuePos, sb)
 	return false
 }
 
@@ -2481,6 +2484,63 @@ type segmentState struct {
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
+
+	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
+
+	// True after "<sensitive word> is": the next token is forced only if it
+	// has the shape of a secret (see processAndAppend).
+	pendingAfterCopula bool
+}
+
+// looksLikeSecretWord reports whether a word carries a digit, or a symbol
+// other than the hyphen and dot that ordinary words contain.
+func looksLikeSecretWord(s string) bool {
+	for _, r := range s {
+		if unicode.IsDigit(r) || (!unicode.IsLetter(r) && r != '-' && r != '.' && r != '\'') {
+			return true
+		}
+	}
+	return false
+}
+
+// copulaWords link a sensitive word to its value in prose: "password is x".
+var copulaWords = map[string]bool{"is": true, "was": true, "are": true, "were": true}
+
+// isHashKeyName reports whether a key names a commit or content hash: sha,
+// git_sha, commit, commit_id, hash, rev, revision.
+func isHashKeyName(k string) bool {
+	lk := strings.ToLower(trimQuotes(k))
+	if strings.Contains(lk, "commit") {
+		return true
+	}
+	if i := strings.LastIndexAny(lk, "_-."); i != -1 {
+		lk = lk[i+1:]
+	}
+	switch lk {
+	case "sha", "sha1", "hash", "rev", "revision":
+		return true
+	}
+	return false
+}
+
+func isShortHex(s string) bool {
+	return len(s) >= 7 && len(s) <= 40 && isHexStr(s)
+}
+
+// isShortHashUnderHashKey reports whether tok is an abbreviated hash in a
+// commit/sha context: the value token right after such a key, or a one-token
+// pair (git_sha=a1b2c3d, "commit":"a1b2c3d"). A sensitive key never counts,
+// so password_hash=… is still hidden.
+func (st *configState) isShortHashUnderHashKey(tok string, afterHashKey bool) bool {
+	if afterHashKey {
+		return isShortHex(trimQuotes(strings.TrimSuffix(tok, ",")))
+	}
+	k, v, ok := splitCompactPair(tok)
+	if !ok {
+		k, v, ok = strings.Cut(tok, "=")
+		k, v = trimQuotes(k), trimQuotes(v)
+	}
+	return ok && isShortHex(v) && isHashKeyName(k) && !st.isSensitiveKey(k)
 }
 
 // genericValueKeys are the keys that carry the value of a generic pair such as
@@ -2556,6 +2616,19 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
 		forced = true
 	}
+	// "my password is 123456": the sensitive word's forced slot goes to "is",
+	// which the rule above frees as a short word, and the value after it
+	// passed. Carry the force one token further, but only onto something
+	// shaped like a secret — long enough, with a digit or a symbol other than
+	// a hyphen or a dot — so "the pass is valid.", "password is incorrect"
+	// and "token is auto-generated" keep their words.
+	if state.pendingAfterCopula {
+		core := strings.TrimRight(cleanToken, `.,;:!?)"'`)
+		if len(core) >= st.config.MinSecretLength && looksLikeSecretWord(core) {
+			forced = true
+		}
+	}
+	afterCopula := state.pendingKeySensitive && (copulaWords[lowerClean] || trimmed == "=")
 	// {"name": "password", "value": …} makes the value sensitive, but only the
 	// pair that carries it: a "value" or "data" key, which spends the flag.
 	// Other keys pass untouched and leave it armed, so
@@ -2569,7 +2642,17 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.nextValueIsSensitive = false
 		}
 	}
-	isKey := st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, override, sb, depth)
+	// An abbreviated commit hash under a commit/sha key (git_sha=a1b2c3d4e5f6,
+	// "commit": "a1b2c3d4e5f6") is a public identifier. isGitHash only knows
+	// the full 40 characters, and a 12-character hash scores above the
+	// entropy threshold on its own, so without the key it stays hidden: bare
+	// hex of that length can just as well be a secret.
+	var isKey bool
+	if st.isShortHashUnderHashKey(trimmed, state.pendingHashKey) {
+		sb.WriteString(token)
+	} else {
+		isKey = st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, override, sb, depth)
+	}
 	// sb is updated inside processTokenLogic
 
 	// 2. Update Context State
@@ -2631,6 +2714,13 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	// Remember the auth scheme for exactly one token (see the forcing above).
 	state.pendingBearer = lowerClean == "bearer"
+	state.pendingAfterCopula = afterCopula
+
+	if k, isPair := pairKey(trimmed); isPair && (strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")) {
+		state.pendingHashKey = isHashKeyName(k) && !st.isSensitiveKey(k)
+	} else {
+		state.pendingHashKey = false
+	}
 
 	// Check if this token is a Context Keyword (e.g. "Error", "Failed")
 	if ContextKeywords[lowerClean] {
