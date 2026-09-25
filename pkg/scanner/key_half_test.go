@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -36,21 +37,31 @@ func TestQuotedSensitiveValueWithEquals(t *testing.T) {
 	}
 
 	// A sensitive key means the whole value is secret, including any part that
-	// would score as safe on its own.
-	if out := ScanAndRedact(`{"secret": "user=admin pass=hunter2"}`); strings.Contains(out, "admin") {
-		t.Errorf("part of a forced value survived: %q", out)
+	// would score as safe on its own: one marker, no user= or pass= left.
+	if out := ScanAndRedact(`{"secret": "user=admin pass=hunter2"}`); !regexp.MustCompile(`^\{"secret": "\[HIDDEN:[0-9a-f]{6}\]"\}$`).MatchString(out) {
+		t.Errorf("forced value not hidden as one blob: %q", out)
 	}
 
-	// The same defect through the other sensitivity flag: a {"key": "password",
-	// "value": …} pair marks the value sensitive via overrideSensitivity, and
-	// the quoted branch used to ignore that flag too, so a value containing
-	// '=' was re-parsed and its tail scored on its own.
-	out4 := ScanAndRedact(`{"key": "password", "value": "x=hunter2"}`)
-	if strings.Contains(out4, "hunter2") {
-		t.Errorf("value under a password-typed pair leaked: %q", out4)
-	}
-	if !json.Valid([]byte(out4)) {
-		t.Errorf("output is no longer valid JSON: %q", out4)
+	// A {"key": "password", "value": …} pair marks the value sensitive. Spaced,
+	// "value": is its own token, so the value arrives forced and is hidden as
+	// one blob. Compact, "value":"x=hunter2" is one token that reaches the
+	// quoted key=value branch with overrideSensitivity set, and that branch
+	// used to ignore the flag, so the tail was scored on its own.
+	for _, in := range []string{
+		`{"key": "password", "value": "x=hunter2"}`,
+		`{"key":"password","value":"x=hunter2"}`,
+		`{"key":"password","value":"hunter2"}`,
+	} {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, "hunter2") {
+			t.Errorf("value under a password-typed pair leaked: in=%q out=%q", in, out)
+		}
+		if !json.Valid([]byte(out)) {
+			t.Errorf("output is no longer valid JSON: in=%q out=%q", in, out)
+		}
+		if !strings.Contains(out, `"value":`) {
+			t.Errorf("the value's own key was hidden: in=%q out=%q", in, out)
+		}
 	}
 
 	// Regression (B3): an inner key under a NON-sensitive outer key stays
@@ -70,13 +81,14 @@ func TestQuotedBase64BlobNotReparsed(t *testing.T) {
 	defer UpdateConfig(oldCfg)
 	UpdateConfig(campaignConfig())
 
+	// The blob must come back as one marker. Checking only that the blob is
+	// gone is not enough: its body has digits in it, so B19 hides it as a key
+	// half even when the guard is removed, and the output then keeps a stray
+	// "==" after the marker.
 	in := `{"payload": "` + b7Blob + `"}`
 	out := ScanAndRedact(in)
-	if strings.Contains(out, b7Blob) {
-		t.Errorf("payload leaked under a non-sensitive key: %q", out)
-	}
-	if !json.Valid([]byte(out)) {
-		t.Errorf("output is no longer valid JSON: %q", out)
+	if !regexp.MustCompile(`^\{"payload": "\[HIDDEN:[0-9a-f]{6}\]"\}$`).MatchString(out) {
+		t.Errorf("payload not hidden as one blob: %q", out)
 	}
 }
 
@@ -136,9 +148,38 @@ func TestSecretAsKeyIsScored(t *testing.T) {
 		}
 	}
 
-	// The signature detector keeps its label on a key half too.
+	// The signature detector keeps its label on a key half too. The prefixed
+	// tokens with '_' or '-' look like field names, so only the signature check
+	// in writeKeyHalf stops them from being written out as is.
 	applyCfg(func(c *Config) { c.EntityTypeLabels = true })
-	if out := ScanAndRedact("AKIAIOSFODNN7EXAMPLE=x"); !strings.HasPrefix(out, "[HIDDEN:aws-key:") || !strings.HasSuffix(out, "=x") {
-		t.Errorf("signature label lost on a key half: %q", out)
+	for _, tc := range []struct{ secret, label string }{
+		{"AKIAIOSFODNN7EXAMPLE", "aws-key"},
+		{stripeLowEntropy, "stripe-key"},
+		{githubLowEntropy, "github-token"},
+		{slackLowEntropy, "slack-token"},
+	} {
+		out := ScanAndRedact(tc.secret + "=x")
+		if !strings.HasPrefix(out, "[HIDDEN:"+tc.label+":") || !strings.HasSuffix(out, "=x") {
+			t.Errorf("signature label lost on a key half: in=%q out=%q", tc.secret+"=x", out)
+		}
+	}
+}
+
+// TestSeparatedSecretAsKeyKnownLimit pins a documented gap (KNOWN_LIMITATIONS):
+// a random secret with '-' or '_' in it has a field-name shape, so as the key
+// half of key=value it is written out unscored. A fix has to change this test
+// on purpose.
+func TestSeparatedSecretAsKeyKnownLimit(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, in := range []string{
+		"Zq8vN3pL-7xR2wT9yB4mK6=x",
+		"hqw55CTBeUqNyfgG89hH_mA=1",
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("known limit changed, update KNOWN_LIMITATIONS.md and this test: in=%q out=%q", in, out)
+		}
 	}
 }

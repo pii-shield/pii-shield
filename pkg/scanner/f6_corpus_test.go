@@ -75,8 +75,8 @@ func f6Bucket(tok string) string {
 }
 
 // f6Outcome reports whether the token is hidden in the two places F6 cares
-// about: alone in keyless prose, and as the key half of key=value (B7's hole,
-// where the key side is written out unscored today).
+// about: alone in keyless prose, and as the key half of key=value (scored since
+// B19 unless the token looks like a field name).
 func f6Outcome(s *Scanner, tok string) (keyless, asKey bool) {
 	out := s.ScanAndRedact("event " + tok + " done")
 	fields := strings.Fields(out)
