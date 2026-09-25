@@ -44,8 +44,9 @@ func TestShortHashUnderHashKey(t *testing.T) {
 // TestSensitiveWordThenCopula covers the golden-file prompt "my pass is
 // 123456", which passed in the clear: the sensitive word forces only its next
 // token, "is", which is freed as a short word (B12). The force now carries
-// past is/was/are/were onto a word shaped like a secret, and never onto an
-// ordinary word.
+// past is/was/are/were or "=" onto a word shaped like a secret, after a strong
+// secret word only. The mirror cases include the false positives a wider rule
+// produced on the prose of the Go and Python source trees.
 func TestSensitiveWordThenCopula(t *testing.T) {
 	oldCfg := activeCfg()
 	defer UpdateConfig(oldCfg)
@@ -56,6 +57,7 @@ func TestSensitiveWordThenCopula(t *testing.T) {
 		{"password is hunter2", "hunter2"},
 		{"the token was abc123def456, then", "abc123def456"},
 		{"password is p@ss!word", "p@ss!word"},
+		{"password = hunter2x", "hunter2x"},
 		{`{"prompt": "User said \"my pass is 123456\""}`, "123456"},
 	} {
 		out := ScanAndRedact(tc.in)
@@ -72,6 +74,11 @@ func TestSensitiveWordThenCopula(t *testing.T) {
 		"the password is 12345",
 		"password was changed on 2026-09-25",
 		"key is 2048 bits",
+		"The key is base32 and safe to display",
+		"a default token is encountered.”",
+		"api_key = api_key if api_key is not None",
+		"password = password",
+		"the password is stored_in_vault now",
 	} {
 		if out := ScanAndRedact(in); out != in {
 			t.Errorf("ordinary word after a copula redacted: in=%q out=%q", in, out)

@@ -2490,18 +2490,24 @@ type segmentState struct {
 	// True after "<sensitive word> is": the next token is forced only if it
 	// has the shape of a secret (see processAndAppend).
 	pendingAfterCopula bool
+	// True if the previous token was a strong secret word (password, token).
+	prevStrongSecretWord bool
 }
 
 // looksLikeSecretWord reports whether a word carries a digit, or a symbol
 // other than the hyphen and dot that ordinary words contain.
 func looksLikeSecretWord(s string) bool {
 	for _, r := range s {
-		if unicode.IsDigit(r) || (!unicode.IsLetter(r) && r != '-' && r != '.' && r != '\'') {
+		if unicode.IsDigit(r) || (!unicode.IsLetter(r) && r != '-' && r != '.' && r != '_' && r != '\'') {
 			return true
 		}
 	}
 	return false
 }
+
+// strongSecretWords are the sensitive words that, in prose, name a secret
+// rather than something ordinary ("the key is base32").
+var strongSecretWords = map[string]bool{"pass": true, "password": true, "passwd": true, "passphrase": true, "secret": true, "token": true}
 
 // copulaWords link a sensitive word to its value in prose: "password is x".
 var copulaWords = map[string]bool{"is": true, "was": true, "are": true, "were": true}
@@ -2618,17 +2624,20 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
 	// which the rule above frees as a short word, and the value after it
-	// passed. Carry the force one token further, but only onto something
-	// shaped like a secret — long enough, with a digit or a symbol other than
-	// a hyphen or a dot — so "the pass is valid.", "password is incorrect"
-	// and "token is auto-generated" keep their words.
+	// passed. Carry the force one token further, but only after a strong
+	// secret word (password, token — not "key", which prose uses for anything)
+	// and only onto something shaped like a secret: long enough, with a digit
+	// or a symbol other than - . _ ' — so "the pass is valid.", "password is
+	// incorrect" and "token is auto-generated" keep their words. Measured on
+	// the prose in the Go and Python source trees, where "the key is base32"
+	// and "api_key = api_key" were the false positives of a wider rule.
 	if state.pendingAfterCopula {
-		core := strings.TrimRight(cleanToken, `.,;:!?)"'`)
+		core := strings.TrimRightFunc(cleanToken, func(r rune) bool { return unicode.IsPunct(r) && r != '_' })
 		if len(core) >= st.config.MinSecretLength && looksLikeSecretWord(core) {
 			forced = true
 		}
 	}
-	afterCopula := state.pendingKeySensitive && (copulaWords[lowerClean] || trimmed == "=")
+	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=")
 	// {"name": "password", "value": …} makes the value sensitive, but only the
 	// pair that carries it: a "value" or "data" key, which spends the flag.
 	// Other keys pass untouched and leave it armed, so
@@ -2715,6 +2724,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// Remember the auth scheme for exactly one token (see the forcing above).
 	state.pendingBearer = lowerClean == "bearer"
 	state.pendingAfterCopula = afterCopula
+	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
 	if k, isPair := pairKey(trimmed); isPair && (strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")) {
 		state.pendingHashKey = isHashKeyName(k) && !st.isSensitiveKey(k)
