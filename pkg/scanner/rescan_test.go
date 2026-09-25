@@ -23,6 +23,8 @@ var rescanLines = []string{
 	"Error 00A0a1 00112A",
 	"Authorization: Bearer abcdefghijklmnop1234",
 	"card 4539148803436467 end",
+	`{"data": "{\"password\": \"hunter2xyz\", \"user\": \"bob\"}"}`,
+	`{"msg": "login failed for \"bob\" token=abc123def456"}`,
 }
 
 // TestRescanIsStable pins invariant I3: scanning already-redacted output

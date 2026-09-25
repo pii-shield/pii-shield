@@ -1115,6 +1115,31 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
+	// A JSON string that carries escaped JSON or quoted text inside it
+	// ("{\"password\": \"x\"}"). The pair splitters below look for the
+	// closing quote without honouring backslash escapes, so they cut such a
+	// token at the first \" and hid its tail together with the closing quote
+	// and brace, which broke the line's JSON; with several inner fields the
+	// secret leaked instead. Decode it, scan the text a reader would see, and
+	// encode the result back. When nothing was hidden the token is written
+	// byte for byte, so escapes are only normalised on lines that changed.
+	if inner, ok := escapedJSONString(rawToken); ok {
+		if forcedSensitive {
+			sb.WriteByte('"')
+			st.processSingleToken(inner, inner, true, contextSensitive, false, sb)
+			sb.WriteByte('"')
+			return false
+		}
+		var scanned strings.Builder
+		st.scanLine(inner, &scanned, depth+1)
+		if scanned.String() == inner {
+			sb.WriteString(rawToken)
+		} else {
+			sb.WriteString(jsonQuote(scanned.String()))
+		}
+		return false
+	}
+
 	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
 		st.maskURLParameters(rawToken, sb, depth)
 		return false
@@ -1172,6 +1197,29 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	// Not a key. Process as value.
 	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, true, sb)
 	return false
+}
+
+// escapedJSONString reports whether tok is a double-quoted JSON string with an
+// escaped quote inside, and returns its decoded content.
+func escapedJSONString(tok string) (string, bool) {
+	if len(tok) < 4 || tok[0] != '"' || tok[len(tok)-1] != '"' || !strings.Contains(tok, `\"`) {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal([]byte(tok), &s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// jsonQuote encodes s as a JSON string literal without HTML escaping, so a
+// marker's brackets and a URL's & stay as they are.
+func jsonQuote(s string) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s) // encoding a string cannot fail
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func trimQuotes(s string) string {

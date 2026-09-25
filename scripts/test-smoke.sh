@@ -220,18 +220,10 @@ pass_or_fail "Case 1: value of a password-typed key/value pair redacted, JSON va
 [[ "$LINE2" == "$(sed -n 2p "$INPUT_FILE")" ]]
 pass_or_fail "Case 2: escaped quotes preserved, line unchanged" $?
 
-[[ "$LINE3" != *nested_secret* && "$LINE3" == '{"data": "{\"nested_key\":'*'[HIDDEN:'* ]]
-pass_or_fail "Case 3: secret inside nested JSON redacted" $?
-
-# Known bug: the nested JSON string loses its closing quote and brace, e.g.
-# {"data": "{\"nested_key\":[HIDDEN:…]}. Expected to fail until fixed; when it
-# starts passing, this check fails so the fix drops the exception on purpose.
-if [[ -n "$LINE3" ]] && echo "$LINE3" | jq . > /dev/null 2>&1; then
-    echo -e "${RED}[FAIL] Case 3: nested JSON is valid now: known bug fixed, turn this into a normal check${NC}"
-    FAILURES=$((FAILURES + 1))
-else
-    echo -e "${YELLOW}[KNOWN BUG] Case 3: nested JSON output is not valid JSON${NC}"
-fi
+# Nested JSON inside a JSON string: the secret is hidden and the line stays
+# valid JSON, closing quote and brace included.
+[[ "$LINE3" != *nested_secret* && "$LINE3" == '{"data": "{\"nested_key\": \"[HIDDEN:'* ]] && echo "$LINE3" | jq . > /dev/null 2>&1
+pass_or_fail "Case 3: secret inside nested JSON redacted, JSON valid" $?
 
 [[ "$LINE4" != *SecretDBPass* && "$LINE4" == 'jdbc:mysql://db:3306?pass=[HIDDEN:'* ]]
 pass_or_fail "Case 4: JDBC URL password redacted, rest of the URL kept" $?
