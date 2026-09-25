@@ -517,42 +517,8 @@ func TestMainMetricsSigterm(t *testing.T) {
 		os.Exit(0)
 	}
 
-	port := freePort(t)
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainMetricsSigterm")
-	cmd.Env = append(os.Environ(), "TEST_MAIN_METRICS_SIGTERM=1", "PII_METRICS_ENABLED=true", "PII_METRICS_PORT="+port)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	// Keep stdin open so main stays blocked on the scanner until the signal.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatalf("failed to get stdin pipe: %v", err)
-	}
+	cmd, stdin, stderr := startMetricsSidecar(t, "TestMainMetricsSigterm", "TEST_MAIN_METRICS_SIGTERM=1")
 	defer stdin.Close()
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start subprocess: %v", err)
-	}
-
-	up := false
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get("http://127.0.0.1:" + port + "/healthz")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				up = true
-				break
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !up {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		t.Fatalf("metrics server never became ready; stderr: %s", stderr.String())
-	}
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("failed to send SIGTERM: %v", err)
@@ -810,6 +776,65 @@ func TestMainWatchFileSigterm(t *testing.T) {
 			}
 		})
 	}
+}
+
+// startMetricsSidecar starts the test binary as a sidecar with the metrics
+// server on a free port and waits until that server answers. The port is
+// picked by opening and closing a listener, so another process can take it
+// before the child binds (seen under go test ./..., where other packages'
+// test binaries open wildcard listeners at the same time): the child then logs
+// "Metrics server failed" and keeps running without metrics. Instead of
+// waiting out the deadline on a server that will never come up, retry with a
+// fresh port. Readiness is proven by our own piishield_ series on /metrics,
+// not just a 200, so a foreign server on the same port cannot pass for ours.
+func startMetricsSidecar(t *testing.T, testName, envFlag string) (*exec.Cmd, io.WriteCloser, *lockedBuffer) {
+	t.Helper()
+	const attempts = 3
+	var lastErr string
+	for attempt := 1; attempt <= attempts; attempt++ {
+		port := freePort(t)
+		cmd := exec.Command(os.Args[0], "-test.run="+testName)
+		cmd.Env = append(os.Environ(), envFlag, "PII_METRICS_ENABLED=true", "PII_METRICS_PORT="+port)
+		stderr := &lockedBuffer{}
+		cmd.Stderr = stderr
+		// Keep stdin open so main stays blocked on the scanner until the signal.
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatalf("failed to get stdin pipe: %v", err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("failed to start subprocess: %v", err)
+		}
+
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if strings.Contains(stderr.String(), "Metrics server failed") {
+				break
+			}
+			if metricsServerIsOurs(port) {
+				return cmd, stdin, stderr
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		lastErr = stderr.String()
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Logf("attempt %d: metrics server on port %s not ready; stderr: %s", attempt, port, lastErr)
+	}
+	t.Fatalf("metrics server never became ready after %d attempts; last stderr: %s", attempts, lastErr)
+	return nil, nil, nil
+}
+
+func metricsServerIsOurs(port string) bool {
+	client := http.Client{Timeout: time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/metrics")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	return err == nil && resp.StatusCode == http.StatusOK && bytes.Contains(body, []byte("piishield_"))
 }
 
 func freePort(t *testing.T) string {
