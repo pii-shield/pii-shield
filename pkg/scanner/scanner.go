@@ -1409,16 +1409,36 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		quote := string(rawToken[0])
 		trimmed := trimQuotes(rawToken)
 
+		// Same guard as the one on the raw token, applied to the quoted content:
+		// base64 padding is not a separator, and re-parsing on it hands the
+		// body back as an unscored "key".
+		if isPaddedBase64Blob(trimmed) {
+			sb.WriteString(quote)
+			st.processSingleToken(trimmed, trimmed, forcedSensitive, false, false, sb)
+			sb.WriteString(quote)
+			return false, true
+		}
+
 		tIdx := strings.IndexByte(trimmed, '=')
 		if tIdx != -1 {
+			// The caller already knows this whole value is secret (it sat under
+			// a sensitive key). Re-parsing it into key=value here would hand
+			// half of it back unredacted, so hide it as one blob instead (B7).
+			if forcedSensitive {
+				sb.WriteString(quote)
+				st.processSingleToken(trimmed, trimmed, true, false, false, sb)
+				sb.WriteString(quote)
+				return false, true
+			}
+
 			// Logic: key is trimmed[:tIdx], val is trimmed[tIdx+1:]
 			key := trimmed[:tIdx]
 			val := trimmed[tIdx+1:]
 
-			keySensitive := st.isSensitiveKey(key)
+			keySensitive := st.isSensitiveKey(key) || overrideSensitivity
 
 			sb.WriteString(quote)
-			sb.WriteString(key)
+			st.writeKeyHalf(key, sb)
 			sb.WriteRune('=')
 			if keySensitive {
 				st.processSingleToken(val, val, true, false, false, sb)
@@ -1450,7 +1470,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 
 		keySensitive := st.isSensitiveKey(key) || overrideSensitivity
 
-		sb.WriteString(key)
+		st.writeKeyHalf(key, sb)
 		sb.WriteRune('=')
 
 		if containsSep := strings.Contains(val, "=") || strings.Contains(val, ":"); containsSep && !keySensitive {
@@ -1471,6 +1491,54 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		return keySensitive && val == "", true
 	}
 	return false, false
+}
+
+// writeKeyHalf writes the key side of a key=value pair. A key that looks like a
+// field name (request_id, userAgent, payment.authorised, HTTP) is written as
+// is, unless it matches a secret signature; anything else goes through the
+// same single-token path as a value, so `<secret>=x` is no longer a way past
+// the scanner (B19). Scoring every key is not an option: snake_case field
+// names sit right on the entropy threshold (context_id scores 3.622 against
+// 3.600) and would be hidden by the hundred.
+func (st *configState) writeKeyHalf(key string, sb *strings.Builder) {
+	if key == "" || (looksLikeFieldName(key) && matchSignature(key) == "") {
+		sb.WriteString(key)
+		return
+	}
+	st.processSingleToken(key, key, false, false, false, sb)
+}
+
+// looksLikeFieldName reports whether a key has the shape of a field name
+// rather than of a random token: it contains a '_', '-', '.' or ':'
+// separator, or a '&', ';' or '%' (the tail of a query chain such as
+// rows=10&page=1, or a URL-encoded one such as height=30%20src=, where the
+// "key" is "10&page" or "30%20src" and was always written out as is), or
+// it is a run of words - lower, UPPER, camelCase or PascalCase - with at most
+// a trailing run of digits (http2, sha256). Letters are judged by Unicode
+// class, so a Cyrillic word counts as a word too.
+func looksLikeFieldName(key string) bool {
+	if strings.ContainsAny(key, "_-.:&;%") {
+		return true
+	}
+	first := true
+	digits := false
+	for _, r := range key {
+		switch {
+		case unicode.IsDigit(r):
+			if first {
+				return false
+			}
+			digits = true
+		case unicode.IsLetter(r):
+			if digits {
+				return false
+			}
+		default:
+			return false
+		}
+		first = false
+	}
+	return true
 }
 
 func (st *configState) processColonPair(rawToken string, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool, handled bool) {
