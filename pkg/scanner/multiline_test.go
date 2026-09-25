@@ -56,8 +56,10 @@ func TestScanAndRedactText_EachLineIsScanned(t *testing.T) {
 	if got != want {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
-	if !strings.Contains(got, "[HIDDEN:") {
-		t.Fatalf("expected secrets on inner lines to be redacted, got %q", got)
+	for _, secret := range []string{"SuperSecretValue123", "Zq8vN3pL7xR2wT9yB4mK6"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("secret %q on an inner line survived: %q", secret, got)
+		}
 	}
 }
 
@@ -90,7 +92,7 @@ func TestScanAndRedactText_PackageLevelUsesGlobalConfig(t *testing.T) {
 	if got := ScanAndRedactText(in); got != in {
 		t.Fatalf("ScanAndRedactText(%q) = %q, want unchanged", in, got)
 	}
-	if got := ScanAndRedactText("password=SuperSecretValue123\n"); got == "password=SuperSecretValue123\n" || !strings.HasSuffix(got, "\n") {
+	if got := ScanAndRedactText("password=SuperSecretValue123\n"); strings.Contains(got, "SuperSecretValue123") || !strings.HasPrefix(got, "password=[HIDDEN:") || !strings.HasSuffix(got, "\n") {
 		t.Fatalf("expected redaction with trailing newline kept, got %q", got)
 	}
 }

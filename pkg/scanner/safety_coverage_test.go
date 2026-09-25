@@ -58,7 +58,7 @@ func TestProcessEqualPairEdgeCases(t *testing.T) {
 	// Test quoted assignment
 	sb.Reset()
 	_, _ = cfgState().processEqualPair(`"password=mysecret"`, false, false, &sb, 0)
-	if !strings.Contains(sb.String(), "[HIDDEN") {
+	if !strings.HasPrefix(sb.String(), `"password=[HIDDEN`) || strings.Contains(sb.String(), "mysecret") {
 		t.Errorf("Expected quoted password assignment to be identified as sensitive and redacted, got: %s", sb.String())
 	}
 
@@ -66,8 +66,8 @@ func TestProcessEqualPairEdgeCases(t *testing.T) {
 
 	// Test nested assignment (data=key=val)
 	_, handled := cfgState().processEqualPair("data=config=safevalue", false, false, &sb, 0)
-	if !handled {
-		t.Errorf("Expected nested assignment to be handled")
+	if !handled || sb.String() != "data=config=safevalue" {
+		t.Errorf("Expected nested safe assignment to be handled and kept, got handled=%v out=%q", handled, sb.String())
 	}
 
 	sb.Reset()

@@ -15,6 +15,7 @@ func TestCompactJSONSafeValues(t *testing.T) {
 		input      string
 		mustKeep   []string // substrings that must survive untouched
 		mustRedact []string // keys whose value must become [HIDDEN:...]
+		mustBeGone []string // values that must not survive anywhere
 	}{
 		{
 			name:     "compact ISO timestamp is preserved",
@@ -36,6 +37,7 @@ func TestCompactJSONSafeValues(t *testing.T) {
 			input:      `{"action":"retrieve_customer","customer_email":"alice@company.com","timestamp":"2026-06-19T10:30:00Z"}`,
 			mustKeep:   []string{"retrieve_customer", "2026-06-19T10:30:00Z"},
 			mustRedact: []string{"customer_email"},
+			mustBeGone: []string{"alice@company.com", "alice"},
 		},
 	}
 
@@ -51,6 +53,11 @@ func TestCompactJSONSafeValues(t *testing.T) {
 				marker := `"` + key + `":"[HIDDEN`
 				if !strings.Contains(out, marker) {
 					t.Errorf("expected %q value to be redacted, got: %s", key, out)
+				}
+			}
+			for _, secret := range tt.mustBeGone {
+				if strings.Contains(out, secret) {
+					t.Errorf("expected %q to be gone, got: %s", secret, out)
 				}
 			}
 		})

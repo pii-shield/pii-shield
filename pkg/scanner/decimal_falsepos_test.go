@@ -77,14 +77,26 @@ func TestPlainDecimalRegressions(t *testing.T) {
 
 	// Luhn carve-out runs before tokenization and must be unaffected for
 	// bare, dashed, and trailing-dot card forms.
-	for _, in := range []string{
-		"card 4539148803436467 end",
-		"card 4556-7375-8689-9855 end",
-		"card 4539148803436467. next",
+	// Every digit group of the card must be gone: the old check looked for
+	// "4539", which the dashed card does not contain, so a partial leak such
+	// as 4556-7375-[HIDDEN] would have passed.
+	for _, tc := range []struct {
+		in     string
+		groups []string
+	}{
+		{"card 4539148803436467 end", []string{"4539148803436467"}},
+		{"card 4556-7375-8689-9855 end", []string{"4556", "7375", "8689", "9855"}},
+		{"card 4539148803436467. next", []string{"4539148803436467"}},
 	} {
-		out = ScanAndRedact(in)
-		if !strings.Contains(out, "[HIDDEN") || strings.Contains(out, "4539") {
-			t.Errorf("card number leaked: %q -> %q", in, out)
+		out = ScanAndRedact(tc.in)
+		rest := withoutMarkers(out)
+		for _, g := range tc.groups {
+			if strings.Contains(rest, g) {
+				t.Errorf("card digits %q leaked: %q -> %q", g, tc.in, out)
+			}
+		}
+		if !strings.Contains(out, "[HIDDEN") {
+			t.Errorf("no marker: %q -> %q", tc.in, out)
 		}
 	}
 
