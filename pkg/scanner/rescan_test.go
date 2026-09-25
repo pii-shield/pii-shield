@@ -76,3 +76,24 @@ func TestEmptyValueKeptAsIs(t *testing.T) {
 		}
 	}
 }
+
+// TestMarkerEdgeShapes covers the less common ways a marker reaches the
+// scanner: glued to more text inside a quoted pair (sent back through the
+// tokenizer), after a token with an invalid UTF-8 byte, unterminated, and
+// inside a quoted phrase. Each must come back unchanged, and valid UTF-8.
+func TestMarkerEdgeShapes(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, tc := range []struct{ in, want string }{
+		{`data="k=[HIDDEN:abc123](note)"`, `data="k=[HIDDEN:abc123](note)"`},
+		{"x [HIDDEN:abc unterminated", "x [HIDDEN:abc unterminated"},
+		{`{"msg": "[HIDDEN:abc123] tail"}`, `{"msg": "[HIDDEN:abc123] tail"}`},
+		{"k\xff=[HIDDEN:abc123] x", "k�=[HIDDEN:abc123] x"},
+	} {
+		if out := ScanAndRedact(tc.in); out != tc.want {
+			t.Errorf("in=%q\n got  %q\n want %q", tc.in, out, tc.want)
+		}
+	}
+}
