@@ -2483,6 +2483,26 @@ type segmentState struct {
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 }
 
+// genericValueKeys are the keys that carry the value of a generic pair such as
+// {"name": "DB_PASSWORD", "value": "…"} (Kubernetes env) or
+// {"setting": "token", "data": "…"}.
+var genericValueKeys = map[string]bool{"value": true, "val": true, "values": true, "data": true}
+
+// pairKey returns the key of a token that opens or holds a key/value pair:
+// "k": or k= (value in the next token), "k":"v" or k=v (both in this one).
+func pairKey(tok string) (string, bool) {
+	if k, _, ok := splitCompactPair(tok); ok {
+		return k, true
+	}
+	if i := strings.IndexAny(tok, ":="); i > 0 {
+		k := trimQuotes(tok[:i])
+		if k != "" && !strings.ContainsAny(k, " \"'") {
+			return k, true
+		}
+	}
+	return "", false
+}
+
 // splitCompactPair splits a quoted JSON pair with no space after the colon,
 // "k":"v", into its unquoted key and value.
 func splitCompactPair(tok string) (key, val string, ok bool) {
@@ -2536,7 +2556,20 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
 		forced = true
 	}
-	isKey := st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, state.nextValueIsSensitive, sb, depth)
+	// {"name": "password", "value": …} makes the value sensitive, but only the
+	// pair that carries it: a "value" or "data" key, which spends the flag.
+	// Other keys pass untouched and leave it armed, so
+	// {"name": "password", "type": "string", "value": …} keeps its type and
+	// still hides the value, and a word in prose after "name: password" is
+	// not treated as a key.
+	override := false
+	if state.nextValueIsSensitive {
+		if k, isPair := pairKey(trimmed); isPair && genericValueKeys[strings.ToLower(k)] {
+			override = true
+			state.nextValueIsSensitive = false
+		}
+	}
+	isKey := st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, override, sb, depth)
 	// sb is updated inside processTokenLogic
 
 	// 2. Update Context State
@@ -2571,10 +2604,24 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.pendingGenericKey = false
 		}
 
-		// Compact JSON carries the generic pair in one token, {"key":"password"},
-		// so the two-token path above never sees it. Same rule: the next pair's
-		// value is sensitive.
-		if k, v, ok := splitCompactPair(trimmed); ok {
+		// "name" and "setting" are not sensitive words, so their key token
+		// never reports isKey and the branch above never armed the check for
+		// them: {"name": "password", "value": "x=hunter2"} leaked while the
+		// same pair under "key" was hidden. A generic name followed by its
+		// separator arms it here.
+		if isGenericKeyName && (strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")) {
+			state.pendingGenericKey = true
+		}
+
+		// Compact JSON ({"key":"password"}) and logfmt (key=password) carry
+		// the generic pair in one token, so the two-token path above never
+		// sees it. Same rule: the next pair's value is sensitive.
+		k, v, ok := splitCompactPair(trimmed)
+		if !ok {
+			k, v, ok = strings.Cut(trimmed, "=")
+			k, v = trimQuotes(k), trimQuotes(v)
+		}
+		if ok && v != "" {
 			lk := strings.ToLower(k)
 			if (lk == "key" || lk == "name" || lk == "setting") && st.isSensitiveKey(v) {
 				state.nextValueIsSensitive = true

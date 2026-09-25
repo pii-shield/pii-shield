@@ -25,6 +25,8 @@ var rescanLines = []string{
 	"card 4539148803436467 end",
 	`{"data": "{\"password\": \"hunter2xyz\", \"user\": \"bob\"}"}`,
 	`{"msg": "login failed for \"bob\" token=abc123def456"}`,
+	`{"name": "password", "value": "x=hunter2"}`,
+	`name=password value=hunter`,
 }
 
 // TestRescanIsStable pins invariant I3: scanning already-redacted output
