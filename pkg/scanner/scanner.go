@@ -1032,6 +1032,34 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 			continue
 		}
 
+		// An existing marker is one opaque value. '[' and ']' are separators,
+		// so without this the scanner would see HIDDEN:key:abc123 as a
+		// key:value pair and hide its tail again, nesting markers on every
+		// pass over already-redacted text.
+		if r == '[' && strings.HasPrefix(segment[i:], "[HIDDEN") {
+			if end := strings.IndexByte(segment[i:], ']'); end != -1 {
+				if i > start {
+					token := segment[start:i]
+					if seenInvalid {
+						token = strings.ToValidUTF8(token, "\uFFFD")
+					}
+					st.processAndAppend(token, sb, &state, depth)
+				}
+				sb.WriteString(segment[i : i+end+1])
+				// The marker is the value the preceding key, context word
+				// ("Error") or "Bearer" was waiting for, so it consumes them
+				// exactly as the original token did on the first pass.
+				state.pendingKeySensitive = false
+				state.pendingContextSensitive = false
+				state.pendingBearer = false
+				state.isInValuePos = false
+				i += end + 1
+				start = i
+				seenInvalid = false
+				continue
+			}
+		}
+
 		if isSepRune(r) {
 			if i > start {
 				token := segment[start:i]
@@ -1069,6 +1097,22 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if depth > maxTokenRecursionDepth {
 		st.processSingleToken(trimQuotes(rawToken), rawToken, forcedSensitive, contextSensitive, true, sb)
 		return false
+	}
+
+	// A marker from an earlier pass is one opaque value; parsing it would read
+	// [HIDDEN:abc123] as a key:value pair (see the same guard in scanSegment).
+	// A value that reached here with a marker glued to more text, such as
+	// [HIDDEN:abc123]( inside a quoted pair, goes back through the tokenizer,
+	// which splits the marker off.
+	if strings.Contains(rawToken, "[HIDDEN") {
+		if isRedacted(trimQuotes(rawToken)) {
+			sb.WriteString(rawToken)
+			return false
+		}
+		if !strings.ContainsAny(rawToken, `"'`) {
+			st.scanLine(rawToken, sb, depth+1)
+			return false
+		}
 	}
 
 	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
@@ -1168,8 +1212,11 @@ func isRedacted(content string) bool {
 }
 
 func (st *configState) processSingleToken(content, original string, forcedSensitive bool, contextSensitive bool, autoQuote bool, sb *strings.Builder) {
-	// -1. Check Idempotency (Already Redacted)
-	if isRedacted(content) {
+	// -1. Check Idempotency (Already Redacted). An empty value holds nothing
+	// to hide: forced under a sensitive key (password=, token=&, "secret":"")
+	// it used to become a marker, the hash of "", and a second scan of
+	// password=[HIDDEN:x] then saw password= plus a marker and added another.
+	if content == "" || isRedacted(content) {
 		sb.WriteString(original)
 		return
 	}
@@ -1726,7 +1773,8 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 				key := kv[0]
 				val := kv[1]
 
-				if st.isSafeRegexWhitelisted(val) {
+				// An empty value has nothing to hide (see processSingleToken).
+				if val == "" || st.isSafeRegexWhitelisted(val) {
 					sb.WriteString(param)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)

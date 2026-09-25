@@ -110,6 +110,8 @@ func TestEntityLabelsIdempotent(t *testing.T) {
 		"card 4539148803436467 end",
 		"id a3f8K2pQ9xLmW0vNbT5cRdYe",
 		"GET /v1/orders?session=E8s9d_2kL1&page=2",
+		"password=hunter2xyz token=abc123def456",
+		`{"secret": "user=admin pass=x"}`,
 	}
 	for _, in := range inputs {
 		once := ScanAndRedact(in)
