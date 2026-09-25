@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-smoke.sh - v6
+# test-smoke.sh - v7
 #
 # Runs the unit tests, benchmarks and a 1000-line end-to-end corpus through the
 # Docker image, then scores the result.
@@ -12,6 +12,11 @@
 #
 # Scoring uses the secret VALUE, not "did the line change": a line can change
 # because something else on it was redacted while the secret itself survives.
+# A caught secret must also leave a [HIDDEN marker behind, so a line that was
+# emptied or mangled does not count as a catch.
+# A safe line, the other way round, must come back byte for byte. The run also
+# fails when the container exits non-zero or returns a different number of
+# lines, since an empty or shifted output would otherwise score as clean.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
@@ -29,18 +34,19 @@ CORPUS_FILE="scripts/testdata/smoke-corpus.txt"
 CORPUS_META="scripts/testdata/smoke-corpus.tsv"
 COUNT=1000
 
-# Keyless secrets in prose (see generate_corpus type 6) have no key to force
+# Keyless secrets in prose (see generate_corpus type 7) have no key to force
 # redaction, so detection rests entirely on the entropy score of a short random
 # token. Measured on 1500 samples: 0.07% of them score below the threshold —
 # with ~140 such lines per corpus that is a ~9% chance of a red run on
-# unchanged code. They are counted and printed, but only fail the run when they
-# exceed this budget, which is what a real recall regression looks like.
-# Closing the gap for good is campaign item F6 (length-dependent threshold).
-KNOWN_GAP_MAX=2
+# unchanged code. A fresh random corpus (--fuzz) therefore gets a budget of 2.
+# The frozen corpus has no such dice roll: every one of its known-gap secrets
+# is caught today, so any miss there is a real recall regression and the budget
+# is 0. (A length-dependent threshold was tried as F6 and retired.)
+KNOWN_GAP_MAX=0
 
 MODE="frozen"
 case "${1:-}" in
-    --fuzz)       MODE="fuzz" ;;
+    --fuzz)       MODE="fuzz"; KNOWN_GAP_MAX=2 ;;
     --regenerate) MODE="regenerate" ;;
     "")           ;;
     *) echo "Usage: $(basename "$0") [--fuzz | --regenerate]" >&2; exit 2 ;;
@@ -171,19 +177,64 @@ echo '{"msg": "User said \"Hello\" to admin"}' >> "$INPUT_FILE"
 echo '{"data": "{\"nested_key\": \"nested_secret\"}"}' >> "$INPUT_FILE"
 echo 'jdbc:mysql://db:3306?pass=SecretDBPass' >> "$INPUT_FILE"
 
-docker run -i --rm pii-shield:local < "$INPUT_FILE" > "$OUTPUT_FILE"
+# run_scanner <in> <out>: fails the run when the container exits non-zero or
+# returns a different number of lines than it was given.
+run_scanner() {
+    if ! docker run -i --rm pii-shield:local < "$1" > "$2"; then
+        echo -e "${RED}❌ Scanner container exited non-zero.${NC}"
+        return 1
+    fi
+    local want got
+    want=$(wc -l < "$1" | tr -d ' ')
+    got=$(wc -l < "$2" | tr -d ' ')
+    if [ "$want" != "$got" ]; then
+        echo -e "${RED}❌ Line count changed: $want in, $got out.${NC}"
+        return 1
+    fi
+}
 
-if grep -q "SuperSecret123" "$OUTPUT_FILE"; then
-    echo -e "${RED}[FAIL] Case 1: Simple Password leaked${NC}"
-    FAILURES=$((FAILURES + 1))
-else echo -e "${GREEN}[PASS] Case 1: Simple Password redacted${NC}"; fi
-
-if grep -q 'User said \\"Hello\\" to admin' "$OUTPUT_FILE"; then
-    echo -e "${GREEN}[PASS] Case 2: Escaped quotes preserved${NC}"
-else
-    echo -e "${RED}[FAIL] Case 2: Escaped quotes corrupted${NC}"
+if ! run_scanner "$INPUT_FILE" "$OUTPUT_FILE"; then
     FAILURES=$((FAILURES + 1))
 fi
+
+# pass_or_fail <name> <ok 0|1>
+pass_or_fail() {
+    if [ "$2" -eq 0 ]; then
+        echo -e "${GREEN}[PASS] $1${NC}"
+    else
+        echo -e "${RED}[FAIL] $1${NC}"
+        FAILURES=$((FAILURES + 1))
+    fi
+}
+
+LINE1=$(sed -n 1p "$OUTPUT_FILE")
+LINE2=$(sed -n 2p "$OUTPUT_FILE")
+LINE3=$(sed -n 3p "$OUTPUT_FILE")
+LINE4=$(sed -n 4p "$OUTPUT_FILE")
+
+# Case 1: {"key": "password", "value": …} marks the value sensitive even though
+# its own key, "value", is not.
+[[ "$LINE1" != *SuperSecret123* && "$LINE1" == *'"value": "[HIDDEN:'* ]] && echo "$LINE1" | jq . > /dev/null 2>&1
+pass_or_fail "Case 1: value of a password-typed key/value pair redacted, JSON valid" $?
+
+[[ "$LINE2" == "$(sed -n 2p "$INPUT_FILE")" ]]
+pass_or_fail "Case 2: escaped quotes preserved, line unchanged" $?
+
+[[ "$LINE3" != *nested_secret* && "$LINE3" == '{"data": "{\"nested_key\":'*'[HIDDEN:'* ]]
+pass_or_fail "Case 3: secret inside nested JSON redacted" $?
+
+# Known bug: the nested JSON string loses its closing quote and brace, e.g.
+# {"data": "{\"nested_key\":[HIDDEN:…]}. Expected to fail until fixed; when it
+# starts passing, this check fails so the fix drops the exception on purpose.
+if [[ -n "$LINE3" ]] && echo "$LINE3" | jq . > /dev/null 2>&1; then
+    echo -e "${RED}[FAIL] Case 3: nested JSON is valid now: known bug fixed, turn this into a normal check${NC}"
+    FAILURES=$((FAILURES + 1))
+else
+    echo -e "${YELLOW}[KNOWN BUG] Case 3: nested JSON output is not valid JSON${NC}"
+fi
+
+[[ "$LINE4" != *SecretDBPass* && "$LINE4" == 'jdbc:mysql://db:3306?pass=[HIDDEN:'* ]]
+pass_or_fail "Case 4: JDBC URL password redacted, rest of the URL kept" $?
 
 # ==============================================================================
 # PHASE 2: Bulk corpus
@@ -207,7 +258,11 @@ LINES=$(wc -l < "$INPUT_FILE" | tr -d ' ')
 INPUT_SIZE=$(wc -c < "$INPUT_FILE")
 
 START=$(get_time_ms)
-docker run -i --rm pii-shield:local < "$INPUT_FILE" > "$OUTPUT_FILE"
+if ! run_scanner "$INPUT_FILE" "$OUTPUT_FILE"; then
+    echo -e "${RED}❌ FAILED: the bulk corpus did not come back line for line; scoring it would be meaningless.${NC}"
+    rm -f "$INPUT_FILE" "$OUTPUT_FILE" "$META_FILE"
+    exit 1
+fi
 END=$(get_time_ms)
 
 DURATION_MS=$(( END - START ))
@@ -217,13 +272,22 @@ KBPS=$(( INPUT_SIZE * 1000 / DURATION_MS / 1024 ))
 
 # --- Scoring -----------------------------------------------------------------
 # The loop reads from a process substitution, not a pipe, so the counters live
-# in this shell and no temp file is needed to carry them back.
+# in this shell and no temp file is needed to carry them back. Columns are
+# joined with \x1f, not a tab: a tab is IFS whitespace, so read collapses an
+# empty field and every later column shifts left. The meta column still holds
+# TYPE<TAB>SECRET and is split by hand.
+SEP=$'\x1f'
 TP=0; TN=0; FP=0; FN=0; GAPS=0
-while IFS=$'\t' read -r IN OUT EXPECTED_TYPE SECRET; do
+while IFS="$SEP" read -r IN OUT META; do
+    EXPECTED_TYPE=${META%%$'\t'*}
+    SECRET=${META#*$'\t'}
     case "$EXPECTED_TYPE" in
         SECRET)
             if [[ -n "$SECRET" && "$OUT" == *"$SECRET"* ]]; then
                 echo -e "${RED}[LEAK] False Negative:${NC}\n   Input: $IN\n   Output: $OUT"
+                FN=$((FN + 1))
+            elif [[ "$OUT" != *"[HIDDEN"* ]]; then
+                echo -e "${RED}[MANGLED] Secret line lost without a marker:${NC}\n   Input: $IN\n   Output: $OUT"
                 FN=$((FN + 1))
             else
                 TP=$((TP + 1))
@@ -232,6 +296,9 @@ while IFS=$'\t' read -r IN OUT EXPECTED_TYPE SECRET; do
         KNOWN_GAP)
             if [[ -n "$SECRET" && "$OUT" == *"$SECRET"* ]]; then
                 GAPS=$((GAPS + 1))
+            elif [[ "$OUT" != *"[HIDDEN"* ]]; then
+                echo -e "${RED}[MANGLED] Secret line lost without a marker:${NC}\n   Input: $IN\n   Output: $OUT"
+                FN=$((FN + 1))
             else
                 TP=$((TP + 1))
             fi
@@ -241,15 +308,15 @@ while IFS=$'\t' read -r IN OUT EXPECTED_TYPE SECRET; do
             TN=$((TN + 1))
             ;;
         *)
-            if [[ "$IN" != "$OUT" && "$OUT" == *"[HIDDEN"* ]]; then
-                echo -e "${YELLOW}[BROKEN] False Positive (Safe Data Redacted):${NC}\n   Input:  $IN\n   Output: $OUT"
+            if [[ "$IN" != "$OUT" ]]; then
+                echo -e "${YELLOW}[BROKEN] False Positive (Safe Line Changed):${NC}\n   Input:  $IN\n   Output: $OUT"
                 FP=$((FP + 1))
             else
                 TN=$((TN + 1))
             fi
             ;;
     esac
-done < <(LC_ALL=C paste "$INPUT_FILE" "$OUTPUT_FILE" "$META_FILE")
+done < <(LC_ALL=C paste -d "$SEP" "$INPUT_FILE" "$OUTPUT_FILE" "$META_FILE")
 
 echo -e "\n📊 Phase 2 Results ($LINES items):"
 echo -e "Accuracy: $(( (TP + TN) * 100 / LINES ))%"
