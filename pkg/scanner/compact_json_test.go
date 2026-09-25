@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -53,5 +54,36 @@ func TestCompactJSONSafeValues(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCompactJSONPairAfterSensitiveKey guards a regression from B7: a complete
+// compact pair such as "password":"x" still reported itself as a key, so the
+// next pair arrived force-redacted. When that pair's value held a '=', the
+// quoted branch hid "query":"a=b" whole, key and quotes included, and the line
+// stopped being valid JSON: {"password":"[HIDDEN]","[HIDDEN]"}.
+func TestCompactJSONPairAfterSensitiveKey(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	tests := []struct {
+		in, secret, keep string
+	}{
+		{`{"password":"abc123xyz","query":"a=b"}`, "abc123xyz", `"query":"a=b"`},
+		{`{"token":"abc123xyz","url":"x=1&y=2"}`, "abc123xyz", `"url":"x=1&y=2"`},
+		{`{"password":"abc123xyz","user":"bob"}`, "abc123xyz", `"user":"bob"`},
+	}
+	for _, tt := range tests {
+		out := ScanAndRedact(tt.in)
+		if !json.Valid([]byte(out)) {
+			t.Errorf("output is no longer valid JSON: in=%q out=%q", tt.in, out)
+		}
+		if strings.Contains(out, tt.secret) {
+			t.Errorf("secret leaked: in=%q out=%q", tt.in, out)
+		}
+		if !strings.Contains(out, tt.keep) {
+			t.Errorf("neighbouring pair changed: in=%q out=%q", tt.in, out)
+		}
 	}
 }
