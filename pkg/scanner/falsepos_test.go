@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -53,11 +54,21 @@ func TestFalsePositives(t *testing.T) {
 	// 3. True Positive Confidence Trigger (Forced Masking)
 	t.Run("Context overrides should still trigger redaction", func(t *testing.T) {
 		uuid := "123e4567-e89b-12d3-a456-426614174000"
-		// 'token' is a sensitive context keyword
+		// "token:" is a sensitive key, so the UUID is its forced value.
 		input := fmt.Sprintf("token: %s", uuid)
 		output := ScanAndRedact(input)
-		if output == input {
-			t.Errorf("Expected UUID to be redacted because of context, but got %s", output)
+		if strings.Contains(output, uuid) {
+			t.Errorf("Expected UUID under a sensitive key to be redacted, got %s", output)
+		}
+		// A context word ("error", "failed") before a bare UUID reaches the
+		// UUID branch of processSingleToken with contextSensitive set, which
+		// forces it. The sensitive-key case above never got there, so this
+		// branch had no test at all (audit 2026-09-25).
+		for _, word := range []string{"error", "failed"} {
+			in := fmt.Sprintf("%s %s", word, uuid)
+			if out := ScanAndRedact(in); strings.Contains(out, uuid) || !strings.Contains(out, "[HIDDEN:") {
+				t.Errorf("UUID after context word %q not redacted: %s", word, out)
+			}
 		}
 	})
 

@@ -133,7 +133,7 @@ func TestSingleQuoteRewritePreservesQuoteChar(t *testing.T) {
 	// Regression: a double-quoted value still gets double quotes.
 	in2 := `token="abc123def456gh"`
 	out2 := ScanAndRedact(in2)
-	if strings.Count(out2, `"`) != 2 {
+	if strings.Count(out2, `"`) != 2 || strings.Contains(out2, "abc123def456gh") {
 		t.Errorf("double-quoted case broken: %q", out2)
 	}
 
@@ -504,7 +504,7 @@ func TestCustomRegexShortToken(t *testing.T) {
 	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Pattern: `^[A-Z]{4}$`, Name: "code"}}); err != nil {
 		t.Fatalf("ApplyCustomRegexes: %v", err)
 	}
-	if err := cfg.ApplySafeRegexes([]CustomRegexConfig{{Pattern: `^ok$`, Name: "okword"}}); err != nil {
+	if err := cfg.ApplySafeRegexes([]CustomRegexConfig{{Pattern: `^ok$`, Name: "okword"}, {Pattern: `^SAFE$`, Name: "safeword"}}); err != nil {
 		t.Fatalf("ApplySafeRegexes: %v", err)
 	}
 	UpdateConfig(cfg)
@@ -524,8 +524,12 @@ func TestCustomRegexShortToken(t *testing.T) {
 		t.Errorf("safe rule did not protect a 2-char token: %q", out)
 	}
 
-	// The safe rule wins over the custom rule for the token it names, and
-	// tokens no rule mentions are untouched.
+	// The safe rule wins over the custom rule for a token both match: SAFE is
+	// four capitals, so ^[A-Z]{4}$ would hide it without the safe rule.
+	if out := ScanAndRedact("state SAFE done"); out != "state SAFE done" {
+		t.Errorf("custom rule beat the safe rule: %q", out)
+	}
+	// Tokens no rule mentions are untouched.
 	if out := ScanAndRedact("state ok done"); out != "state ok done" {
 		t.Errorf("unexpected redaction on unmatched short tokens: %q", out)
 	}

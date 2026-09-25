@@ -76,20 +76,26 @@ func TestScanner_TechnicalJargon(t *testing.T) {
 	}
 }
 
+// TestScanner_NegativeCases checks that each secret is gone from the output,
+// not only that a marker appeared somewhere: the "Stress Test Leak" line also
+// carries an IP, which is redacted on its own, so with entropy redaction
+// disabled the old marker-anywhere check stayed green while
+// ccGazanojgGcOSa came back in the clear (audit 2026-09-25).
 func TestScanner_NegativeCases(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
 		shouldRedact bool
+		secret       string // must not survive outside a marker
 	}{
-		{"Weak Password", "password=123", true},                                                       // Should be redacted because key 'password' is sensitive
-		{"Common Word", "key=value", true},                                                            // Should be redacted because key 'key' is sensitive
-		{"High Entropy Secret", "api_key=sk_live_51Nc7qE...", true},                                   // Should be redacted
-		{"Random Noise", "data=8f7d9a2b3c4e5f6", true},                                                // High entropy hex
-		{"Valid Visa (Luhn)", "cc=4556737586899855", true},                                            // Valid Luhn with enough distinct digits (7 >= 2)
-		{"Stress Test Leak (ccGazanojgGcOSa)", "Error: 192.168.1.5 ccGazanojgGcOSa connection", true}, // Regression test for Threshold 3.6
-		{"Stripe/Visa Test Card (low digit diversity)", "card=4111111111111111", true},                // Regression: only 2 distinct digits (4,1), was wrongly filtered by countDistinctDigits<4
-		{"Mastercard Test Card (low digit diversity)", "card=5555555555554444", true},                 // Regression: only 2 distinct digits (5,4)
+		{"Weak Password", "password=123", true, "123"},                                                                   // Should be redacted because key 'password' is sensitive
+		{"Common Word", "key=value", true, "value"},                                                                      // Should be redacted because key 'key' is sensitive
+		{"High Entropy Secret", "api_key=sk_live_51Nc7qE...", true, "sk_live_51Nc7qE"},                                   // Should be redacted
+		{"Random Noise", "data=8f7d9a2b3c4e5f6", true, "8f7d9a2b3c4e5f6"},                                                // High entropy hex
+		{"Valid Visa (Luhn)", "cc=4556737586899855", true, "4556737586899855"},                                           // Valid Luhn with enough distinct digits (7 >= 2)
+		{"Stress Test Leak (ccGazanojgGcOSa)", "Error: 192.168.1.5 ccGazanojgGcOSa connection", true, "ccGazanojgGcOSa"}, // Regression test for Threshold 3.6
+		{"Stripe/Visa Test Card (low digit diversity)", "card=4111111111111111", true, "4111111111111111"},               // Regression: only 2 distinct digits (4,1), was wrongly filtered by countDistinctDigits<4
+		{"Mastercard Test Card (low digit diversity)", "card=5555555555554444", true, "5555555555554444"},                // Regression: only 2 distinct digits (5,4)
 	}
 
 	// Ensure default config for this test
@@ -110,6 +116,9 @@ func TestScanner_NegativeCases(t *testing.T) {
 			isRedacted := strings.Contains(got, "[HIDDEN:")
 			if isRedacted != tt.shouldRedact {
 				t.Errorf("Expected redaction: %v, Got redaction: %v. Input: %q, Output: %q", tt.shouldRedact, isRedacted, tt.input, got)
+			}
+			if tt.secret != "" && strings.Contains(withoutMarkers(got), tt.secret) {
+				t.Errorf("secret %q survived. Input: %q, Output: %q", tt.secret, tt.input, got)
 			}
 		})
 	}

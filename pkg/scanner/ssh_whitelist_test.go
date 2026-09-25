@@ -36,7 +36,9 @@ func TestSSHKeyBodyWhitelistNarrowed(t *testing.T) {
 		sshRSABody,
 		sshECDSABody,
 	} {
-		if out := ScanAndRedact(line); !strings.Contains(out, "AAAA") {
+		// The whole line, not just its "AAAA" prefix: a key body redacted
+		// after the first few characters would still contain "AAAA".
+		if out := ScanAndRedact(line); out != line {
 			t.Errorf("real ssh public key redacted: %q -> %q", line, out)
 		}
 	}

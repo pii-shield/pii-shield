@@ -38,8 +38,8 @@ func TestLongBase64Redacted(t *testing.T) {
 
 	// Framing around the blob survives: only the payload is replaced.
 	out := ScanAndRedact("src=data:image/png;base64," + longBase64Blob)
-	if !strings.HasPrefix(out, "src=data:image/png;base64,") {
-		t.Errorf("data-URI framing lost: %q", out)
+	if !strings.HasPrefix(out, "src=data:image/png;base64,[HIDDEN:") || strings.Contains(out, longBase64Blob) {
+		t.Errorf("data-URI framing lost or payload kept: %q", out)
 	}
 
 	// An SSH public key body stays whitelisted (F2 interlock) — it is public by
