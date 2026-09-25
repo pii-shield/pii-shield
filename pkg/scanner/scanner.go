@@ -1599,7 +1599,12 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 		// it already is when whitespace follows the colon (B9).
 		st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
 
-		return keySensitive, true
+		// The value was consumed right here, so the pair is complete and the
+		// next token is not its value. Reporting a key would force-redact that
+		// next token: in compact JSON {"password":"x","query":"a=b"} the
+		// neighbour "query":"a=b" was hidden whole, key included, and the line
+		// stopped being valid JSON.
+		return false, true
 	}
 	return false, false
 }
@@ -2382,6 +2387,23 @@ type segmentState struct {
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 }
 
+// splitCompactPair splits a quoted JSON pair with no space after the colon,
+// "k":"v", into its unquoted key and value.
+func splitCompactPair(tok string) (key, val string, ok bool) {
+	if len(tok) < 5 || tok[0] != '"' {
+		return "", "", false
+	}
+	end := strings.IndexByte(tok[1:], '"') + 1
+	if end == 0 || end+1 >= len(tok) || tok[end+1] != ':' {
+		return "", "", false
+	}
+	v := tok[end+2:]
+	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+		return "", "", false
+	}
+	return tok[1:end], v[1 : len(v)-1], true
+}
+
 func (st *configState) processAndAppend(token string, sb *strings.Builder, state *segmentState, depth int) {
 	// 0. Pre-analysis for Generic Key State (before token is consumed/redacted)
 	trimmed := strings.TrimSpace(token)
@@ -2451,6 +2473,16 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 				state.nextValueIsSensitive = true
 			}
 			state.pendingGenericKey = false
+		}
+
+		// Compact JSON carries the generic pair in one token, {"key":"password"},
+		// so the two-token path above never sees it. Same rule: the next pair's
+		// value is sensitive.
+		if k, v, ok := splitCompactPair(trimmed); ok {
+			lk := strings.ToLower(k)
+			if (lk == "key" || lk == "name" || lk == "setting") && st.isSensitiveKey(v) {
+				state.nextValueIsSensitive = true
+			}
 		}
 	}
 
