@@ -80,15 +80,13 @@ func TestQuotedBase64BlobNotReparsed(t *testing.T) {
 	}
 }
 
-// TestKeyNamesAreNeverScored pins the reason the wider hole below stays open.
-//
-// The obvious fix for `<secret>=x` — score the key half instead of writing it
-// out — is not viable: ordinary snake_case log keys sit right on the entropy
-// threshold (context_id, request_id and commit_sha all score 3.622 against a
-// 3.600 default), so scoring them redacts standard field names. Measured
-// 2026-09-18: it produced 255 false positives on the 1000-line smoke corpus.
-// Telling a short key name from a short secret needs the length-dependent
-// threshold of campaign item F6, not a local change here.
+// TestKeyNamesAreNeverScored pins why B19 scores a key half only when it does
+// not look like a field name. Scoring every key is not viable: ordinary
+// snake_case log keys sit right on the entropy threshold (context_id,
+// request_id and commit_sha all score 3.622 against a 3.600 default), and
+// scoring them produced 255 false positives on the 1000-line smoke corpus
+// (measured 2026-09-18). A length-dependent threshold does not fix it either
+// (F6, retired 2026-09-25). Field-name-shaped keys must come back untouched.
 func TestKeyNamesAreNeverScored(t *testing.T) {
 	oldCfg := activeCfg()
 	defer UpdateConfig(oldCfg)
@@ -100,9 +98,47 @@ func TestKeyNamesAreNeverScored(t *testing.T) {
 		"commit_sha=abc123 status=200",
 		"user=admin role=viewer",
 		"rows=10&page=1",
+		"requestId=5",
+		"payment.declined=1",
+		"HTTP=1",
+		"sha256=abc",
+		"Аутентификация=да",
+		"host:port=1",
 	} {
 		if out := ScanAndRedact(in); out != in {
 			t.Errorf("key name redacted: in=%q out=%q", in, out)
 		}
+	}
+}
+
+// TestSecretAsKeyIsScored covers B19: the key half of key=value used to be
+// written out unscored, so appending "=x" to a secret defeated the scanner,
+// even the signature detectors. A key that does not look like a field name
+// now goes through the same single-token path as a value.
+func TestSecretAsKeyIsScored(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, secret := range []string{
+		"AKIAIOSFODNN7EXAMPLE",
+		"AbC9xY2kQ8pLmN0rZq7",
+		"hqw55CTBeUqNyfgG89hHmA",
+	} {
+		for _, in := range []string{secret + "=x", "msg " + secret + "=1 done", `"` + secret + `=x"`} {
+			out := ScanAndRedact(in)
+			if strings.Contains(out, secret) {
+				t.Errorf("secret used as a key leaked: in=%q out=%q", in, out)
+			}
+			if !strings.Contains(out, "[HIDDEN") {
+				t.Errorf("expected a marker: in=%q out=%q", in, out)
+			}
+		}
+	}
+
+	// The signature detector keeps its label on a key half too.
+	applyCfg(func(c *Config) { c.EntityTypeLabels = true })
+	if out := ScanAndRedact("AKIAIOSFODNN7EXAMPLE=x"); !strings.HasPrefix(out, "[HIDDEN:aws-key:") || !strings.HasSuffix(out, "=x") {
+		t.Errorf("signature label lost on a key half: %q", out)
 	}
 }
