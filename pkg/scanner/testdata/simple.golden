@@ -2,6 +2,6 @@
 Log line with key=[HIDDEN:54443f] and token=[HIDDEN:abd62a]
 User session active: jwt=[HIDDEN:062bf9]
 {"context": {"user": {"api_key": "[HIDDEN:69dbd3]"}}}
-{"prompt": "User said \"my pass is 123456\""}
+{"prompt": "User said \"my pass is [HIDDEN:54443f]\""}
 GET /api/v1/user?token=[HIDDEN:16cae9]&uid=123
-Safe data check: uuid=550e8400-e29b-41d4-a716-446655440000 git_sha=[HIDDEN:9c0cf2]
+Safe data check: uuid=550e8400-e29b-41d4-a716-446655440000 git_sha=a1b2c3d4e5f6
