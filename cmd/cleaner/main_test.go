@@ -18,10 +18,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pii-shield/pii-shield/pkg/metrics"
 	"github.com/pii-shield/pii-shield/pkg/scanner"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestMainSuccess(t *testing.T) {
+	// main reads these; a value left in the developer's shell would change
+	// what is being tested. main also installs scanner.RedactionCallback when
+	// metrics or stats are on, so restore it for the tests that follow.
+	for _, k := range []string{"PII_METRICS_ENABLED", "PII_METRICS_PORT", "PII_STATS_LOG_INTERVAL", "PII_FAIL_POLICY"} {
+		t.Setenv(k, "")
+	}
+	oldCallback := scanner.RedactionCallback
+	t.Cleanup(func() { scanner.RedactionCallback = oldCallback })
+
 	oldStdin := os.Stdin
 	oldStdout := os.Stdout
 	defer func() {
@@ -60,7 +71,14 @@ func TestMainSuccess(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) != 2 {
-		t.Errorf("expected 2 lines, got %d", len(lines))
+		t.Fatalf("expected 2 lines, got %d: %q", len(lines), output)
+	}
+	// The line count alone passed with a main that echoed its input raw.
+	if strings.Contains(output, "test@example.com") || !strings.HasPrefix(lines[0], "hello [HIDDEN:") || !strings.HasSuffix(lines[0], " world") {
+		t.Errorf("email not redacted or surrounding text changed: %q", lines[0])
+	}
+	if lines[1] != "line 2" {
+		t.Errorf("safe line changed: %q", lines[1])
 	}
 }
 
@@ -189,7 +207,8 @@ func TestIsNamedPipe(t *testing.T) {
 // TestStreamPipeOnceBufferOverflow exercises the FIFO error path: a line larger
 // than the scanner buffer triggers bufio.ErrTooLong, and the fail policy decides
 // whether the overflow is dropped or passed through with a warning marker. The
-// metricsEnabled case also covers the error-metric increment.
+// metricsEnabled case also checks the error metric: +1 with metrics on, and
+// unchanged with them off. Neither policy may let the raw line through.
 func TestStreamPipeOnceBufferOverflow(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -222,6 +241,7 @@ func TestStreamPipeOnceBufferOverflow(t *testing.T) {
 				}
 			}()
 
+			errorsBefore := testutil.ToFloat64(metrics.ErrorsTotal)
 			done := make(chan error, 1)
 			go func() { done <- streamPipeOnce(fifo, tc.metricsEnabled, tc.failPolicy, wOut) }()
 
@@ -258,9 +278,27 @@ func TestStreamPipeOnceBufferOverflow(t *testing.T) {
 			wOut.Close()
 			<-scanDone
 			rOut.Close()
+
+			close(outCh)
+			for line := range outCh {
+				if strings.Contains(line, rawOverflowProbe) {
+					t.Errorf("raw overflow content leaked into the output")
+				}
+			}
+			want := errorsBefore
+			if tc.metricsEnabled {
+				want++
+			}
+			if got := testutil.ToFloat64(metrics.ErrorsTotal); got != want {
+				t.Errorf("errors metric: got %v, want %v", got, want)
+			}
 		})
 	}
 }
+
+// rawOverflowProbe is a run of the filler used by the overflow tests; finding
+// it in the output means part of the oversized line was written through.
+var rawOverflowProbe = strings.Repeat("A", 64)
 
 // TestProcessLinePanicRecovery covers the Blast Radius Control Policy: a panic
 // raised while sanitizing one line must never take the sidecar down. Fail-open
@@ -386,7 +424,10 @@ func TestMainBufferOverflowFailOpen(t *testing.T) {
 		t.Errorf("expected exit code 1 for scanner error, got %d", exitCode)
 	}
 	if !strings.Contains(stdout, "[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]") {
-		t.Errorf("expected fail-open overflow warning marker, got stdout: %s", stdout)
+		t.Errorf("expected fail-open overflow warning marker, got stdout: %.200s", stdout)
+	}
+	if strings.Contains(stdout, rawOverflowProbe) {
+		t.Errorf("fail-open wrote the raw oversized line through: %.200s", stdout)
 	}
 	if !strings.Contains(stderr, "Error reading standard input:") {
 		t.Errorf("expected stderr to contain scanner error, got: %s", stderr)
@@ -400,7 +441,10 @@ func TestMainBufferOverflowFailClosed(t *testing.T) {
 		t.Errorf("expected exit code 1 for scanner error, got %d", exitCode)
 	}
 	if !strings.Contains(stdout, "[PII_SHIELD_DROP: BUFFER_OVERFLOW]") {
-		t.Errorf("expected fail-closed overflow drop marker, got stdout: %s", stdout)
+		t.Errorf("expected fail-closed overflow drop marker, got stdout: %.200s", stdout)
+	}
+	if strings.Contains(stdout, rawOverflowProbe) {
+		t.Errorf("fail-closed wrote the raw oversized line through: %.200s", stdout)
 	}
 	if !strings.Contains(stderr, "Error reading standard input:") {
 		t.Errorf("expected stderr to contain scanner error, got: %s", stderr)
