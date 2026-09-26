@@ -14,5 +14,7 @@ export GOCACHE="${GOCACHE:-${ROOT_DIR}/.gocache}"
 echo "Running operator integration tests with envtest..."
 echo "Note: these tests start a local Kubernetes API server and require localhost bind permissions."
 
-cd "${OPERATOR_DIR}"
-go test -tags=integration ./internal/controller/...
+# make test-integration downloads the envtest binaries for the Kubernetes
+# version in go.mod and points KUBEBUILDER_ASSETS at them, so the suite also
+# runs on a fresh checkout.
+make -C "${OPERATOR_DIR}" test-integration
