@@ -6,8 +6,9 @@ import "testing"
 
 // Zero-allocation contract for the O2/O3 hot-path functions on ASCII tokens.
 // Excluded from -race runs: race instrumentation changes allocation behavior.
-// (redactWithHMAC's alloc win is asserted via BenchmarkRedactWithHMAC instead —
-// its sync.Pool makes AllocsPerRun flaky under GC pressure.)
+// redactWithHMAC is not covered: O4 was dropped, and its sync.Pool makes
+// AllocsPerRun flaky under GC pressure. BenchmarkRedactWithHMAC reports its
+// allocations but asserts nothing.
 func TestHotPathZeroAllocsASCII(t *testing.T) {
 	oldCfg := activeCfg()
 	defer UpdateConfig(oldCfg)

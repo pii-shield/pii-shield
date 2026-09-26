@@ -38,13 +38,11 @@ func TestScanner_HighEntropySafeData(t *testing.T) {
 		},
 	}
 
-	// Ensure default config for this test
-	// SAFE CONFIG MODIFICATION
+	// The default config: these used to run at a 3.8 threshold under a
+	// "default config" comment, which checked false positives under a looser
+	// setting than the one shipped (3.6).
 	savedCfg := activeCfg()
-	applyCfg(func(c *Config) {
-		c.EntropyThreshold = 3.8
-		c.MinSecretLength = 6
-	})
+	UpdateConfig(campaignConfig())
 	defer UpdateConfig(savedCfg)
 
 	for _, tt := range safeData {
@@ -105,7 +103,7 @@ func TestScanner_JSONIntegrity(t *testing.T) {
 	}
 
 	for _, input := range inputs {
-		t.Run("ValidJSON", func(t *testing.T) {
+		t.Run(input, func(t *testing.T) {
 			output := ScanAndRedact(input)
 
 			// 1. Verify it is still valid JSON

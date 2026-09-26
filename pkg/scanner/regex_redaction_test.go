@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"os"
-	"os/exec"
 	"regexp"
 	"testing"
 )
@@ -47,10 +46,21 @@ func TestScanner_CustomRegexRedaction(t *testing.T) {
 			expectedOutput: `ID: \[HIDDEN:Account:[a-f0-9]{6}\]`,
 		},
 		{
-			name:           "False Positive Check (Short)",
+			// A short rule fires on a short token: there is no length gate
+			// in front of custom rules since B5 (the old "< 5 characters is
+			// skipped" case asserted a gate that no longer exists).
+			name:        "Short rule fires on a short token",
+			regexConfig: `[{"pattern": "^[0-9]{4}$", "name": "PIN"}]`,
+			input:       "Code: 1234",
+			// After "Code:" the number is in value position, so it is quoted
+			// the way a hidden JSON number is.
+			expectedOutput: `^Code: "\[HIDDEN:PIN:[a-f0-9]{6}\]"$`,
+		},
+		{
+			name:           "Short rule leaves a token it does not match",
 			regexConfig:    `[{"pattern": "^[0-9]{4}$", "name": "PIN"}]`,
-			input:          "Code: 123", // Length < 5, should be skipped
-			expectedOutput: "Code: 123",
+			input:          "Code: 123",
+			expectedOutput: "^Code: 123$",
 		},
 		{
 			name:           "Multiple Regexes",
@@ -102,26 +112,6 @@ func TestScanner_CustomRegexRedaction(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestScanner_CrashOnInvalidConfig(t *testing.T) {
-	t.Skip("Skipping subprocess test to avoid hanging during current session")
-	if os.Getenv("BE_CRASHER") == "1" {
-		// Mock invalid config
-		os.Setenv("PII_CUSTOM_REGEX_LIST", `[{"pattern": "[a-", "name": "Broken"}]`)
-		loadConfig() // This should panic/fatal
-		return
-	}
-
-	// Re-run this test in a subprocess with BE_CRASHER=1
-	cmd := exec.Command(os.Args[0], "-test.run=TestScanner_CrashOnInvalidConfig") // Run only this test
-	cmd.Env = append(os.Environ(), "BE_CRASHER=1")
-	err := cmd.Run()
-	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
-		// Verify standard error output if possible, but exit code 1 is enough signal for now
-		return // Success, it crashed
-	}
-	t.Fatalf("process ran with err %v, want exit status 1 (crash)", err)
 }
 
 func TestScanner_SafeRegexWhitelist(t *testing.T) {

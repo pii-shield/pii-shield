@@ -6,23 +6,22 @@ import (
 	"testing"
 )
 
-// Helper to reset config for benchmarks (simple simulation). UpdateConfig
-// rebuilds the derived state (sensitiveRegex, hmacPool) from these fields.
-func resetConfig() {
-	UpdateConfig(Config{
-		EntropyThreshold:        DefaultEntropyThreshold,
-		MinSecretLength:         6,
-		DisableBigramCheck:      false,
-		BigramDefaultScore:      -7.0,
-		AdaptiveThreshold:       false,
-		AdaptiveBaselineSamples: 100,
-		Salt:                    []byte("1234567890abcdef1234567890abcdef"), // Dummy salt
-		SensitiveKeys: []string{
-			"pass", "secret", "token", "key", "cvv", "cvc", "auth", "sign",
-			"password", "passwd", "api_key", "apikey", "access_token", "client_secret",
-			"aws_access_key_id", "aws_secret_access_key", "gcp_credentials", "slack_token",
-		},
-	})
+// Benchmarks for the whitelist, blacklist and custom-regex steps in isolation.
+// There is no Test function here: the file was performance_test.go, a name
+// that promised timing assertions it never had. Each benchmark checks only
+// that the step still gives the right answer inside its loop.
+
+// resetConfig puts the benchmark on the shipped defaults (campaignConfig =
+// DefaultConfig plus a fixed salt) and restores the previous config when the
+// benchmark ends. The old hand-copied Config left out ConfidenceThreshold (0
+// instead of 1.0) and was never restored, so benchmarks that ran after it in
+// file order, BenchmarkScanAndRedact and BenchmarkThroughput among them,
+// measured that config plus whatever custom rules the last one added.
+func resetConfig(b *testing.B) {
+	b.Helper()
+	old := activeCfg()
+	b.Cleanup(func() { UpdateConfig(old) })
+	UpdateConfig(campaignConfig())
 }
 
 // -----------------------------------------------------------------------------
@@ -30,7 +29,7 @@ func resetConfig() {
 // -----------------------------------------------------------------------------
 
 func BenchmarkWhitelist_Static(b *testing.B) {
-	resetConfig()
+	resetConfig(b)
 	// Test standard static whitelist check
 	token := "2001:db8:85a3::8a2e:370:7334" // Valid IPv6
 
@@ -44,7 +43,7 @@ func BenchmarkWhitelist_Static(b *testing.B) {
 }
 
 func BenchmarkWhitelist_Regex(b *testing.B) {
-	resetConfig()
+	resetConfig(b)
 	// Configure a Safe Regex
 	safePattern := `^SAFE-ID-\d+$`
 	re := regexp.MustCompile(safePattern)
@@ -73,7 +72,7 @@ func BenchmarkWhitelist_Regex(b *testing.B) {
 // -----------------------------------------------------------------------------
 
 func BenchmarkBlacklist_Static(b *testing.B) {
-	resetConfig()
+	resetConfig(b)
 	// "password" is in default SensitiveKeys
 	key := "password"
 
@@ -86,7 +85,7 @@ func BenchmarkBlacklist_Static(b *testing.B) {
 }
 
 func BenchmarkBlacklist_Regex(b *testing.B) {
-	resetConfig()
+	resetConfig(b)
 	// Configure Sensitive Key Patterns
 	// We simulate what loadConfig does: combine into one regex
 	// Drive the sensitive-key regex through the real config path so it is
@@ -112,7 +111,7 @@ func BenchmarkBlacklist_Regex(b *testing.B) {
 // -----------------------------------------------------------------------------
 
 func BenchmarkCustomRegex(b *testing.B) {
-	resetConfig()
+	resetConfig(b)
 	// Configure Custom Regex for redaction (e.g. finding SSNs in values)
 	pattern := `\b\d{3}-\d{2}-\d{4}\b` // SSN-like
 	re := regexp.MustCompile(pattern)
@@ -136,28 +135,21 @@ func BenchmarkCustomRegex(b *testing.B) {
 }
 
 func BenchmarkCustomRegex_5Rules(b *testing.B) {
-	resetConfig()
-	// Configure 5 Custom Regexes
-	rules := []CustomRegexRule{
-		{Regexp: regexp.MustCompile(`\buser-\d+\b`), Name: "UserId"},
-		{Regexp: regexp.MustCompile(`\bemail-[a-z]+\b`), Name: "EmailId"},
-		{Regexp: regexp.MustCompile(`\bkb-\d{5}\b`), Name: "KB"},
-		{Regexp: regexp.MustCompile(`\bticket-[a-z0-9]+\b`), Name: "Ticket"},
-		{Regexp: regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`), Name: "SSN"}, // The one that matches
+	resetConfig(b)
+	// Five rules through ApplyCustomRegexes, the path the config loader
+	// uses, so the benchmark measures the real combined regex rather than a
+	// hand-built copy of it.
+	cfg := activeCfg()
+	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{
+		{Pattern: `\buser-\d+\b`, Name: "UserId"},
+		{Pattern: `\bemail-[a-z]+\b`, Name: "EmailId"},
+		{Pattern: `\bkb-\d{5}\b`, Name: "KB"},
+		{Pattern: `\bticket-[a-z0-9]+\b`, Name: "Ticket"},
+		{Pattern: `\b\d{3}-\d{2}-\d{4}\b`, Name: "SSN"}, // the one that matches
+	}); err != nil {
+		b.Fatal(err)
 	}
-	// Simulate Combined Regex Compilation (O(1) Optimization)
-	var patterns []string
-	var names []string
-	for _, r := range rules {
-		patterns = append(patterns, "("+r.Regexp.String()+")")
-		names = append(names, r.Name)
-	}
-	combined, _ := regexp.Compile(strings.Join(patterns, "|"))
-	applyCfg(func(c *Config) {
-		c.CustomRegexes = rules
-		c.CombinedCustomRegex = combined
-		c.CustomRegexNames = names
-	})
+	UpdateConfig(cfg)
 
 	token := "123-45-6789"
 	var sb strings.Builder

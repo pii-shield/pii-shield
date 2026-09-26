@@ -1,9 +1,9 @@
 package scanner
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -37,15 +37,19 @@ func TestFalsePositives(t *testing.T) {
 	})
 
 	// 2. Base64 Image/Payload Test
-	t.Run("Base64 blobs > 64 chars should be skipped", func(t *testing.T) {
-		// Generate 100 bytes of random data for base64 (entropy is perfectly random!)
+	t.Run("Base64 blobs > 64 chars are skipped above confidence 1.2", func(t *testing.T) {
+		// 100 pseudo-random bytes from a fixed seed: high entropy, and the
+		// same input on every run.
 		raw := make([]byte, 100)
-		rand.Read(raw)
+		_, _ = rand.New(rand.NewSource(1)).Read(raw)
 		b64 := base64.StdEncoding.EncodeToString(raw)
 
 		input := fmt.Sprintf("Payload: %s", b64)
 		output := ScanAndRedact(input)
-		// We expect the Payload to NOT be redacted because it doesn't have a sensitive key context like 'secret:'
+		// Kept only because this test raises ConfidenceThreshold to 1.5. At the
+		// default (1.0) such a blob is redacted even without a key (F3; see
+		// base64_blob_test.go) — the absence of a sensitive key is not what
+		// keeps it.
 		if output != input {
 			t.Errorf("Expected raw base64 pass-through, got %s", output)
 		}

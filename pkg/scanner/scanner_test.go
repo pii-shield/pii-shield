@@ -32,13 +32,19 @@ func TestScanner_Multilingual(t *testing.T) {
 		},
 	}
 
-	// Disable bigram check for multilingual tests to avoid false positives on non-English text
-	applyCfg(func(c *Config) { c.DisableBigramCheck = true })
-	defer applyCfg(func(c *Config) { c.DisableBigramCheck = false })
+	// At the default config (bigrams on): since F5 bigrams are scored only on
+	// ASCII pairs, so non-English text needs no special setup. The line must
+	// come back byte for byte; the per-word checks below only name what broke.
+	savedCfg := activeCfg()
+	UpdateConfig(campaignConfig())
+	defer UpdateConfig(savedCfg)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ScanAndRedact(tt.input)
+			if got != tt.input {
+				t.Errorf("line changed: %q -> %q", tt.input, got)
+			}
 			for _, safe := range tt.expectedSafe {
 				if !strings.Contains(got, safe) {
 					t.Errorf("Expected safe word %q to be present, but it was redacted or modified. Got: %s", safe, got)
@@ -106,9 +112,6 @@ func TestScanner_NegativeCases(t *testing.T) {
 		c.MinSecretLength = 6
 	})
 	defer UpdateConfig(savedCfg)
-
-	// Reset sensitive keys to default for this test to ensure "password" and "key" are caught
-	// (Actual implementation does not expose Reset, but defaults are loaded in init)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
