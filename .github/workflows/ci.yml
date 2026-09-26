@@ -62,6 +62,13 @@ jobs:
       working-directory: operator
       run: go test -v -race -coverprofile=cover.out ./...
 
+    # The envtest suite is behind //go:build integration, so the step above
+    # skips it: it starts a real kube-apiserver and checks the CRD schema and
+    # the status subresource, which the fake client of the unit tests cannot.
+    - name: Run Operator Integration Tests (envtest)
+      working-directory: operator
+      run: make test-integration
+
     - name: Lint Helm Charts
       run: |
         helm lint charts/pii-shield

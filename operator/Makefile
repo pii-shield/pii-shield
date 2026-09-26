@@ -65,8 +65,15 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate fmt vet setup-envtest ## Run tests, including the envtest integration suite.
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -tags=integration $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+
+# The envtest suite (//go:build integration) starts a local kube-apiserver and
+# etcd, so it checks what the fake client cannot: the CRD schema and the status
+# subresource. Without the build tag, plain go test skips it.
+.PHONY: test-integration
+test-integration: setup-envtest ## Run only the envtest integration suite.
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -tags=integration -count=1 ./internal/controller/...
 
 # The e2e suite lives in tests/run_e2e.sh: it builds the operator and agent
 # images, loads them into the local Kind/minikube cluster, installs the Helm
