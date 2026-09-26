@@ -208,7 +208,7 @@ To run the envtest-based controller integration suite:
 ./scripts/test-operator-integration.sh
 ```
 
-These tests start a local Kubernetes API server and etcd through `envtest`, so they require permission to bind to `127.0.0.1`. In restricted sandboxes, run them in a local shell, Docker environment, or CI runner that allows localhost bind.
+The script calls `make -C operator test-integration`, which downloads the envtest binaries for the Kubernetes version in `operator/go.mod` on first use. CI runs the same target on every push. These tests start a local Kubernetes API server and etcd through `envtest`, so they require permission to bind to `127.0.0.1`. In restricted sandboxes, run them in a local shell, Docker environment, or CI runner that allows localhost bind.
 
 ## Support
 
