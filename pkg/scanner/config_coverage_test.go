@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 )
@@ -24,30 +23,24 @@ func TestLoadConfigEdgeCases(t *testing.T) {
 	oldConfig := activeCfg()
 	defer UpdateConfig(oldConfig)
 
-	oldSalt := os.Getenv("PII_SALT")
-	oldThreshold := os.Getenv("PII_ENTROPY_THRESHOLD")
-	oldAdaptive := os.Getenv("PII_ADAPTIVE_THRESHOLD")
-	oldSamples := os.Getenv("PII_ADAPTIVE_SAMPLES")
-	oldKeys := os.Getenv("PII_SENSITIVE_KEYS")
-	defer func() {
-		os.Setenv("PII_SALT", oldSalt)
-		os.Setenv("PII_ENTROPY_THRESHOLD", oldThreshold)
-		os.Setenv("PII_ADAPTIVE_THRESHOLD", oldAdaptive)
-		os.Setenv("PII_ADAPTIVE_SAMPLES", oldSamples)
-		os.Setenv("PII_SENSITIVE_KEYS", oldKeys)
-	}()
-
-	// Apply test environment variables
-	os.Setenv("PII_SALT", "short123") // Less than 16 bytes
-	os.Setenv("PII_ENTROPY_THRESHOLD", "invalid_float")
-	os.Setenv("PII_ADAPTIVE_THRESHOLD", "true")
-	os.Setenv("PII_ADAPTIVE_SAMPLES", "50")
-	os.Setenv("PII_SENSITIVE_KEYS", "custom1,custom2 ")
+	// t.Setenv restores each variable, including unsetting one that was not
+	// set before; the old manual restore wrote "" back instead.
+	t.Setenv("PII_SALT", "short123") // Less than 16 bytes
+	t.Setenv("PII_ENTROPY_THRESHOLD", "invalid_float")
+	t.Setenv("PII_ADAPTIVE_THRESHOLD", "true")
+	t.Setenv("PII_ADAPTIVE_SAMPLES", "50")
+	t.Setenv("PII_SENSITIVE_KEYS", "custom1,custom2 ")
 
 	cfg := loadConfig()
 
 	if string(cfg.Salt) != "short123" {
 		t.Errorf("expected salt 'short123', got %s", cfg.Salt)
+	}
+	if cfg.EntropyThreshold != DefaultEntropyThreshold {
+		t.Errorf("invalid PII_ENTROPY_THRESHOLD: expected the default %v, got %v", DefaultEntropyThreshold, cfg.EntropyThreshold)
+	}
+	if !cfg.AdaptiveThreshold {
+		t.Errorf("PII_ADAPTIVE_THRESHOLD=true was not applied")
 	}
 	if cfg.AdaptiveBaselineSamples != 50 {
 		t.Errorf("expected 50 adaptive samples, got %d", cfg.AdaptiveBaselineSamples)

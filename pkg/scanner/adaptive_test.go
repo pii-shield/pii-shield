@@ -1,50 +1,37 @@
 package scanner
 
 import (
+	"math"
 	"testing"
 )
 
-func TestAdaptiveThreshold_Integration(t *testing.T) {
-	// 1. Reset State
-	globalBaseline.Reset()
-	if globalBaseline.IsReady() {
-		t.Error("Baseline should not be ready after reset")
+// TestBaselineThresholdIsMeanPlusTwoSigma checks readiness and the formula on
+// a local baseline, so no global state is left behind. The samples alternate
+// 3.0 and 4.0: mean 3.5, population stddev 0.5, threshold 4.5. The old test fed
+// a constant, where stddev is 0 and any mean + k*stddev gives the same answer.
+func TestBaselineThresholdIsMeanPlusTwoSigma(t *testing.T) {
+	stats := newBaselineStats(100)
+	for i := 0; i < 99; i++ {
+		stats.Update(3.0 + float64(i%2))
 	}
-
-	// 2. Train with safe samples (low entropy)
-	// We use direct Update calls to avoid ScanAndRedact overhead/complexity
-	safeEntropy := 3.5
-	// Feed 110 samples (default maxSamples is 100)
-	for i := 0; i < 110; i++ {
-		globalBaseline.Update(safeEntropy)
+	if _, ready := stats.GetThreshold(); ready || stats.IsReady() {
+		t.Fatal("baseline ready before maxSamples")
 	}
-
-	// 3. Verify Ready State
-	if !globalBaseline.IsReady() {
-		t.Error("Baseline should be ready after >100 samples")
+	stats.Update(4.0)
+	threshold, ready := stats.GetThreshold()
+	if !ready || !stats.IsReady() {
+		t.Fatal("baseline not ready at maxSamples")
 	}
-
-	// 4. Verify Threshold Calculation
-	// With constant entropy 3.5, mean=3.5, stddev=0.
-	// Threshold = mean + 2*stddev = 3.5.
-	threshold, ready := globalBaseline.GetThreshold()
-	if !ready {
-		t.Error("GetThreshold should return ready=true")
+	if math.Abs(threshold-4.5) > 1e-9 {
+		t.Errorf("threshold = %v, want mean + 2*stddev = 4.5", threshold)
 	}
-
-	// Floating point comparison
-	if threshold < 3.49 || threshold > 3.51 {
-		t.Errorf("Expected threshold ~3.5, got %f", threshold)
-	}
-
-	// 5. Verify partial update
-	globalBaseline.Reset()
-	globalBaseline.Update(5.0)
-	_, ready = globalBaseline.GetThreshold()
-	if ready {
-		t.Error("Baseline should not be ready with 1 sample")
+	// Samples past maxSamples are ignored: the baseline is frozen once ready.
+	stats.Update(100)
+	if again, _ := stats.GetThreshold(); again != threshold {
+		t.Errorf("threshold moved after the baseline was full: %v -> %v", threshold, again)
 	}
 }
+
 func TestBaselineStats_HardReset(t *testing.T) {
 	// 1. Create a baseline and fill it completely
 	stats := newBaselineStats(5) // Small size for quick testing

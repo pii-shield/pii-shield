@@ -64,20 +64,34 @@ func TestCustomRegexFallbackPath(t *testing.T) {
 }
 
 // TestAdaptiveThresholdPath covers the AdaptiveThreshold branches in
-// processSingleToken: the baseline Update on safe tokens, and — once the
-// baseline is ready — the GetThreshold read that replaces the static threshold.
+// processSingleToken: the baseline Update on scored tokens and, once the
+// baseline is ready, the GetThreshold read that replaces the static threshold.
+// It used to train on "the quick brown fox…", whose words are all shorter than
+// MinSecretLength and never reach the scorer, so the baseline never became
+// ready and the test asserted nothing (audit 2026-09-25). zebra42 scores 3.31:
+// under the static 3.6 threshold, above the ~2.8 baseline learned here.
 func TestAdaptiveThresholdPath(t *testing.T) {
 	oldCfg := activeCfg()
 	defer UpdateConfig(oldCfg)
+	globalBaseline.Reset()
+	defer globalBaseline.Reset()
+
 	cfg := campaignConfig()
+	UpdateConfig(cfg)
+	if out := ScanAndRedact("value zebra42 end"); out != "value zebra42 end" {
+		t.Fatalf("static threshold already hides the probe token: %q", out)
+	}
+
 	cfg.AdaptiveThreshold = true
 	UpdateConfig(cfg)
-
-	// Feed enough safe, low-entropy tokens to move the baseline past its
-	// readiness sample count; every safe token hits the Update path, and once
-	// the baseline is ready the GetThreshold branch is exercised too.
-	for i := 0; i < 200; i++ {
-		ScanAndRedact("the quick brown fox jumps over the lazy dog")
+	for i := 0; i < 30; i++ {
+		ScanAndRedact("ordinary operational message received successfully")
 	}
-	_ = ScanAndRedact("value ordinaryword end")
+	threshold, ready := globalBaseline.GetThreshold()
+	if !ready || threshold >= cfg.EntropyThreshold {
+		t.Fatalf("baseline not learned: threshold=%v ready=%v", threshold, ready)
+	}
+	if out := ScanAndRedact("value zebra42 end"); strings.Contains(out, "zebra42") {
+		t.Errorf("adaptive threshold %.2f did not apply: %q", threshold, out)
+	}
 }

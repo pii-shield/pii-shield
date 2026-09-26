@@ -20,7 +20,8 @@ func BenchmarkScanAndRedact(b *testing.B) {
 }
 
 // BenchmarkScanAndRedact_Parallel measures performance under high concurrency
-// to detect mutex contention in adaptive threshold logic.
+// to detect contention on shared state (the config snapshot, the HMAC pool).
+// Adaptive threshold mode is off by default, so its mutex is not exercised.
 func BenchmarkScanAndRedact_Parallel(b *testing.B) {
 	line := `{"level":"info","ts":1698765432,"msg":"API request processed","request_id":"req_12345abcde","auth_token":"bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.secret","trace_id":"0af7651916cd43dd8448eb211c80319c"}`
 

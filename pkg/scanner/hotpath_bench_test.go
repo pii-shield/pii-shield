@@ -5,10 +5,11 @@ import (
 	"testing"
 )
 
-// Micro-benchmarks isolating the Phase 4 hot-path functions (O2 calculateShannon,
-// O3 calculateBigramAdjustment, O4 redactWithHMAC). They exist so benchstat can
-// attribute a win to the specific function; end-to-end effects show up in
-// BenchmarkScanAndRedact / BenchmarkThroughput.
+// Micro-benchmarks isolating the Phase 4 hot-path functions: calculateShannon
+// (O2), calculateBigramAdjustment (O3) and redactWithHMAC (the O4 candidate,
+// which was dropped; the benchmark stays as a baseline). They exist so
+// benchstat can attribute a win to the specific function; end-to-end effects
+// show up in BenchmarkScanAndRedact / BenchmarkThroughput.
 
 var benchShannonTokens = []string{
 	"AbC9xY2kQ8pLmN0r",

@@ -8,6 +8,12 @@ import (
 	"testing"
 )
 
+// Archived research tool. F6 (length-dependent entropy thresholds) was
+// RETIRED in #214: a per-bucket threshold that won on this synthetic corpus
+// lost on real logs. The sweep stays so the result can be reproduced; it
+// gates nothing, and a new threshold idea should start from it rather than
+// from scratch.
+//
 // TestF6ThresholdSweep asks whether one entropy threshold per length bucket
 // beats the global one on the frozen F6 corpus. It runs end to end: for each
 // bucket and each threshold the keyless check from TestEntropyThresholdCorpus
