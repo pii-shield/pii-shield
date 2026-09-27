@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -587,6 +588,35 @@ func CalculateComplexity(token string) float64 {
 // Scanner instance's bigram/entropy config is honored instead of silently
 // falling back to the package-level default.
 func (st *configState) calculateComplexity(token string) float64 {
+	// A compound of word-shaped parts (gpt-4o-mini, search.max_results,
+	// sentence-transformers/all-MiniLM-L6-v2) is scored as its most complex
+	// part. Scored whole it looked random for three reasons that say nothing
+	// about randomness: Shannon adds up across distinct words, the separator
+	// counts as an extra character class, and every pair touching a separator
+	// or a digit is an unknown bigram, which pulls an English compound out of
+	// the English band. A secret is a random run, and a random run fails the
+	// part shape or scores high on its own, so it is still caught.
+	if !st.isWordCompound(token) {
+		return st.calculateRawComplexity(token)
+	}
+	best := 0.0
+	for part, next := nextCompoundPart(token, 0); part != ""; part, next = nextCompoundPart(token, next) {
+		// A part cannot score above log2(len) plus the largest class bonus
+		// (1.5) and bigram adjustment (0.5); skip it when that bound cannot
+		// beat the best part so far.
+		if len(part) < len(logTable) && logTable[len(part)]+2.0 <= best {
+			continue
+		}
+		if s := st.calculateRawComplexity(part); s > best {
+			best = s
+		}
+	}
+	return best
+}
+
+// calculateRawComplexity scores token as one run of characters: Shannon
+// entropy plus the character-class bonus plus the bigram adjustment.
+func (st *configState) calculateRawComplexity(token string) float64 {
 	if len(token) == 0 {
 		return 0
 	}
@@ -601,6 +631,134 @@ func (st *configState) calculateComplexity(token string) float64 {
 	bigramScore := st.calculateBigramAdjustment(token)
 
 	return entropy + bonus + bigramScore
+}
+
+// isWordCompound reports whether token, split on - . _ / , reads as a
+// compound of words. Every part must be word-shaped: ASCII letters and digits
+// only, at most 24 characters, laid out as letters, then up to 8 digits, then
+// up to 2 letters (claude, MiniLM, v2, Qwen2, 4o, 70b, 20250805), with no
+// single lowercase letter between capitals in a run of four or more letters
+// (XkQpZm is not a word). At least one part must be a word of three or more
+// letters, and the token must not name a secret (see namesSecret). And the
+// letters must read like words: the pairs of adjacent letters inside the parts
+// average above compoundMinBigramAvg, unless there are only one or two of
+// them (gpt-4o-2024-08-06), too few to judge. Without that test a recovery
+// code such as pdgw-mln1-45zz-52wl passed: each of its chunks fits the shape
+// and is too short to score as random on its own. For the same reason parts
+// that all have one length of four or more are a generated code
+// (abcd-efgh-ijkl-mnop, XXXXX-XXXXX-XXXXX), not words: the short English table
+// lets about a quarter of random lowercase groups through the bigram test,
+// and group size is what code generators fix.
+func (st *configState) isWordCompound(token string) bool {
+	if st.config.DisableBigramCheck || len(token) > 128 || !strings.ContainsAny(token, "-._/") {
+		return false
+	}
+	first, next := nextCompoundPart(token, 0)
+	nParts, hasWord, sameLength := 0, false, len(first) >= 4
+	sum, pairs := 0.0, 0
+	for p := first; p != ""; p, next = nextCompoundPart(token, next) {
+		nParts++
+		sameLength = sameLength && len(p) == len(first)
+		letters, ok := wordShapedPart(p)
+		if !ok {
+			return false
+		}
+		if letters == len(p) && letters >= 3 {
+			hasWord = true
+		}
+		for i := 1; i < len(p); i++ {
+			if isASCIILetter(p[i-1]) && isASCIILetter(p[i]) {
+				sum += st.letterBigram(p[i-1], p[i])
+				pairs++
+			}
+		}
+	}
+	if nParts < 2 || !hasWord || sameLength || (pairs > 2 && sum/float64(pairs) <= compoundMinBigramAvg) {
+		return false
+	}
+	return !st.namesSecret(token)
+}
+
+// nextCompoundPart returns the first non-empty part of token at or after i,
+// split on - . _ / , and the index to continue from; "" when there is none.
+func nextCompoundPart(token string, i int) (string, int) {
+	for i < len(token) {
+		start := i
+		for i < len(token) && token[i] != '-' && token[i] != '.' && token[i] != '_' && token[i] != '/' {
+			i++
+		}
+		if i > start {
+			return token[start:i], i + 1
+		}
+		i++
+	}
+	return "", len(token)
+}
+
+// namesSecret reports whether token contains one of the configured sensitive
+// words, by the same substring and pattern rules isSensitiveKey uses. A
+// compound that names a secret (auth_CZIenvzL, pass-CknfJJmpAlpn) is where a
+// secret sits behind a word, so it keeps the whole-token score. This cannot
+// call isSensitiveKey itself, which scores long keys and would recurse.
+func (st *configState) namesSecret(token string) bool {
+	// isWordCompound caps token at 128 bytes, so the lowered copy lives on the
+	// stack.
+	var buf [128]byte
+	low := buf[:len(token)]
+	for i := 0; i < len(token); i++ {
+		low[i] = lowerASCIIByte(token[i])
+	}
+	for _, sk := range st.config.SensitiveKeys {
+		if bytes.Contains(low, []byte(sk)) {
+			return true
+		}
+	}
+	return st.sensitiveRegex != nil && st.sensitiveRegex.MatchString(token)
+}
+
+// compoundMinBigramAvg is the letter-pair average a compound must exceed to be
+// scored part by part. Random letters average about -6.6 against the English
+// table at the default -7.0 for an unknown pair (a fifth of pairs are in the
+// table, near -5.3); on the corpora the cut was chosen on, real model ids and
+// setting keys with three or more pairs measured -6.44 and up and random chunk
+// codes -6.67 and down.
+const compoundMinBigramAvg = -6.5
+
+// wordShapedPart reports whether p is shaped like one part of an identifier
+// (see isWordCompound) and returns the length of its leading letter run.
+func wordShapedPart(p string) (int, bool) {
+	if len(p) > 24 {
+		return 0, false
+	}
+	i := 0
+	for i < len(p) && isASCIILetter(p[i]) {
+		i++
+	}
+	letters := i
+	for i < len(p) && isASCIIDigit(p[i]) {
+		i++
+	}
+	if i-letters > 8 {
+		return 0, false
+	}
+	tail := i
+	for i < len(p) && isASCIILetter(p[i]) {
+		i++
+	}
+	if i != len(p) || i-tail > 2 {
+		return 0, false
+	}
+	if letters >= 4 {
+		for j := 0; j < letters; j++ {
+			lowerAlone := p[j] >= 'a' && p[j] <= 'z' &&
+				(j == 0 || p[j-1] < 'a' || p[j-1] > 'z') &&
+				(j+1 == letters || p[j+1] < 'a' || p[j+1] > 'z')
+			if lowerAlone {
+				return 0, false
+			}
+		}
+	}
+	return letters, true
 }
 
 func calculateShannon(token string) float64 {

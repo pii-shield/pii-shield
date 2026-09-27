@@ -88,7 +88,13 @@ func TestMainSuccess(t *testing.T) {
 // block until a writer connects, redact what it reads, and reopen after EOF so a
 // second writer is still processed.
 func TestReadFIFO(t *testing.T) {
-	dir := t.TempDir()
+	// Not t.TempDir: if readFIFO cannot be stopped, the cleanup below must be
+	// able to leave the pipe in place rather than have it removed under a live
+	// reopen loop.
+	dir, err := os.MkdirTemp("", "TestReadFIFO")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
 	fifo := filepath.Join(dir, "log.pipe")
 	if err := syscall.Mkfifo(fifo, 0o666); err != nil {
 		t.Fatalf("mkfifo: %v", err)
@@ -114,7 +120,7 @@ func TestReadFIFO(t *testing.T) {
 		readFIFO(fifo, false, "open", wOut, stop)
 	}()
 
-	// readFIFO must not outlive the test: once t.TempDir() is removed, a
+	// readFIFO must not outlive the pipe: once the directory is removed, a
 	// surviving reopen loop would log.Fatalf on the deleted pipe and take the
 	// whole test binary down with it.
 	t.Cleanup(func() {
@@ -124,10 +130,20 @@ func TestReadFIFO(t *testing.T) {
 		// writer until the loop exits: O_NONBLOCK fails with ENXIO instead of
 		// blocking when readFIFO is not (yet) waiting in open, so this cannot
 		// deadlock against a loop that has already stopped.
+		//
+		// A nudge only reaches EOF once every writer is closed: a writer fd
+		// left open anywhere keeps readFIFO in Read for good. So give up after
+		// a deadline, fail the test, and leave the pipe in place; the stray
+		// loop then blocks forever instead of hanging the binary until the
+		// -timeout panic or log.Fatalf-ing on a removed pipe.
+		deadline := time.After(10 * time.Second)
 		for done := false; !done; {
 			select {
 			case <-fifoDone:
 				done = true
+			case <-deadline:
+				t.Errorf("readFIFO did not stop within 10s (a FIFO writer is still open?); leaving %s in place", dir)
+				return
 			default:
 				if w, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, os.ModeNamedPipe); err == nil {
 					_ = w.Close()
@@ -138,18 +154,9 @@ func TestReadFIFO(t *testing.T) {
 		_ = wOut.Close()
 		<-scanDone
 		_ = rOut.Close()
+		_ = os.RemoveAll(dir)
 	})
 
-	writeLine := func(s string) {
-		w, err := os.OpenFile(fifo, os.O_WRONLY, os.ModeNamedPipe)
-		if err != nil {
-			t.Fatalf("open pipe for write: %v", err)
-		}
-		if _, err := io.WriteString(w, s); err != nil {
-			t.Fatalf("write pipe: %v", err)
-		}
-		w.Close()
-	}
 	nextLine := func() string {
 		select {
 		case line := <-outCh:
@@ -159,11 +166,46 @@ func TestReadFIFO(t *testing.T) {
 			return ""
 		}
 	}
+	// sendLine connects one writer, writes s and returns the sanitized line.
+	// After a writer closes, readFIFO's reader sees EOF and closes its fd, but
+	// a new writer can open the pipe in between, while that old fd still
+	// counts as a reader. Two things follow. The write can fail with EPIPE if
+	// the old reader closes first; nothing was delivered (s is under
+	// PIPE_BUF), so reopen and retry. Or the write lands in the old reader's
+	// buffer just before it closes; the kernel keeps those bytes only while a
+	// writer is open, so hold w until the line comes back and the reopened
+	// reader picks them up. The deferred Close also runs on t.Fatalf, so a
+	// failure here never leaves a writer that keeps readFIFO from seeing EOF.
+	sendLine := func(s string) string {
+		var w *os.File
+		defer func() {
+			if w != nil {
+				_ = w.Close()
+			}
+		}()
+		const maxAttempts = 20
+		for attempt := 1; ; attempt++ {
+			var err error
+			w, err = os.OpenFile(fifo, os.O_WRONLY, os.ModeNamedPipe)
+			if err != nil {
+				t.Fatalf("open pipe for write: %v", err)
+			}
+			_, err = io.WriteString(w, s)
+			if err == nil {
+				break
+			}
+			_ = w.Close()
+			w = nil
+			if !errors.Is(err, syscall.EPIPE) || attempt == maxAttempts {
+				t.Fatalf("write pipe (attempt %d): %v", attempt, err)
+			}
+		}
+		return nextLine()
+	}
 
 	// First writer; reading its sanitized line back confirms readFIFO blocked on
 	// the empty pipe until a writer connected, then processed the input.
-	writeLine("contact john.doe@example.com now\n")
-	line1 := nextLine()
+	line1 := sendLine("contact john.doe@example.com now\n")
 	if strings.Contains(line1, "john.doe@example.com") {
 		t.Errorf("email not redacted in FIFO output: %q", line1)
 	}
@@ -173,8 +215,7 @@ func TestReadFIFO(t *testing.T) {
 
 	// First writer has closed (EOF). A second writer must still be served, which
 	// only works if readFIFO reopened the pipe after EOF instead of exiting.
-	writeLine("second line ok\n")
-	line2 := nextLine()
+	line2 := sendLine("second line ok\n")
 	if !strings.Contains(line2, "second line ok") {
 		t.Errorf("second writer not processed; FIFO not reopened after EOF: %q", line2)
 	}
