@@ -13,6 +13,7 @@ import (
 // 6742381.25 scored 3.62 (entropy 3.12 + 0.5 class bonus for the dot)
 // against the 3.6 default threshold and was redacted.
 func TestPlainDecimalNotRedacted(t *testing.T) {
+	useDefaultConfig(t)
 	inputs := []string{
 		"6742381.25",
 		"value 6742381.25 end",
@@ -69,6 +70,7 @@ func TestPlainDecimalHelper(t *testing.T) {
 // TestPlainDecimalRegressions proves the safe rule does not open recall
 // holes: forced-sensitive values and Luhn card numbers still redact.
 func TestPlainDecimalRegressions(t *testing.T) {
+	useDefaultConfig(t)
 	// Sensitive key forces the value regardless of isSafe.
 	out := ScanAndRedact("password=6742381.25")
 	if !strings.Contains(out, "[HIDDEN") || strings.Contains(out, "6742381.25") {
@@ -112,6 +114,7 @@ func TestPlainDecimalRegressions(t *testing.T) {
 // 1000 seeded floats in both fixed and shortest-repr formats, zero
 // redactions expected.
 func TestFullPrecisionFloatCorpus(t *testing.T) {
+	useDefaultConfig(t)
 	rng := rand.New(rand.NewSource(42))
 	redacted := 0
 	for i := 0; i < 1000; i++ {

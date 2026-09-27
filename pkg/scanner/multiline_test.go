@@ -88,6 +88,7 @@ func TestScanAndRedactText_PreservesLineCount(t *testing.T) {
 }
 
 func TestScanAndRedactText_PackageLevelUsesGlobalConfig(t *testing.T) {
+	useDefaultConfig(t)
 	in := "x\n4532015112.830366\n"
 	if got := ScanAndRedactText(in); got != in {
 		t.Fatalf("ScanAndRedactText(%q) = %q, want unchanged", in, got)

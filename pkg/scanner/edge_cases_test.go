@@ -101,7 +101,7 @@ func TestDeepEqualsChainBounded(t *testing.T) {
 	if testing.Short() {
 		t.Skip("2MB input")
 	}
-	UpdateConfig(campaignConfig())
+	useDefaultConfig(t)
 	in := strings.Repeat("a=", 1_000_000) + "b"
 	done := make(chan string, 1)
 	go func() { done <- ScanAndRedact(in) }()
@@ -119,7 +119,7 @@ func TestDeepEqualsChainBounded(t *testing.T) {
 // quoted-token unwrap path (processTokenLogic → scanSegment); it must be
 // bounded by the same depth limit.
 func TestDeepQuoteNestingBounded(t *testing.T) {
-	UpdateConfig(campaignConfig())
+	useDefaultConfig(t)
 	in := strings.Repeat(`"`, 100_000)
 	done := make(chan string, 1)
 	go func() { done <- ScanAndRedact(in) }()

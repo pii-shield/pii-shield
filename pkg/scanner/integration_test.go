@@ -19,8 +19,12 @@ func TestGolden(t *testing.T) {
 	for _, inputPath := range matches {
 		name := filepath.Base(inputPath)
 		t.Run(name, func(t *testing.T) {
-			// FORCE DETERMINISTIC SALT for golden file stability
-			cfg := activeCfg()
+			// FORCE DETERMINISTIC SALT for golden file stability, on the
+			// shipped defaults rather than whatever an earlier test left,
+			// and restore the previous config afterwards.
+			old := activeCfg()
+			t.Cleanup(func() { UpdateConfig(old) })
+			cfg := campaignConfig()
 			cfg.Salt = []byte("integration-test-salt-1234567890")
 			UpdateConfig(cfg)
 

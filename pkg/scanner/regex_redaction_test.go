@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"os"
 	"regexp"
 	"testing"
 )
@@ -82,12 +81,12 @@ func TestScanner_CustomRegexRedaction(t *testing.T) {
 			tConfig.CustomRegexes = []CustomRegexRule{} // Reset
 
 			if tt.regexConfig != "" {
-				// Simulate loading from env
-				os.Setenv("PII_CUSTOM_REGEX_LIST", tt.regexConfig)
+				// Simulate loading from env. t.Setenv restores the
+				// variable (or unsets it) when the subtest ends.
+				t.Setenv("PII_CUSTOM_REGEX_LIST", tt.regexConfig)
 				// Re-load config to parse regexes.
 				// Note: In real app, init() runs once. Here we simulate it.
 				tConfig = loadConfig()
-				os.Unsetenv("PII_CUSTOM_REGEX_LIST")
 			}
 
 			// Swap global config. Reset entropy threshold to a very high value
@@ -154,18 +153,14 @@ func TestScanner_SafeRegexWhitelist(t *testing.T) {
 			tConfig.CustomRegexes = []CustomRegexRule{}
 			tConfig.SafeRegexes = []CustomRegexRule{}
 
-			if tt.safeConfig != "" {
-				os.Setenv("PII_SAFE_REGEX_LIST", tt.safeConfig)
-			}
-			if tt.customConfig != "" {
-				os.Setenv("PII_CUSTOM_REGEX_LIST", tt.customConfig)
-			}
+			// Both are set, empty when the case does not use one, so a value
+			// from the developer's shell cannot leak into loadConfig.
+			t.Setenv("PII_SAFE_REGEX_LIST", tt.safeConfig)
+			t.Setenv("PII_CUSTOM_REGEX_LIST", tt.customConfig)
 
 			// Reload config
 			if tt.safeConfig != "" || tt.customConfig != "" {
 				tConfig = loadConfig()
-				os.Unsetenv("PII_SAFE_REGEX_LIST")
-				os.Unsetenv("PII_CUSTOM_REGEX_LIST")
 			}
 			// Ensure entropy is sensitive enough to catch the "High Entropy" case if whitelist fails
 			if tt.name == "Conflict: Whitelist Wins over High Entropy" {

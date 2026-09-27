@@ -33,6 +33,7 @@ func TestNewScanner_UsesOwnConfig(t *testing.T) {
 // leaves the package-level default configuration (and ScanAndRedact's
 // behavior) untouched.
 func TestNewScanner_DoesNotMutateGlobal(t *testing.T) {
+	useDefaultConfig(t)
 	const line = "token=hi"
 
 	cfg := DefaultConfig()
