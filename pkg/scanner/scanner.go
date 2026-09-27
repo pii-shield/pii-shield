@@ -1045,6 +1045,14 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 		// pass over already-redacted text.
 		if r == '[' && strings.HasPrefix(segment[i:], "[HIDDEN") {
 			if end := strings.IndexByte(segment[i:], ']'); end != -1 {
+				// Except a marker in the password slot of a URL
+				// (postgres://app:[HIDDEN:x]@db/app): split there, the
+				// host and path would be scored on their own as a new token.
+				if i > start && strings.HasPrefix(segment[i+end+1:], "@") &&
+					strings.HasSuffix(segment[start:i], ":") && strings.Contains(segment[start:i], "://") {
+					i += end + 1
+					continue
+				}
 				if i > start {
 					token := segment[start:i]
 					if seenInvalid {
@@ -1134,6 +1142,13 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	// [HIDDEN:abc123]( inside a quoted pair, goes back through the tokenizer,
 	// which splits the marker off.
 	if strings.Contains(rawToken, "[HIDDEN") {
+		// A URL whose password is a marker from an earlier pass (see the
+		// same guard in scanSegment) goes to the URL handling, which keeps
+		// the marker.
+		if s, e, ok := urlPassword(rawToken); ok && isRedacted(rawToken[s:e]) {
+			st.maskURLParameters(rawToken, sb, depth)
+			return false
+		}
 		if isRedacted(trimQuotes(rawToken)) {
 			sb.WriteString(rawToken)
 			return false
@@ -1823,6 +1838,21 @@ func indexWhitespace(s string) int {
 }
 
 func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth int) {
+	// The password in user:password@ comes first: it can hold '/', '?' or '@',
+	// so it has to be cut out before anything splits the URL on those.
+	if pwStart, pwEnd, ok := urlPassword(url); ok {
+		sb.WriteString(url[:pwStart])
+		if pw := url[pwStart:pwEnd]; isRedacted(pw) {
+			sb.WriteString(pw)
+		} else if label := matchSignature(pw); label != "" {
+			st.redactWithHMAC(pw, st.entityLabel(label), "signature", sb)
+		} else {
+			st.redactWithHMAC(pw, st.entityLabel("key"), "entropy", sb)
+		}
+		st.maskURLParameters(url[pwEnd:], sb, depth)
+		return
+	}
+
 	// No query text: nothing to mask. This guard must come first, and it is
 	// load-bearing. A quoted User-Agent carries tokens like
 	// `+http://www.bing.com/bingbot.htm`, which arrive here on the `://`
@@ -1885,8 +1915,10 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 				key := kv[0]
 				val := kv[1]
 
-				// An empty value has nothing to hide (see processSingleToken).
-				if val == "" || st.isSafeRegexWhitelisted(val) {
+				// An empty value has nothing to hide (see processSingleToken),
+				// and a marker from an earlier pass is already hidden: hashing
+				// it again gave quoted URLs a new marker on every pass.
+				if val == "" || isRedacted(val) || st.isSafeRegexWhitelisted(val) {
 					sb.WriteString(param)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
@@ -1907,6 +1939,53 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 			}
 		}
 	}
+}
+
+// urlPassword finds the password of a user:password@ userinfo right after the
+// first "://" in s and returns its bounds, or ok=false when there is none.
+//
+// The userinfo ends at the first '@', extended past any further '@' that comes
+// before the host ends at '/', '?', '#' or a space (u:p@ss@host hides p@ss). It is not stopped at
+// '/', '?' or '#': generated passwords carry them unencoded often enough, and
+// stopping there left the tail of the password in clear. Instead the user part,
+// before the first ':', must hold none of / ? # = & — a path or a query that
+// happens to contain ':' and '@' (https://medium.com/@alice,
+// /login?next=a:b@c, unpkg.com/react@18) has one of them there. A "password"
+// that is only digits followed by '/' is a port and a path
+// (https://host:8080/users/@alice), not a password. An empty password holds
+// nothing to hide.
+func urlPassword(s string) (start, end int, ok bool) {
+	i := strings.Index(s, "://")
+	if i < 0 {
+		return 0, 0, false
+	}
+	auth := i + 3
+	rel := strings.IndexByte(s[auth:], '@')
+	if rel < 0 {
+		return 0, 0, false
+	}
+	at := auth + rel
+	for {
+		next := strings.IndexByte(s[at+1:], '@')
+		if next < 0 || strings.ContainsAny(s[at+1:at+1+next], "/?# \t") {
+			break
+		}
+		at += 1 + next
+	}
+	colon := strings.IndexByte(s[auth:at], ':')
+	if colon < 0 || strings.ContainsAny(s[auth:auth+colon], "/?#=& \t") ||
+		strings.ContainsAny(s[auth:at], " \t") {
+		return 0, 0, false
+	}
+	start, end = auth+colon+1, at
+	if start == end {
+		return 0, 0, false
+	}
+	pw := s[start:end]
+	if slash := strings.IndexByte(pw, '/'); slash > 0 && isDigits(pw[:slash]) {
+		return 0, 0, false
+	}
+	return start, end, true
 }
 
 // writeURLPath writes the part of a URL before its query. The path is not
