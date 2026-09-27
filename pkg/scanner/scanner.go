@@ -768,8 +768,10 @@ func calculateShannon(token string) float64 {
 
 	// Optimization: Stack allocation for ASCII-only tokens (common case)
 	// Checks for ASCII and populates counts in one pass.
-	// If non-ASCII found, falls back to map.
-	var counts [256]int
+	// If non-ASCII found, falls back to map. Only bytes below utf8.RuneSelf
+	// are ever counted here, so the array stops there: zeroing and ranging
+	// 256 entries cost a short token more than the counting itself.
+	var counts [utf8.RuneSelf]int
 	isASCII := true
 	totalChars := 0
 
