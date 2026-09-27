@@ -10,9 +10,9 @@ authors = [
 ]
 description = "High-performance PII redaction scanner using Go WASM (WASI)"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
-    "wasmtime>=12.0.0"
+    "wasmtime>=45.0.0"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

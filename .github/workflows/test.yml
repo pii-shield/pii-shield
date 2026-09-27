@@ -90,3 +90,29 @@ jobs:
       - name: Test Python SDK
         working-directory: sdks/python
         run: python test.py
+
+  test-python-macos-system:
+    # Apple's own /usr/bin/python3 (Xcode/CLT build, Python 3.9) is Apple-signed; wasmtime's
+    # default Mach-port trap handler got it SIGKILLed on the first wasm call. Installs the
+    # SDK from pyproject.toml so the declared wasmtime floor is what gets tested.
+    needs: test-go
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: compiled-wasm
+          path: .
+
+      - name: Install SDK into a venv from /usr/bin/python3
+        working-directory: sdks/python
+        run: |
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -c "import sys; print(sys.version)"
+          "$RUNNER_TEMP/venv/bin/pip" install .
+
+      - name: Test Python SDK
+        working-directory: sdks/python
+        run: '"$RUNNER_TEMP/venv/bin/python" test.py'

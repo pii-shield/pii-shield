@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 from dataclasses import dataclass, asdict
 from typing import List, Optional
@@ -38,6 +39,12 @@ class PiiShield:
                 wasm_path = os.path.join(os.path.dirname(__file__), "pii-shield-wasi.wasm")
         
         cfg = Config()
+        if sys.platform == "darwin":
+            # wasmtime's default macOS trap handler sets Mach exception ports on the
+            # calling thread. Apple-signed interpreters (/usr/bin/python3) guard that
+            # port, and the kernel SIGKILLs the process on the first wasm call.
+            # Signal-based trap handling works in every interpreter.
+            cfg.macos_use_mach_ports = False
         self.engine = Engine(cfg)
         self.linker = Linker(self.engine)
         
