@@ -65,3 +65,23 @@ jobs:
           git add data/
           git diff --staged --quiet || git commit -m "chore: update traffic stats $(date -u +%Y-%m-%d)"
           git push
+
+      # Search Console runs after the traffic push, so a Search Console failure
+      # still turns the run red but never holds back the day's traffic data.
+      - name: Fetch Search Console data
+        working-directory: stats-repo
+        env:
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GSC_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::warning::GSC_SERVICE_ACCOUNT_JSON secret is not set; Search Console data was not fetched"
+            exit 0
+          fi
+          python3 scripts/fetch_gsc.py
+
+      - name: Commit and push Search Console data
+        working-directory: stats-repo
+        run: |
+          git add data/
+          git diff --staged --quiet || git commit -m "chore: update search console stats $(date -u +%Y-%m-%d)"
+          git push
