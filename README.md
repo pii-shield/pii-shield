@@ -7,7 +7,7 @@ PII-Shield runs in-process — CLI, sidecar, or WASM. There is no hosted API and
 
 > **Same name, different projects.** This is not the PII Shield privacy proxy from the Microsoft developer-community blog (May 2026, [vikasgautam18/pii-shield](https://github.com/vikasgautam18/pii-shield)), not the piishield.ai or piishield.com prompt-redaction products, and not the [`pii-shield`](https://pypi.org/project/pii-shield/) package on PyPI by Intellirim. Our packages are `pii-shield-wasi` on PyPI and `@aragossa/pii-shield-wasi` on npm; in prose we call this project the PII-Shield sidecar.
 
-[![Release](https://img.shields.io/badge/release-v2.2.4-blue)](https://github.com/pii-shield/pii-shield/releases/tag/v2.2.4) ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg) ![Docker Pulls](https://img.shields.io/docker/pulls/thelisdeep/pii-shield) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/pii-shield)](https://artifacthub.io/packages/search?repo=pii-shield)<br>
+[![Release](https://img.shields.io/badge/release-v2.2.5-blue)](https://github.com/pii-shield/pii-shield/releases/tag/v2.2.5) ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg) ![Docker Pulls](https://img.shields.io/docker/pulls/thelisdeep/pii-shield) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/pii-shield)](https://artifacthub.io/packages/search?repo=pii-shield)<br>
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12945/badge)](https://www.bestpractices.dev/projects/12945) ![Go Report Card](https://goreportcard.com/badge/github.com/pii-shield/pii-shield?v=1) ![Test Coverage](https://github.com/pii-shield/pii-shield/actions/workflows/test.yml/badge.svg) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors)](https://pii-shield.com/go/sponsors?utm_source=github&utm_medium=readme-badge&utm_campaign=sponsors)
 
 "Don't let PII poison your AI models." PII-Shield ensures that sensitive data never reaches your training dataset, saving you from GDPR-forced model retraining.
@@ -84,9 +84,9 @@ This deploys the PII-Shield Operator which automatically injects highly-secure, 
 ### Docker
 Get the latest lightweight image from Docker Hub or GHCR:
 ```bash
-docker pull thelisdeep/pii-shield:2.2.4
+docker pull thelisdeep/pii-shield:2.2.5
 # OR from GitHub Container Registry (Enterprise):
-docker pull ghcr.io/pii-shield/pii-shield:2.2.4
+docker pull ghcr.io/pii-shield/pii-shield:2.2.5
 ```
 
 ### Build from Source
@@ -121,7 +121,7 @@ You can pipe any log output through PII-Shield to see it in action immediately:
 
 ```bash
 # Emulate a log with a sensitive password
-echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm ghcr.io/pii-shield/pii-shield:2.2.4
+echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm ghcr.io/pii-shield/pii-shield:2.2.5
 
 # Output: Error: User password=[HIDDEN:8f3a11] failed login
 ```
