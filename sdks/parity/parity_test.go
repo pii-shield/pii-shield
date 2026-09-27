@@ -1,14 +1,15 @@
 // Package parity holds the cross-entrypoint redaction parity golden
-// (cases.json) and the Go/CLI-side assertion. The Node and Python SDK tests
-// load the SAME cases.json and assert byte-identical output, so every
-// entrypoint (Go API, CLI, Node, Python) is proven to redact identically for a
-// given input and config. See sdks/*/test.* and issue #48.
+// (cases.json) and the Go-side assertion. The Node and Python SDK tests load
+// the SAME cases.json and assert byte-identical output against the freshly
+// built WASM kernel, so the Go API, Node and Python are proven to redact
+// identically for a given input and config. The CLI is not run here: it is
+// configured from environment variables, not this JSON. See sdks/*/test.*
+// and issue #48.
 package parity
 
 import (
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/pii-shield/pii-shield/pkg/scanner"
@@ -21,75 +22,18 @@ type parityCase struct {
 	Expected string                 `json:"expected"`
 }
 
-// sdkConfig mirrors ConfigFromSDK in cmd/wasm-ffi/main.go.
-type sdkConfig struct {
-	EntropyThreshold     float64                     `json:"entropy_threshold"`
-	Salt                 string                      `json:"salt"`
-	ConfidenceThreshold  float64                     `json:"confidence_score"`
-	MinSecretLength      int                         `json:"min_secret_length"`
-	SensitiveKeys        []string                    `json:"sensitive_keys"`
-	DisableBigramCheck   *bool                       `json:"disable_bigram_check"`
-	AdaptiveThreshold    *bool                       `json:"adaptive_threshold"`
-	SensitiveKeyPatterns []string                    `json:"sensitive_key_patterns"`
-	CustomRegexes        []scanner.CustomRegexConfig `json:"custom_regexes"`
-	SafeRegexes          []scanner.CustomRegexConfig `json:"safe_regexes"`
-}
-
-// applyConfig mirrors the config mapping in cmd/wasm-ffi/main.go init_config,
-// including the fixed default salt the WASM kernel seeds. Keep the two in sync;
-// any drift makes the Node/Python SDK tests fail against this golden.
+// applyConfig builds the config exactly as the WASM kernel's init_config does:
+// both call scanner.ConfigFromSDKJSON, so this side cannot drift from what the
+// Node and Python SDKs run. It used to be a hand-kept copy of that mapping,
+// which had already lost entity_type_labels and turned a bad
+// sensitive_key_patterns list into a test failure where the kernel drops it.
 func applyConfig(t *testing.T, c map[string]interface{}) scanner.Config {
 	t.Helper()
 	raw, err := json.Marshal(c)
 	if err != nil {
 		t.Fatalf("marshal case config: %v", err)
 	}
-	var sdk sdkConfig
-	if err := json.Unmarshal(raw, &sdk); err != nil {
-		t.Fatalf("unmarshal case config: %v", err)
-	}
-
-	cfg := scanner.DefaultConfig()
-	cfg.Salt = []byte("pii-shield-default-salt-12345678")
-	if sdk.Salt != "" {
-		cfg.Salt = []byte(sdk.Salt)
-	}
-	if sdk.EntropyThreshold > 0 {
-		cfg.EntropyThreshold = sdk.EntropyThreshold
-	}
-	if sdk.ConfidenceThreshold > 0 {
-		cfg.ConfidenceThreshold = sdk.ConfidenceThreshold
-	}
-	if sdk.MinSecretLength > 0 {
-		cfg.MinSecretLength = sdk.MinSecretLength
-	}
-	if len(sdk.SensitiveKeys) > 0 {
-		keys := make([]string, len(sdk.SensitiveKeys))
-		for i, k := range sdk.SensitiveKeys {
-			keys[i] = strings.ToLower(strings.TrimSpace(k))
-		}
-		cfg.SensitiveKeys = keys
-	}
-	if sdk.DisableBigramCheck != nil {
-		cfg.DisableBigramCheck = *sdk.DisableBigramCheck
-	}
-	if sdk.AdaptiveThreshold != nil {
-		cfg.AdaptiveThreshold = *sdk.AdaptiveThreshold
-	}
-	if len(sdk.SensitiveKeyPatterns) > 0 {
-		if err := cfg.ApplySensitiveKeyPatterns(sdk.SensitiveKeyPatterns); err != nil {
-			t.Fatalf("apply sensitive key patterns: %v", err)
-		}
-	}
-	if len(sdk.CustomRegexes) > 0 {
-		// init_config discards this error: an invalid rule is skipped, the rest apply (B14).
-		_ = cfg.ApplyCustomRegexes(sdk.CustomRegexes)
-	}
-	if len(sdk.SafeRegexes) > 0 {
-		// init_config discards this error: an invalid rule is skipped, the rest apply (B14).
-		_ = cfg.ApplySafeRegexes(sdk.SafeRegexes)
-	}
-	return cfg
+	return scanner.ConfigFromSDKJSON(raw)
 }
 
 func loadCases(t *testing.T) []parityCase {

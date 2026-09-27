@@ -96,5 +96,57 @@
     },
     "input": "ref 12345/06 filed",
     "expected": "ref [HIDDEN:case-no:987a12] filed"
+  },
+  {
+    "name": "signature_aws_key_with_entity_labels",
+    "config": {
+      "entity_type_labels": true
+    },
+    "input": "deploy key AKIAIOSFODNN7EXAMPLE rotated",
+    "expected": "deploy key [HIDDEN:aws-key:dcce47] rotated"
+  },
+  {
+    "name": "signature_key_half_b19",
+    "config": {
+      "entity_type_labels": true
+    },
+    "input": "AKIAIOSFODNN7EXAMPLE=x",
+    "expected": "[HIDDEN:aws-key:dcce47]=x"
+  },
+  {
+    "name": "luhn_card_with_issuer_prefix",
+    "config": {},
+    "input": "card 4539148803436467 end",
+    "expected": "card [HIDDEN:301b53] end"
+  },
+  {
+    "name": "luhn_valid_without_issuer_not_a_card",
+    "config": {},
+    "input": "TraceId=1234567812345670",
+    "expected": "TraceId=1234567812345670"
+  },
+  {
+    "name": "quoted_value_under_sensitive_key_b7",
+    "config": {},
+    "input": "{\"secret\": \"user=admin pass=hunter2\"}",
+    "expected": "{\"secret\": \"[HIDDEN:397db4]\"}"
+  },
+  {
+    "name": "request_line_query_keeps_protocol_b17",
+    "config": {},
+    "input": "\"GET /a?_=12345 HTTP/1.1\" 200 5",
+    "expected": "\"GET /a?_=12345 HTTP/1.1\" 200 5"
+  },
+  {
+    "name": "generic_name_value_pair",
+    "config": {},
+    "input": "{\"name\": \"DB_PASSWORD\", \"value\": \"hunter\"}",
+    "expected": "{\"name\": \"DB_PASSWORD\", \"value\": \"[HIDDEN:ac7de8]\"}"
+  },
+  {
+    "name": "nested_json_string_stays_valid",
+    "config": {},
+    "input": "{\"data\": \"{\\\"password\\\": \\\"hunter2xyz\\\", \\\"user\\\": \\\"bob\\\"}\"}",
+    "expected": "{\"data\": \"{\\\"password\\\": \\\"[HIDDEN:60c3ce]\\\", \\\"user\\\": \\\"bob\\\"}\"}"
   }
 ]
