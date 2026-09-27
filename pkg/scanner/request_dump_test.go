@@ -37,6 +37,12 @@ func TestEscapedCRLFSeparatesTokens(t *testing.T) {
 		}
 	}
 
+	// Invalid UTF-8 before the break is repaired as on any other token.
+	if out := ScanAndRedact("x\xff" + `\r\n` + gcpDumpKey); strings.Contains(out, gcpDumpKey) ||
+		!strings.HasPrefix(out, "x\uFFFD"+`\r\n`) {
+		t.Errorf("invalid UTF-8 before \\r\\n: %q", out)
+	}
+
 	// Windows paths keep their whitelist: none of them holds "\r\n".
 	for _, in := range []string{
 		`C:\Users\admin\AppData\Local\Temp\report.txt`,
@@ -116,6 +122,18 @@ func TestTelegramBotTokenInURLPath(t *testing.T) {
 				t.Errorf("lost %q: %q", tail, out)
 			}
 		}
+	}
+
+	// Any signature is found in a path segment, not only a Telegram token.
+	if out := ScanAndRedact("https://example.com/keys/" + gcpDumpKey + "/info"); strings.Contains(out, gcpDumpKey) ||
+		!strings.HasPrefix(out, "https://example.com/keys/[HIDDEN:gcp-key:") || !strings.HasSuffix(out, "/info") {
+		t.Errorf("key in URL path: %q", out)
+	}
+
+	// Telegram-shaped but not a token (secret too short): the token goes on
+	// to the ordinary pair handling.
+	if out := ScanAndRedact("/bot12345:Ashort/xyz/abcdefgh"); strings.Contains(out, "[HIDDEN:telegram") {
+		t.Errorf("non-token matched: %q", out)
 	}
 
 	// Paths without a signature are still written verbatim: ids, slugs and
