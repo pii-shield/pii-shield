@@ -99,6 +99,11 @@ jobs:
           exit 1
         fi
 
+  # Informational: this job has no baseline and no threshold, so it cannot
+  # fail on a slowdown. It fails only if a benchmark's own correctness check
+  # (b.Fatal inside the loop) fires. Performance claims need the A/B run in
+  # benchmark/run_benchmarks.sh plus benchstat, not this job. The job name is
+  # kept because the "Protect main" ruleset lists it as a required check.
   benchmark:
     name: Performance Check
     runs-on: ubuntu-latest
@@ -108,5 +113,5 @@ jobs:
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
       with:
         go-version-file: 'go.mod'
-    - name: Run Benchmarks
+    - name: Run Benchmarks (informational, no baseline or threshold)
       run: go test -bench=. -benchmem ./pkg/scanner

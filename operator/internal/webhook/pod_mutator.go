@@ -24,8 +24,9 @@ type PodMutator struct {
 	Decoder           admission.Decoder
 	LegacySidecarMode bool
 	// StrictMode denies pods that request injection but have no resolvable
-	// PiiPolicy. It is the default; the STRICT_MODE env var (set from the
-	// chart's webhook.strictMode value) overrides it at runtime.
+	// PiiPolicy. It is off by default: cmd/main.go leaves the field false and
+	// the chart ships webhook.strictMode: false. The STRICT_MODE env var (set
+	// from that chart value) overrides the field at runtime.
 	StrictMode bool
 }
 
