@@ -372,11 +372,11 @@ func DefaultConfig() Config {
 // configured (CLI without PII_SALT, SDK without a salt).
 func randomSalt() []byte {
 	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
-		// CRITICAL SECURITY: Fail closed if we cannot generate a secure salt.
-		// Do not use a fallback.
-		panic(fmt.Sprintf("FATAL: Failed to generate secure random salt: %v", err))
-	}
+	// CRITICAL SECURITY: this fails closed. Since Go 1.24 (go.mod requires
+	// 1.26) crypto/rand.Read never returns an error: if the OS cannot supply
+	// randomness it crashes the program irrecoverably, so there is no path
+	// that falls back to a weak or fixed salt.
+	_, _ = rand.Read(salt)
 	return salt
 }
 
