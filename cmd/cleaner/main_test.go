@@ -752,74 +752,99 @@ func TestMainWatchFileSigterm(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path, wantOutput := tc.setup(t, t.TempDir())
-
-			cmd := exec.Command(os.Args[0], "-test.run=TestMainWatchFileSigterm")
-			cmd.Env = append(os.Environ(), "TEST_MAIN_WATCH=1", "TEST_WATCH_FILE="+path)
-
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				t.Fatalf("failed to get stdout pipe: %v", err)
-			}
-
-			outCh := make(chan string, 8)
-			if err := cmd.Start(); err != nil {
-				t.Fatalf("failed to start subprocess: %v", err)
-			}
-			go func() {
-				sc := bufio.NewScanner(stdout)
-				for sc.Scan() {
-					outCh <- sc.Text()
-				}
-				close(outCh)
-			}()
-
-			if wantOutput {
-				// Feed a line and wait for its sanitized copy; seeing output
-				// proves the subprocess is past signal.Notify, so SIGTERM
-				// cannot hit the default handler.
-				go func() {
-					f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
-					if err != nil {
-						return
+			// Only the missing-file wait loop gives no sign that main has
+			// installed its signal handler, so there the test can only wait.
+			// A SIGTERM that lands before signal.Notify kills the process by
+			// the signal itself; that says nothing about shutdown, so it is
+			// retried with a longer wait instead of reported. Any other
+			// outcome is final.
+			delay := 500 * time.Millisecond
+			for attempt := 1; ; attempt++ {
+				stderr, err := runWatchFileSigterm(t, path, wantOutput, delay)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) && !wantOutput && attempt < 3 {
+					if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() == syscall.SIGTERM {
+						t.Logf("attempt %d: SIGTERM beat the signal handler after %v; retrying", attempt, delay)
+						delay *= 2
+						continue
 					}
-					_, _ = io.WriteString(f, "mail test@example.com here\n")
-					f.Close()
-				}()
-				select {
-				case line := <-outCh:
-					if strings.Contains(line, "test@example.com") {
-						t.Errorf("email not redacted in watch-file output: %q", line)
-					}
-				case <-time.After(10 * time.Second):
-					_ = cmd.Process.Kill()
-					_ = cmd.Wait()
-					t.Fatalf("timed out waiting for sanitized output; stderr: %s", stderr.String())
 				}
-			} else {
-				// No output signal exists in the wait loop; give the
-				// subprocess time to install its signal handler.
-				time.Sleep(500 * time.Millisecond)
-			}
-
-			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-				t.Fatalf("failed to send SIGTERM: %v", err)
-			}
-
-			waitErr := make(chan error, 1)
-			go func() { waitErr <- cmd.Wait() }()
-			select {
-			case err := <-waitErr:
 				if err != nil {
-					t.Errorf("expected clean exit on SIGTERM, got %v; stderr: %s", err, stderr.String())
+					t.Errorf("expected clean exit on SIGTERM, got %v; stderr: %s", err, stderr)
 				}
-			case <-time.After(10 * time.Second):
-				_ = cmd.Process.Kill()
-				t.Fatal("sidecar did not exit within 10s of SIGTERM")
+				return
 			}
 		})
 	}
+}
+
+// runWatchFileSigterm starts the sidecar on path in --watch-file mode, waits
+// until it is running (for sanitized output when wantOutput, otherwise for
+// delay), sends SIGTERM and returns stderr and the exit error.
+func runWatchFileSigterm(t *testing.T, path string, wantOutput bool, delay time.Duration) (string, error) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMainWatchFileSigterm$")
+	cmd.Env = append(os.Environ(), "TEST_MAIN_WATCH=1", "TEST_WATCH_FILE="+path)
+
+	stderr := &lockedBuffer{}
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("failed to get stdout pipe: %v", err)
+	}
+
+	outCh := make(chan string, 8)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start subprocess: %v", err)
+	}
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			outCh <- sc.Text()
+		}
+		close(outCh)
+	}()
+
+	if wantOutput {
+		// Feed a line and wait for its sanitized copy; seeing output
+		// proves the subprocess is past signal.Notify, so SIGTERM
+		// cannot hit the default handler.
+		go func() {
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				return
+			}
+			_, _ = io.WriteString(f, "mail test@example.com here\n")
+			f.Close()
+		}()
+		select {
+		case line := <-outCh:
+			if strings.Contains(line, "test@example.com") {
+				t.Errorf("email not redacted in watch-file output: %q", line)
+			}
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			t.Fatalf("timed out waiting for sanitized output; stderr: %s", stderr.String())
+		}
+	} else {
+		time.Sleep(delay)
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("failed to send SIGTERM: %v", err)
+	}
+
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+	select {
+	case err := <-waitErr:
+		return stderr.String(), err
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("sidecar did not exit within 10s of SIGTERM")
+	}
+	return "", nil
 }
 
 // startMetricsSidecar starts the test binary as a sidecar with the metrics
@@ -903,7 +928,9 @@ func runMainWithLongLine(t *testing.T, failPolicy string) (string, string, int) 
 		os.Exit(0)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainBufferOverflow")
+	// Anchor the pattern to the calling test: "TestMainBufferOverflow"
+	// alone matches both the FailOpen and FailClosed tests.
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
 	cmd.Env = append(os.Environ(), "TEST_MAIN_LONG_LINE=1", "PII_FAIL_POLICY="+failPolicy)
 
 	var stdout bytes.Buffer

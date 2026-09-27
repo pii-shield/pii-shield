@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -80,5 +83,43 @@ func TestHumanBytes(t *testing.T) {
 		if got := humanBytes(in); got != want {
 			t.Errorf("humanBytes(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestStatsSignatureCountsAsOther pins where the signature detectors (F1:
+// aws-key, github-token, jwt, …) land in the summary. The scanner reports
+// them as strategy "signature", which has no bucket of its own, so they are
+// counted as "other". A dedicated bucket has to change this test on purpose.
+func TestStatsSignatureCountsAsOther(t *testing.T) {
+	s := newStatsCollector()
+	s.recordRedaction("signature")
+	s.recordLine(10)
+	if got := s.summary(); !strings.Contains(got, "1 redactions") || !strings.Contains(got, "1 other") {
+		t.Errorf("signature redaction not counted as other: %q", got)
+	}
+}
+
+// TestStatsSummaryLoggedOnShutdown checks the wiring, not the collector:
+// with PII_STATS_LOG_INTERVAL set, main counts real redactions through the
+// scanner callback and logs the summary when stdin ends.
+func TestStatsSummaryLoggedOnShutdown(t *testing.T) {
+	if os.Getenv("TEST_MAIN_STATS") == "1" {
+		main()
+		os.Exit(0)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestStatsSummaryLoggedOnShutdown$")
+	cmd.Env = append(os.Environ(), "TEST_MAIN_STATS=1", "PII_STATS_LOG_INTERVAL=1h", "PII_METRICS_ENABLED=false")
+	cmd.Stdin = strings.NewReader("password=hunter2xyz\nnothing here\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("sidecar failed: %v; stderr: %s", err, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "hunter2xyz") {
+		t.Fatalf("secret not redacted: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "PII-Shield stats: 1 redactions") || !strings.Contains(stderr.String(), "across 2 lines") {
+		t.Errorf("expected a final stats summary with 1 redaction over 2 lines, got stderr: %s", stderr.String())
 	}
 }
