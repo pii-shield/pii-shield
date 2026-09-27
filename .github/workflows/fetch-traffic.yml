@@ -20,17 +20,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TRAFFIC_TOKEN }}
         run: |
+          # -f: an HTTP error (e.g. an expired token) fails the job instead of
+          # writing the error body into the data files and committing it
           mkdir -p stats-repo/data
-          curl -sS -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+          curl -fsS --retry 3 -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/pii-shield/pii-shield/traffic/views \
             > stats-repo/data/traffic_views.json
-          curl -sS -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+          curl -fsS --retry 3 -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/pii-shield/pii-shield/traffic/clones \
             > stats-repo/data/traffic_clones.json
-          curl -sS -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+          curl -fsS --retry 3 -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/pii-shield/pii-shield/traffic/popular/paths \
             > stats-repo/data/traffic_popular_paths.json
-          curl -sS -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+          curl -fsS --retry 3 -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/pii-shield/pii-shield/traffic/popular/referrers \
             > stats-repo/data/traffic_popular_referrers.json
       
@@ -38,12 +40,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TRAFFIC_TOKEN }}
         run: |
+          # without pipefail a failed curl is hidden behind jq's exit status
+          set -o pipefail
           TODAY=$(date -u +%Y-%m-%d)
           FILE=stats-repo/data/stars_history.jsonl
           touch "$FILE"
           # re-runs on the same day must replace today's record, not append a duplicate
           grep -v "\"date\":\"$TODAY\"" "$FILE" > "$FILE.tmp" || true
-          curl -sS -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+          curl -fsS --retry 3 -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/pii-shield/pii-shield \
             | jq -c '{stargazers_count, date: (now | gmtime | strftime("%Y-%m-%d"))}' \
             >> "$FILE.tmp"
