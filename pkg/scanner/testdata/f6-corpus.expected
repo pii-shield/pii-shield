@@ -4,6 +4,7 @@ ambiguous	git-sha-40	25-40	10	0	0
 ambiguous	git-sha-short	06-08	10	0	0
 ambiguous	k8s-pod-name	17-24	10	10	0
 ambiguous	objectid-24	17-24	10	0	0
+ambiguous	random-hex	06-08	40	0	0
 ambiguous	sha256-64	41+	10	10	10
 ambiguous	uuid	25-40	10	0	0
 safe	cyrillic-word	01-05	2	0	0
@@ -47,7 +48,6 @@ secret	random-base64	13-16	40	39	37
 secret	random-base64	17-24	40	39	39
 secret	random-base64	25-40	40	40	40
 secret	random-base64	41+	40	40	40
-secret	random-hex	06-08	40	0	0
 secret	random-hex	09-12	40	4	4
 secret	random-hex	13-16	40	25	25
 secret	random-hex	17-24	40	16	16

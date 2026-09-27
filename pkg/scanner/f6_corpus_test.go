@@ -14,18 +14,26 @@ import (
 	"unicode/utf8"
 )
 
-// F6 (length-dependent entropy threshold) is judged on a frozen, labelled
-// token corpus instead of on sample output. testdata/f6-corpus.tsv holds one
-// token per line as label<TAB>class<TAB>token, where label is secret, safe or
-// ambiguous. testdata/f6-corpus.expected pins how the current scanner treats
-// every class and length bucket, so any change to detection shows up here as
-// a count that moved, not as a line that "looks right".
+// A frozen, labelled token corpus that pins how the scanner scores single
+// tokens. It was built for F6 (a length-dependent entropy threshold), which
+// was retired in #214; it stays as the regression suite for the threshold and
+// the key-half scoring, and is the only test that turns red when the entropy
+// threshold moves. The corpus is synthetic (see buildF6Corpus).
+//
+// testdata/f6-corpus.tsv holds one token per line as label<TAB>class<TAB>token,
+// where label is secret, safe or ambiguous. Two files pin the current
+// behavior:
+//   - f6-corpus.expected: counts per label, class and length bucket, for
+//     reading and for the report;
+//   - f6-corpus.verdicts: the verdict for every token. Counts alone let a swap
+//     go unnoticed (one false positive fixed and another introduced in the
+//     same cell leaves the count unchanged); the verdicts name the token.
 //
 // Regenerate the corpus (needs /usr/share/dict/words) and the expected counts:
 //
 //	go test ./pkg/scanner/ -run TestEntropyThresholdCorpus -update-f6-corpus
 //
-// Re-pin only the expected counts after an intended detection change:
+// Re-pin the expected counts and verdicts after an intended detection change:
 //
 //	go test ./pkg/scanner/ -run TestEntropyThresholdCorpus -update-f6-expected
 //
@@ -40,6 +48,7 @@ var (
 const (
 	f6CorpusPath   = "testdata/f6-corpus.tsv"
 	f6ExpectedPath = "testdata/f6-corpus.expected"
+	f6VerdictsPath = "testdata/f6-corpus.verdicts"
 	f6DictPath     = "/usr/share/dict/words"
 	f6SmokeMeta    = "../../scripts/testdata/smoke-corpus.tsv"
 	f6SmokeLines   = "../../scripts/testdata/smoke-corpus.txt"
@@ -74,8 +83,8 @@ func f6Bucket(tok string) string {
 	return "?"
 }
 
-// f6Outcome reports whether the token is hidden in the two places F6 cares
-// about: alone in keyless prose, and as the key half of key=value (scored since
+// f6Outcome reports whether the token is hidden in the two places the corpus
+// checks: alone in keyless prose, and as the key half of key=value (scored since
 // B19 unless the token looks like a field name).
 func f6Outcome(s *Scanner, tok string) (keyless, asKey bool) {
 	out := s.ScanAndRedact("event " + tok + " done")
@@ -105,12 +114,15 @@ func TestEntropyThresholdCorpus(t *testing.T) {
 	s := NewScanner(campaignConfig())
 	type cell struct{ n, keyless, asKey int }
 	cells := map[string]*cell{}
+	var verdicts strings.Builder
+	verdicts.WriteString("# redacted_keyless<TAB>redacted_as_key<TAB>token, in corpus order. Written by -update-f6-expected.\n")
 	for _, c := range corpus {
 		key := c.label + "\t" + c.class + "\t" + f6Bucket(c.token)
 		if cells[key] == nil {
 			cells[key] = &cell{}
 		}
 		k, a := f6Outcome(s, c.token)
+		fmt.Fprintf(&verdicts, "%d\t%d\t%s\n", b2i(k), b2i(a), c.token)
 		cells[key].n++
 		if k {
 			cells[key].keyless++
@@ -143,7 +155,18 @@ func TestEntropyThresholdCorpus(t *testing.T) {
 		if err := os.WriteFile(f6ExpectedPath, []byte(got.String()), 0o644); err != nil {
 			t.Fatalf("write expected: %v", err)
 		}
+		if err := os.WriteFile(f6VerdictsPath, []byte(verdicts.String()), 0o644); err != nil {
+			t.Fatalf("write verdicts: %v", err)
+		}
 		return
+	}
+	wantVerdicts, err := os.ReadFile(f6VerdictsPath)
+	if err != nil {
+		t.Fatalf("read verdicts: %v", err)
+	}
+	if verdicts.String() != string(wantVerdicts) {
+		t.Errorf("F6 corpus verdicts changed for these tokens (keyless, as_key: pinned -> now). If intended, re-pin with -update-f6-expected and put the diff in the PR.\n%s",
+			f6VerdictDiff(string(wantVerdicts), verdicts.String()))
 	}
 	want, err := os.ReadFile(f6ExpectedPath)
 	if err != nil {
@@ -212,6 +235,50 @@ func pct(a, n int) float64 {
 		return 0
 	}
 	return 100 * float64(a) / float64(n)
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// f6VerdictDiff lists the tokens whose verdict moved, keyed by token so a
+// reordered or regenerated corpus still reads sensibly.
+func f6VerdictDiff(want, got string) string {
+	parse := func(s string) (map[string]string, []string) {
+		m := map[string]string{}
+		var order []string
+		for _, l := range strings.Split(s, "\n") {
+			if l == "" || strings.HasPrefix(l, "#") {
+				continue
+			}
+			p := strings.SplitN(l, "\t", 3)
+			if len(p) != 3 {
+				continue
+			}
+			m[p[2]] = p[0] + "," + p[1]
+			order = append(order, p[2])
+		}
+		return m, order
+	}
+	w, _ := parse(want)
+	g, order := parse(got)
+	var b strings.Builder
+	n := 0
+	for _, tok := range order {
+		if w[tok] != g[tok] {
+			n++
+			if n <= 40 {
+				fmt.Fprintf(&b, "  %q: %s -> %s\n", tok, w[tok], g[tok])
+			}
+		}
+	}
+	if n > 40 {
+		fmt.Fprintf(&b, "  … and %d more\n", n-40)
+	}
+	return b.String()
 }
 
 func f6Diff(want, got string) string {
@@ -304,7 +371,15 @@ func buildF6Corpus() ([]f6Token, error) {
 				for j := range buf {
 					buf[j] = a.chars[rng.IntN(len(a.chars))]
 				}
-				add("secret", a.class, string(buf))
+				// Hex of 6-8 characters has the shape of an abbreviated
+				// commit hash, which the corpus labels ambiguous
+				// (git-sha-short); the same shape under two labels made the
+				// secret recall for this cell meaningless (audit 2026-09-25).
+				label := "secret"
+				if a.class == "random-hex" && n <= 8 {
+					label = "ambiguous"
+				}
+				add(label, a.class, string(buf))
 			}
 		}
 	}

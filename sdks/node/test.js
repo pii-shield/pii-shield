@@ -13,6 +13,7 @@ const SNAKE_TO_CAMEL = {
     sensitive_keys: 'sensitiveKeys',
     disable_bigram_check: 'disableBigramCheck',
     adaptive_threshold: 'adaptiveThreshold',
+    entity_type_labels: 'entityTypeLabels',
     sensitive_key_patterns: 'sensitiveKeyPatterns',
     custom_regexes: 'customRegexes',
     safe_regexes: 'safeRegexes',
@@ -25,7 +26,12 @@ async function runParity() {
     for (const tc of cases) {
         const cfg = {};
         for (const [k, v] of Object.entries(tc.config)) {
-            cfg[SNAKE_TO_CAMEL[k] || k] = v;
+            // An unmapped key would reach the SDK under its snake_case name
+            // and be ignored silently, so the case would test the defaults.
+            if (!(k in SNAKE_TO_CAMEL)) {
+                throw new Error(`parity case ${tc.name}: no camelCase mapping for config key ${k}`);
+            }
+            cfg[SNAKE_TO_CAMEL[k]] = v;
         }
         const shield = await PiiShield.create(cfg, "../../pii-shield-wasi.wasm");
         const got = shield.redact(tc.input);
