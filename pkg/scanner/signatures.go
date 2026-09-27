@@ -41,6 +41,13 @@ var (
 	// JWT: three base64url segments, the header starting with the encoded
 	// `{"alg":`. The signature segment may be empty (alg=none).
 	jwtRe = regexp.MustCompile(`^eyJ[0-9A-Za-z_-]+\.[0-9A-Za-z_-]+\.[0-9A-Za-z_-]*$`)
+
+	// Telegram bot tokens: the numeric bot id, a colon, and a 35-character
+	// secret that starts with A. The colon is why no other rule sees it: the
+	// pair splitter cuts the token in two before scoring, so the check runs
+	// ahead of the splitters (processTokenLogic) and on URL path segments,
+	// where the token sits after "bot" in every Bot API call.
+	telegramBotTokenRe = regexp.MustCompile(`^[0-9]{5,16}:A[0-9A-Za-z_-]{34}$`)
 )
 
 // signatureRule pairs the label written into the marker with its matcher. The
@@ -87,7 +94,64 @@ func matchSignature(token string) string {
 			}
 		}
 	}
+	if c := token[0]; c >= '0' && c <= '9' && telegramBotTokenRe.MatchString(token) {
+		return "telegram-bot-token"
+	}
 	return ""
+}
+
+// hasTelegramShape is the cheap pre-filter for the only signature that carries
+// a colon: somewhere in s, at least five digits, a colon, then 'A'. It keeps
+// the per-token cost of the colon-signature path to one IndexByte scan on
+// ordinary tokens such as "ts":1700000000.
+func hasTelegramShape(s string) bool {
+	if len(s) < minSignatureLength {
+		return false
+	}
+	for i := 0; ; {
+		j := strings.IndexByte(s[i:], ':')
+		if j < 0 {
+			return false
+		}
+		i += j
+		if i >= 5 && i+1 < len(s) && s[i+1] == 'A' {
+			digits := 0
+			for k := i - 1; k >= 0 && s[k] >= '0' && s[k] <= '9'; k-- {
+				digits++
+			}
+			if digits >= 5 {
+				return true
+			}
+		}
+		i++
+	}
+}
+
+// urlPathSignature reports how a URL path segment carries a signature secret:
+// the length of a literal prefix to keep ("bot" in a Telegram Bot API path,
+// otherwise 0) and the signature label, or "" when the segment holds none.
+func urlPathSignature(seg string) (keep int, label string) {
+	if label = matchSignature(seg); label != "" {
+		return 0, label
+	}
+	if strings.HasPrefix(seg, "bot") && matchSignature(seg[3:]) == "telegram-bot-token" {
+		return 3, "telegram-bot-token"
+	}
+	return 0, ""
+}
+
+// hasPathSignature reports whether any '/'-separated segment of s carries a
+// signature secret.
+func hasPathSignature(s string) bool {
+	if len(s) < minSignatureLength {
+		return false
+	}
+	for seg := range strings.SplitSeq(s, "/") {
+		if _, label := urlPathSignature(seg); label != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // isPrivateKeyMarker reports whether the line is the BEGIN or END framing line

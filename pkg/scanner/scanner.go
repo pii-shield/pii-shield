@@ -1225,6 +1225,28 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 			}
 		}
 
+		// A literal "\r\n" is an escaped line break inside a request or
+		// header dump (urllib3's "send: b'POST ...\r\nHost: ...\r\n'",
+		// repr() of bytes). It separates two lines, so it separates two tokens:
+		// glued to its neighbours it put the header name and the secret in one
+		// token, and the two backslashes then made isPath call that token a
+		// Windows path, so it was never scored. A Windows path holding "\r\n"
+		// would need a folder named "r" followed by one starting with "n".
+		if r == '\\' && strings.HasPrefix(segment[i:], `\r\n`) {
+			if i > start {
+				token := segment[start:i]
+				if seenInvalid {
+					token = strings.ToValidUTF8(token, "\uFFFD")
+				}
+				st.processAndAppend(token, sb, &state, depth)
+			}
+			sb.WriteString(`\r\n`)
+			i += 4
+			start = i
+			seenInvalid = false
+			continue
+		}
+
 		if isSepRune(r) {
 			if i > start {
 				token := segment[start:i]
@@ -1308,6 +1330,38 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
 		st.maskURLParameters(rawToken, sb, depth)
 		return false
+	}
+
+	// A Python bytes literal (b'...' or b"..."), which is how urllib3 and
+	// http.client log the raw request they send. The prefix hid the quotes
+	// from the quoted-string handling below, and the colon pair splitter cut
+	// the dump at its first header (b'Host: ...) instead, so nothing after it
+	// was scored. Keep the prefix and scan the quoted part.
+	if !forcedSensitive && len(rawToken) >= 3 && (rawToken[0] == 'b' || rawToken[0] == 'B') &&
+		(rawToken[1] == '"' || rawToken[1] == '\'') && rawToken[len(rawToken)-1] == rawToken[1] {
+		sb.WriteByte(rawToken[0])
+		sb.WriteByte(rawToken[1])
+		st.scanSegment(rawToken[2:len(rawToken)-1], sb, depth+1)
+		sb.WriteByte(rawToken[1])
+		return false
+	}
+
+	if hasTelegramShape(rawToken) {
+		// A Telegram bot token is the one signature with a colon in it. It is
+		// hidden whole before processColonPair can cut it into an id and a
+		// tail that no rule matches on its own. Every other signature reaches
+		// the check in processSingleToken as before.
+		if trimmed := trimQuotes(rawToken); matchSignature(trimmed) != "" {
+			st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, isValuePos, sb)
+			return false
+		}
+		// A path with a signature secret in one of its segments
+		// (/bot<id>:<token>/sendMessage) is written segment by segment, so
+		// only the secret is hidden and the rest of the path stays readable.
+		if strings.IndexByte(rawToken, '/') >= 0 && hasPathSignature(rawToken) {
+			st.writeURLPath(rawToken, sb)
+			return false
+		}
 	}
 
 	// 1. Check for Key=Value (e.g. key=value)
@@ -1936,7 +1990,7 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 	// access-log lines). Whatever that verbatim path costs in recall, it is
 	// not B17's to change.
 	if !strings.Contains(url, "?") {
-		sb.WriteString(url)
+		st.writeURLPath(url, sb)
 		return
 	}
 
@@ -1968,7 +2022,7 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 	// The guard at the top proves there is at least one '?', so parts always
 	// has two or more elements here.
 	parts := strings.Split(url, "?")
-	sb.WriteString(parts[0])
+	st.writeURLPath(parts[0], sb)
 	entropyThreshold := st.config.EntropyThreshold
 
 	// Everything after the first '?' is query text. A well-formed URL has a
@@ -2010,6 +2064,31 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 				sb.WriteString(param)
 			}
 		}
+	}
+}
+
+// writeURLPath writes the part of a URL before its query. The path is not
+// scored by entropy: real paths are full of ids, slugs and hashes, and scoring
+// them would redact most access-log lines. It is checked only for signature
+// secrets, which are threshold-free and match a fixed issuer format, so a
+// Telegram bot token (https://api.telegram.org/bot<id>:<token>/sendMessage)
+// or a Google key in a path segment is hidden and nothing else changes.
+func (st *configState) writeURLPath(path string, sb *strings.Builder) {
+	if !hasPathSignature(path) {
+		sb.WriteString(path)
+		return
+	}
+	for i, seg := range strings.Split(path, "/") {
+		if i > 0 {
+			sb.WriteByte('/')
+		}
+		keep, label := urlPathSignature(seg)
+		if label == "" {
+			sb.WriteString(seg)
+			continue
+		}
+		sb.WriteString(seg[:keep])
+		st.redactWithHMAC(seg[keep:], st.entityLabel(label), "signature", sb)
 	}
 }
 

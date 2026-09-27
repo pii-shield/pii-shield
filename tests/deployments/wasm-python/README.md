@@ -13,22 +13,22 @@ The redaction program is [`redact.py`](redact.py); it runs in `python:3.11-slim`
 with `PII_PY_IMAGE`). The fixture is mounted read-only at `/fixture` and the output dir at
 `/out`.
 
-## Why Docker: the SDK is killed on macOS (`Killed: 9`)
+## Why Docker
 
-Run natively on macOS, the Python SDK is killed with `Killed: 9` (SIGKILL) ~2s after the
-WASM module loads and never finishes. It is **not** a bug in pii-shield, the WASM module,
-the fixture, or this script — it is a `wasmtime` (the SDK's runtime) problem specific to
-macOS, so the test runs in a Linux container instead.
+The test runs in a Linux container so its result does not depend on the host's Python
+build. It was moved there because on macOS the SDK was killed with `Killed: 9` (SIGKILL)
+right after loading the WASM module, before any `redact` call.
 
-Evidence:
+Root cause (found 2026-09-27): on macOS, wasmtime catches wasm traps by setting Mach
+exception ports on the thread that first calls into wasm (the SDK's `_initialize` call).
+Apple-signed interpreters (`/usr/bin/python3`, the Xcode / Command Line Tools
+Python 3.9) guard that port, and the kernel kills the process with
+`EXC_GUARD` / `GUARD_TYPE_MACH_PORT` / `SET_EXCEPTION_BEHAVIOR` (see the `.ips` crash
+report). Every wasmtime release from 12 to 49 behaves the same way; interpreters that are
+not Apple-signed (Homebrew, python.org, pyenv) never hit it, and Node was never affected.
 
-- The process is SIGKILLed ~2s after the WASM module is loaded, regardless of input,
-  number of `redact` calls, or workload — it dies even when idle after loading, with
-  zero `redact` calls.
-- Not memory pressure (RSS ~185MB at death, ~49% RAM free, no jetsam/memorystatus
-  kernel events) and not input-dependent (a constant string crashes too).
-- The exact same `pii-shield-wasi.wasm` (byte-identical, same sha256) runs the full
-  3.3GB fixture fine under Node (`wasm-node`) on the same Mac, and a trivial wasm module
-  survives under `wasmtime` — so neither the module nor wasmtime-in-general is at fault.
-- On Linux (same arm64 CPU, in Docker) the identical SDK processes 3,000,000 lines and
-  survives the idle test cleanly — only the OS differs.
+The SDK now sets `Config.macos_use_mach_ports = False` on macOS (the option exists in
+wasmtime 45.0.0 and later, which is the SDK's minimum), so wasmtime uses POSIX signal
+handlers and the SDK runs natively on any macOS Python. The published package gets this
+from the first release after 2.2.4; this runner installs the published package, so it
+stays in the container.
