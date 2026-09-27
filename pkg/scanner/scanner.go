@@ -87,7 +87,8 @@ var (
 	}
 
 	// RedactionCallback is triggered whenever a string is redacted.
-	// The strategy is guaranteed to be one of "entropy", "regex", "luhn".
+	// The strategy is one of "entropy", "regex", "luhn", "signature" (the
+	// issuer-format detectors and PEM private-key framing lines).
 	RedactionCallback func(strategy string)
 
 	// ContextKeywords trigger lower entropy thresholds for subsequent tokens

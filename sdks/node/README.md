@@ -42,7 +42,7 @@ the core scanner default, so redaction matches the CLI for the same config.
 | `sensitiveKeys` | string[] | Key names whose values are always redacted (case-insensitive). Replaces the defaults. |
 | `disableBigramCheck` | boolean | Disable English bigram analysis (useful for non-English logs). |
 | `adaptiveThreshold` | boolean | Enable the **experimental** statistical adaptive-threshold mode. |
-| `entityTypeLabels` | boolean | Emit `[HIDDEN:<type>:<hash>]` markers, where `<type>` names the detector that fired (`card`, `key`, `context`, `url`, `regex`, `entropy`). Off by default; the hash is unchanged. |
+| `entityTypeLabels` | boolean | Emit `[HIDDEN:<type>:<hash>]` markers, where `<type>` names the detector that fired: `card`, `key`, `context`, `url`, `regex`, `entropy`, or one of the issuer-format detectors `aws-key`, `gcp-key`, `github-token`, `slack-token`, `stripe-key`, `jwt`, and `private-key` (a PEM private-key framing line). A named custom rule uses its own name. Off by default; the hash is unchanged. |
 | `sensitiveKeyPatterns` | string[] | Regex patterns matched against key names (equivalent to `PII_SENSITIVE_KEY_PATTERNS`). |
 | `customRegexes` | `{pattern, name}[]` | Rules forcing redaction of matching tokens (equivalent to `PII_CUSTOM_REGEX_LIST`). |
 | `safeRegexes` | `{pattern, name}[]` | Whitelist rules exempting matching tokens (equivalent to `PII_SAFE_REGEX_LIST`). |
