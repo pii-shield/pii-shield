@@ -215,3 +215,55 @@ func TestIsSepRuneEquivalence(t *testing.T) {
 		}
 	}
 }
+
+// shannonCounts256 is calculateShannon's ASCII path as it was with a
+// 256-entry counts array, kept as the oracle for the 128-entry version.
+func shannonCounts256(token string) float64 {
+	var counts [256]int
+	for i := 0; i < len(token); i++ {
+		counts[token[i]]++
+	}
+	var logLen float64
+	if len(token) < 256 {
+		logLen = logTable[len(token)]
+	} else {
+		logLen = math.Log2(float64(len(token)))
+	}
+	entropy := 0.0
+	for _, count := range counts {
+		if count == 0 {
+			continue
+		}
+		var logCount float64
+		if count < 256 {
+			logCount = logTable[count]
+		} else {
+			logCount = math.Log2(float64(count))
+		}
+		p := float64(count) / float64(len(token))
+		entropy -= p * (logCount - logLen)
+	}
+	return entropy
+}
+
+// TestShannonASCIICountsExact: the 128-entry counts array must give the same
+// float64, bit for bit, as the 256-entry one, since scores are compared
+// against thresholds and pinned in the F6 corpus.
+func TestShannonASCIICountsExact(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	for n := 0; n < 100000; n++ {
+		b := make([]byte, 1+rng.Intn(300))
+		for i := range b {
+			b[i] = byte(rng.Intn(128)) // every ASCII byte, control characters too
+		}
+		s := string(b)
+		if got, want := calculateShannon(s), shannonCounts256(s); got != want {
+			t.Fatalf("token %q: got %v want %v", s, got, want)
+		}
+	}
+	for _, s := range []string{"\x7f", strings.Repeat("\x7f\x00", 200), strings.Repeat("a", 70000)} {
+		if got, want := calculateShannon(s), shannonCounts256(s); got != want {
+			t.Fatalf("token of len %d: got %v want %v", len(s), got, want)
+		}
+	}
+}
