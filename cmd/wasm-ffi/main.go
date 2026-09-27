@@ -3,31 +3,10 @@
 package main
 
 import (
-	"encoding/json"
-	"strings"
 	"unsafe"
 
 	"github.com/pii-shield/pii-shield/pkg/scanner"
 )
-
-// ConfigFromSDK represents configuration passed from Python/Node.js SDKs.
-// Every field the core scanner supports at scan time is accepted here; the
-// regex-backed fields are compiled via the shared scanner.Apply* helpers so the
-// SDKs and the CLI derive identical matching state.
-type ConfigFromSDK struct {
-	EntropyThreshold     float64                     `json:"entropy_threshold"`
-	Salt                 string                      `json:"salt"`
-	ConfidenceThreshold  float64                     `json:"confidence_score"`
-	FailPolicy           string                      `json:"fail_policy"`
-	MinSecretLength      int                         `json:"min_secret_length"`
-	SensitiveKeys        []string                    `json:"sensitive_keys"`
-	DisableBigramCheck   *bool                       `json:"disable_bigram_check"`
-	AdaptiveThreshold    *bool                       `json:"adaptive_threshold"`
-	EntityTypeLabels     *bool                       `json:"entity_type_labels"`
-	SensitiveKeyPatterns []string                    `json:"sensitive_key_patterns"`
-	CustomRegexes        []scanner.CustomRegexConfig `json:"custom_regexes"`
-	SafeRegexes          []scanner.CustomRegexConfig `json:"safe_regexes"`
-}
 
 // We use a map to pin memory allocations. This prevents Go's Garbage Collector
 // from reclaiming the memory before the WASM Host (Python/Node.js) reads it.
@@ -64,65 +43,9 @@ func init_config(ptr uint32, length uint32) {
 	// Reconstruct the byte slice from host memory
 	b := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
 
-	// Seed from real defaults so a partial SDK override (e.g. just a salt) keeps
-	// SensitiveKeys and the entropy threshold; only provided fields are applied.
-	cfg := scanner.DefaultConfig()
-	cfg.Salt = []byte("pii-shield-default-salt-12345678")
-
-	var sdkCfg ConfigFromSDK
-	if err := json.Unmarshal(b, &sdkCfg); err == nil {
-		if sdkCfg.EntropyThreshold > 0 {
-			cfg.EntropyThreshold = sdkCfg.EntropyThreshold
-		}
-		if sdkCfg.Salt != "" {
-			cfg.Salt = []byte(sdkCfg.Salt)
-		}
-		if sdkCfg.ConfidenceThreshold > 0 {
-			cfg.ConfidenceThreshold = sdkCfg.ConfidenceThreshold
-		}
-		if sdkCfg.MinSecretLength > 0 {
-			cfg.MinSecretLength = sdkCfg.MinSecretLength
-		}
-		if len(sdkCfg.SensitiveKeys) > 0 {
-			// Normalize the same way loadConfig does for PII_SENSITIVE_KEYS so
-			// SDK-provided keys match the CLI's case-insensitive matching.
-			keys := make([]string, len(sdkCfg.SensitiveKeys))
-			for i, k := range sdkCfg.SensitiveKeys {
-				keys[i] = strings.ToLower(strings.TrimSpace(k))
-			}
-			cfg.SensitiveKeys = keys
-		}
-		if sdkCfg.DisableBigramCheck != nil {
-			cfg.DisableBigramCheck = *sdkCfg.DisableBigramCheck
-		}
-		if sdkCfg.AdaptiveThreshold != nil {
-			cfg.AdaptiveThreshold = *sdkCfg.AdaptiveThreshold
-		}
-		if sdkCfg.EntityTypeLabels != nil {
-			cfg.EntityTypeLabels = *sdkCfg.EntityTypeLabels
-		}
-		// Regex-backed fields go through the shared compile helpers. Errors are
-		// deliberately swallowed: unlike the CLI (which fails fast at startup),
-		// an invalid pattern from an SDK caller must never terminate the host
-		// Node/Python process. A rejected list simply leaves the default in place.
-		if len(sdkCfg.SensitiveKeyPatterns) > 0 {
-			if err := cfg.ApplySensitiveKeyPatterns(sdkCfg.SensitiveKeyPatterns); err != nil {
-				cfg.SensitiveKeyPatterns = nil
-			}
-		}
-		// An invalid rule is skipped and reported on stderr by the scanner
-		// itself (B14); the valid rules are applied, so the error carries no
-		// extra action here.
-		if len(sdkCfg.CustomRegexes) > 0 {
-			_ = cfg.ApplyCustomRegexes(sdkCfg.CustomRegexes)
-		}
-		if len(sdkCfg.SafeRegexes) > 0 {
-			_ = cfg.ApplySafeRegexes(sdkCfg.SafeRegexes)
-		}
-		// Fail policy is handled in the SDK wrappers (Node/Python), not in
-		// scanner.Config.
-	}
-
+	// The mapping lives in the scanner package so the parity test runs the
+	// exact same code (see scanner.ConfigFromSDKJSON).
+	cfg := scanner.ConfigFromSDKJSON(b)
 	scanner.UpdateConfig(cfg)
 }
 
