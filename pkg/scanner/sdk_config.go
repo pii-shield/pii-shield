@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// SDKDefaultSalt is the salt the WASM kernel seeds when an SDK caller gives
-// none, so redaction is deterministic across SDK processes by default.
-const SDKDefaultSalt = "pii-shield-default-salt-12345678"
-
 // SDKConfig is the JSON config the Node and Python SDKs pass to the WASM
 // kernel's init_config. Every field the scanner supports at scan time is
 // accepted; fail_policy is handled in the SDK wrappers and ignored here.
@@ -28,9 +24,14 @@ type SDKConfig struct {
 }
 
 // ConfigFromSDKJSON builds the Config the WASM kernel applies for an SDK
-// payload. It starts from DefaultConfig with SDKDefaultSalt, so a partial
+// payload. It starts from DefaultConfig with a fresh random salt, so a partial
 // override (just a salt, say) keeps the default sensitive keys and threshold,
 // and applies only the fields present. Invalid JSON yields that default.
+//
+// Without a salt the tags are stable only within one SDK instance, the same as
+// the CLI without PII_SALT. A fixed default would let anyone who knows it
+// compute the tag of a guessed value; callers that correlate tags across
+// processes set their own secret salt.
 //
 // Errors never abort: unlike the CLI, an SDK caller's bad pattern must not
 // terminate the host Node/Python process. An invalid sensitive-key pattern
@@ -41,7 +42,7 @@ type SDKConfig struct {
 // Go-side golden check cannot drift from what the SDKs actually run.
 func ConfigFromSDKJSON(b []byte) Config {
 	cfg := DefaultConfig()
-	cfg.Salt = []byte(SDKDefaultSalt)
+	cfg.Salt = randomSalt()
 
 	var sdk SDKConfig
 	if err := json.Unmarshal(b, &sdk); err != nil {

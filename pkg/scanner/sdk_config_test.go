@@ -1,16 +1,19 @@
 package scanner
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestConfigFromSDKJSON pins the SDK config mapping the WASM kernel uses:
-// defaults plus the SDK salt, only the fields present applied, and no error
+// defaults plus a random salt, only the fields present applied, and no error
 // path that can take down the host process.
 func TestConfigFromSDKJSON(t *testing.T) {
 	def := ConfigFromSDKJSON([]byte(`{}`))
-	if string(def.Salt) != SDKDefaultSalt || def.EntropyThreshold != DefaultEntropyThreshold || len(def.SensitiveKeys) == 0 {
-		t.Fatalf("empty payload should give the defaults with the SDK salt: %+v", def)
+	if len(def.Salt) != 32 || def.EntropyThreshold != DefaultEntropyThreshold || len(def.SensitiveKeys) == 0 {
+		t.Fatalf("empty payload should give the defaults with a 32-byte random salt: %+v", def)
 	}
-	if bad := ConfigFromSDKJSON([]byte(`{not json`)); string(bad.Salt) != SDKDefaultSalt || bad.EntropyThreshold != DefaultEntropyThreshold {
+	if bad := ConfigFromSDKJSON([]byte(`{not json`)); len(bad.Salt) != 32 || bad.EntropyThreshold != DefaultEntropyThreshold {
 		t.Errorf("invalid JSON should fall back to the defaults: %+v", bad)
 	}
 
@@ -40,5 +43,37 @@ func TestConfigFromSDKJSON(t *testing.T) {
 	}
 	if p := ConfigFromSDKJSON([]byte(`{"sensitive_key_patterns": ["^x-.*$"]}`)); len(p.SensitiveKeyPatterns) != 1 {
 		t.Errorf("valid sensitive_key_patterns not applied: %q", p.SensitiveKeyPatterns)
+	}
+}
+
+// TestSDKConfigWithoutSaltIsRandom pins that an SDK caller who gives no salt
+// gets a fresh secret one: two instances tag the same value differently, and
+// neither uses the fixed salt the kernel shipped before, whose tags anyone
+// could compute for a guessed value.
+func TestSDKConfigWithoutSaltIsRandom(t *testing.T) {
+	a := ConfigFromSDKJSON([]byte(`{}`))
+	b := ConfigFromSDKJSON([]byte(`{"entropy_threshold": 3.8}`))
+	if string(a.Salt) == string(b.Salt) {
+		t.Fatal("two salt-less SDK configs got the same salt")
+	}
+	const oldFixedSalt = "pii-shield-default-salt-12345678"
+	for _, c := range []Config{a, b, ConfigFromSDKJSON([]byte(`{not json`))} {
+		if string(c.Salt) == oldFixedSalt {
+			t.Fatal("salt-less SDK config fell back to the old fixed salt")
+		}
+	}
+
+	old := activeCfg()
+	t.Cleanup(func() { UpdateConfig(old) })
+	UpdateConfig(a)
+	tagA := ScanAndRedactText("password=SuperSecretValue123")
+	UpdateConfig(b)
+	tagB := ScanAndRedactText("password=SuperSecretValue123")
+	if tagA == tagB || !strings.HasPrefix(tagA, "password=[HIDDEN:") {
+		t.Errorf("expected two different redaction tags, got %q and %q", tagA, tagB)
+	}
+	// [HIDDEN:8836e2] is this value's tag under the old fixed salt.
+	if tagA == "password=[HIDDEN:8836e2]" || tagB == "password=[HIDDEN:8836e2]" {
+		t.Error("tag matches the one computed with the old fixed salt")
 	}
 }

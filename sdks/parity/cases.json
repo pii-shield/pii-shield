@@ -1,9 +1,11 @@
 [
   {
-    "name": "baseline_default_salt_sensitive_key",
-    "config": {},
+    "name": "baseline_sensitive_key",
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "user login password=SuperSecretValue123 ok",
-    "expected": "user login password=[HIDDEN:8836e2] ok"
+    "expected": "user login password=[HIDDEN:afbea4] ok"
   },
   {
     "name": "explicit_salt_high_entropy_token",
@@ -16,16 +18,18 @@
   {
     "name": "sensitive_keys_override",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "sensitive_keys": [
         "ssn"
       ]
     },
     "input": "ssn=hello password=world",
-    "expected": "ssn=[HIDDEN:b014e4] password=world"
+    "expected": "ssn=[HIDDEN:01f746] password=world"
   },
   {
     "name": "min_secret_length_raised",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "min_secret_length": 64
     },
     "input": "ref A1b2C3d4E5f6G7h8x9K0mN random tail",
@@ -34,16 +38,18 @@
   {
     "name": "sensitive_key_patterns",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "sensitive_key_patterns": [
         "^cust_.*"
       ]
     },
     "input": "cust_field=hello plain=world",
-    "expected": "cust_field=[HIDDEN:b014e4] plain=world"
+    "expected": "cust_field=[HIDDEN:01f746] plain=world"
   },
   {
     "name": "custom_regexes",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "custom_regexes": [
         {
           "name": "TX",
@@ -52,7 +58,7 @@
       ]
     },
     "input": "order TX-12345 shipped",
-    "expected": "order [HIDDEN:TX:2f68d5] shipped"
+    "expected": "order [HIDDEN:TX:bff290] shipped"
   },
   {
     "name": "safe_regexes_whitelist",
@@ -70,19 +76,24 @@
   },
   {
     "name": "multiline_decimal_at_line_end_not_redacted",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "+2,bob,20.25\n+total,4532015112.830366\n",
     "expected": "+2,bob,20.25\n+total,4532015112.830366\n"
   },
   {
     "name": "multiline_secret_on_inner_line_redacted_line_count_kept",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "line one\npassword=SuperSecretValue123\r\n4532015112.830366\n",
-    "expected": "line one\npassword=[HIDDEN:8836e2]\r\n4532015112.830366\n"
+    "expected": "line one\npassword=[HIDDEN:afbea4]\r\n4532015112.830366\n"
   },
   {
     "name": "invalid_rule_does_not_drop_the_list",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "custom_regexes": [
         {
           "pattern": "^[0-9]{4,5}/[0-9]{2}$",
@@ -95,58 +106,72 @@
       ]
     },
     "input": "ref 12345/06 filed",
-    "expected": "ref [HIDDEN:case-no:987a12] filed"
+    "expected": "ref [HIDDEN:case-no:be5d3d] filed"
   },
   {
     "name": "signature_aws_key_with_entity_labels",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "entity_type_labels": true
     },
     "input": "deploy key AKIAIOSFODNN7EXAMPLE rotated",
-    "expected": "deploy key [HIDDEN:aws-key:dcce47] rotated"
+    "expected": "deploy key [HIDDEN:aws-key:411a49] rotated"
   },
   {
     "name": "signature_key_half_b19",
     "config": {
+      "salt": "parity-golden-salt-0123456789abc",
       "entity_type_labels": true
     },
     "input": "AKIAIOSFODNN7EXAMPLE=x",
-    "expected": "[HIDDEN:aws-key:dcce47]=x"
+    "expected": "[HIDDEN:aws-key:411a49]=x"
   },
   {
     "name": "luhn_card_with_issuer_prefix",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "card 4539148803436467 end",
-    "expected": "card [HIDDEN:301b53] end"
+    "expected": "card [HIDDEN:c20174] end"
   },
   {
     "name": "luhn_valid_without_issuer_not_a_card",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "TraceId=1234567812345670",
     "expected": "TraceId=1234567812345670"
   },
   {
     "name": "quoted_value_under_sensitive_key_b7",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "{\"secret\": \"user=admin pass=hunter2\"}",
-    "expected": "{\"secret\": \"[HIDDEN:397db4]\"}"
+    "expected": "{\"secret\": \"[HIDDEN:fe66a9]\"}"
   },
   {
     "name": "request_line_query_keeps_protocol_b17",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "\"GET /a?_=12345 HTTP/1.1\" 200 5",
     "expected": "\"GET /a?_=12345 HTTP/1.1\" 200 5"
   },
   {
     "name": "generic_name_value_pair",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "{\"name\": \"DB_PASSWORD\", \"value\": \"hunter\"}",
-    "expected": "{\"name\": \"DB_PASSWORD\", \"value\": \"[HIDDEN:ac7de8]\"}"
+    "expected": "{\"name\": \"DB_PASSWORD\", \"value\": \"[HIDDEN:bdf867]\"}"
   },
   {
     "name": "nested_json_string_stays_valid",
-    "config": {},
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
     "input": "{\"data\": \"{\\\"password\\\": \\\"hunter2xyz\\\", \\\"user\\\": \\\"bob\\\"}\"}",
-    "expected": "{\"data\": \"{\\\"password\\\": \\\"[HIDDEN:60c3ce]\\\", \\\"user\\\": \\\"bob\\\"}\"}"
+    "expected": "{\"data\": \"{\\\"password\\\": \\\"[HIDDEN:6f911f]\\\", \\\"user\\\": \\\"bob\\\"}\"}"
   }
 ]

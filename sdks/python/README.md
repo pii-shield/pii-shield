@@ -37,7 +37,7 @@ scanner default, so redaction matches the CLI for the same config.
 |--------|------|-------------|
 | `entropy_threshold` | float | Shannon entropy cut-off for candidate tokens. |
 | `confidence_score` | float | Hybrid-validation confidence threshold. |
-| `salt` | str | HMAC salt for deterministic `[HIDDEN:xxxxxx]` tokens. Set it to correlate across processes. |
+| `salt` | str | HMAC salt for the `[HIDDEN:xxxxxx]` tags. Treat it as a secret: anyone who has it can compute the tag of a guessed value. If unset, each instance draws a random salt, so tags match only within that instance; set the same salt in every process that must produce matching tags. |
 | `min_secret_length` | int | Minimum candidate token length before entropy checks apply. |
 | `sensitive_keys` | list[str] | Key names whose values are always redacted (case-insensitive). Replaces the defaults. |
 | `disable_bigram_check` | bool | Disable English bigram analysis (useful for non-English logs). |

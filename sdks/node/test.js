@@ -45,6 +45,21 @@ async function runParity() {
     return ok;
 }
 
+// Without a salt each instance draws its own random one, so the same value
+// gets a different tag in each, and never the tag of the old fixed default.
+async function runNoSaltCheck() {
+    const input = 'password=SuperSecretValue123';
+    const a = (await PiiShield.create({}, "../../pii-shield-wasi.wasm")).redact(input);
+    const b = (await PiiShield.create({}, "../../pii-shield-wasi.wasm")).redact(input);
+    const ok = a.startsWith('password=[HIDDEN:') && a !== b && a !== 'password=[HIDDEN:8836e2]' && b !== 'password=[HIDDEN:8836e2]';
+    if (ok) {
+        console.log('no-salt ok: random per instance');
+    } else {
+        console.error(`NO-SALT FAIL: expected two different random tags, got ${JSON.stringify(a)} and ${JSON.stringify(b)}`);
+    }
+    return ok;
+}
+
 async function main() {
     try {
         console.log("Loading WASM module...");
@@ -75,6 +90,9 @@ async function main() {
         // Cross-entrypoint parity against the shared golden.
         const parityOk = await runParity();
         if (!parityOk) {
+            passed = false;
+        }
+        if (!(await runNoSaltCheck())) {
             passed = false;
         }
 

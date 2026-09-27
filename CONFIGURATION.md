@@ -10,7 +10,7 @@ PII-Shield is configured entirely via environment variables.
 | `PII_REQUIRE_STRONG_SALT` | Reject startup when `PII_SALT` is explicitly set to fewer than 16 bytes. Recommended for production and compliance deployments. | No | `false` |
 
 > [!WARNING]
-> If `PII_SALT` is not set, PII-Shield generates a random salt on startup. This means hashes will change every time the pod restarts, making it impossible to correlate logs across restarts. For production, **ALWAYS** set a persistent `PII_SALT`.
+> If `PII_SALT` is not set, PII-Shield generates a random salt on startup (the Node and Python SDKs do the same per instance when `salt` is not set). This means hashes will change every time the pod restarts, making it impossible to correlate logs across restarts. For production, **ALWAYS** set a persistent `PII_SALT`.
 
 Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail instead of only warning when a weak explicit salt is configured.
 

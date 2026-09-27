@@ -24,6 +24,20 @@ def run_parity():
             print(f"parity ok: {tc['name']}")
     return ok
 
+def run_no_salt_check():
+    """Without a salt each instance draws its own random one, so the same value
+    gets a different tag in each, and never the tag of the old fixed default."""
+    text = "password=SuperSecretValue123"
+    a = PiiShield(config=PiiShieldConfig(), wasm_path="../../pii-shield-wasi.wasm").redact(text)
+    b = PiiShield(config=PiiShieldConfig(), wasm_path="../../pii-shield-wasi.wasm").redact(text)
+    old_tag = "password=[HIDDEN:8836e2]"
+    ok = a.startswith("password=[HIDDEN:") and a != b and old_tag not in (a, b)
+    if ok:
+        print("no-salt ok: random per instance")
+    else:
+        print(f"NO-SALT FAIL: expected two different random tags, got {a!r} and {b!r}")
+    return ok
+
 def main():
     try:
         print("Loading WASM module in Python...")
@@ -46,6 +60,8 @@ def main():
                 passed = False
 
         if not run_parity():
+            passed = False
+        if not run_no_salt_check():
             passed = False
 
         if passed:

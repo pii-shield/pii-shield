@@ -368,6 +368,18 @@ func DefaultConfig() Config {
 	return cfg
 }
 
+// randomSalt returns 32 bytes from crypto/rand, the salt used whenever none is
+// configured (CLI without PII_SALT, SDK without a salt).
+func randomSalt() []byte {
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		// CRITICAL SECURITY: Fail closed if we cannot generate a secure salt.
+		// Do not use a fallback.
+		panic(fmt.Sprintf("FATAL: Failed to generate secure random salt: %v", err))
+	}
+	return salt
+}
+
 func loadConfig() Config {
 	cfg := DefaultConfig()
 
@@ -381,13 +393,7 @@ func loadConfig() Config {
 		}
 		cfg.Salt = []byte(envSalt)
 	} else {
-		salt := make([]byte, 32)
-		if _, err := rand.Read(salt); err != nil {
-			// CRITICAL SECURITY: Fail closed if we cannot generate a secure salt.
-			// Do not use a fallback.
-			panic(fmt.Sprintf("FATAL: Failed to generate secure random salt: %v", err))
-		}
-		cfg.Salt = salt
+		cfg.Salt = randomSalt()
 	}
 
 	// Load entropy threshold override
