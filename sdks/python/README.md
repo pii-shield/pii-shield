@@ -8,6 +8,11 @@ PII redaction scanner powered by the core Go engine compiled to WebAssembly (WAS
 pip install pii-shield-wasi
 ```
 
+Requires Python 3.9+ and `wasmtime` 45.0.0+ (pulled in by `pip`). On macOS this
+includes Apple's `/usr/bin/python3`: the SDK turns off wasmtime's Mach-port trap
+handler there, which Apple-signed interpreters do not allow and which used to get
+the process killed (`Killed: 9`) on the first call.
+
 ## Usage
 
 ```python
