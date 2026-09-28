@@ -102,7 +102,7 @@ jobs:
   # On a pull request this job compares the scanner benchmarks against the
   # PR base (scripts/bench-gate.sh): both test binaries are built on this
   # runner and run interleaved, and the job fails when a benchmark is slower
-  # by more than 15% and benchstat calls the difference significant. Shared
+  # by more than 10% and benchstat calls the difference significant. Shared
   # runners are noisy, so the threshold catches regressions a reviewer would
   # care about, not a few percent; for precise numbers use
   # benchmark/run_benchmarks.sh on a quiet machine. On a push there is no

@@ -16,7 +16,7 @@
 # Environment:
 #   BASE_REF       git ref to compare against (default origin/main)
 #   COUNT          runs per side (default 10)
-#   THRESHOLD_PCT  allowed slowdown in percent (default 15)
+#   THRESHOLD_PCT  allowed slowdown in percent (default 10)
 #   BENCH          benchmark regexp (default the two end-to-end benchmarks)
 #   BENCHTIME      -test.benchtime per run (default 1s)
 set -euo pipefail
@@ -26,7 +26,10 @@ cd "${ROOT_DIR}"
 
 BASE_REF="${BASE_REF:-origin/main}"
 COUNT="${COUNT:-10}"
-THRESHOLD_PCT="${THRESHOLD_PCT:-15}"
+# 10%: on the GitHub runners the first gate runs (#246) measured the same code
+# within about +-1% over 10 interleaved runs; 10 leaves room for a noisy
+# neighbour. Revisit with more runs.
+THRESHOLD_PCT="${THRESHOLD_PCT:-10}"
 BENCH="${BENCH:-^(BenchmarkScanAndRedact|BenchmarkThroughput)$}"
 BENCHTIME="${BENCHTIME:-1s}"
 # Pinned so the gate does not change under us; bump deliberately.

@@ -76,3 +76,52 @@ func TestSnakeCaseIdentifierValue(t *testing.T) {
 		}
 	}
 }
+
+// TestShortValueAfterSecretKey: a short all-letter value is freed after a
+// sensitive key (B12), which kept "author": None and "keywords": None intact
+// but also let {"password": "ab"} through while the compact
+// {"password":"ab"} was hidden. After a quoted key that names a secret
+// outright the value is hidden; a key that only contains a sensitive word
+// inside another word, a lone weak word, an unquoted key (type annotations,
+// docstrings) and a literal keep the relaxation.
+func TestShortValueAfterSecretKey(t *testing.T) {
+	useDefaultConfig(t)
+
+	for _, tc := range []struct{ in, secret string }{
+		{`{"password": "ab"}`, `"ab"`},
+		{`{"x-api-key": "abc"}`, `"abc"`},
+		{`{"db_password": "hello"}`, "hello"},
+		{`{"cvv": "abc"}`, `"abc"`},
+		{`{"csrfToken": "abc"}`, `"abc"`},
+	} {
+		out := ScanAndRedact(tc.in)
+		if strings.Contains(out, tc.secret) || !strings.Contains(out, "[HIDDEN:") {
+			t.Errorf("short value after a secret key not hidden: in=%q out=%q", tc.in, out)
+		}
+	}
+	for _, in := range []string{
+		`{"author": "Bob"}`,
+		`"ClientAuth-Enforced": "PASS",`,
+		`{"keywords": None}`,
+		`{"key": "value"}`,
+		`{"auth": "xy"}`,
+		`{"token": true}`,
+		`{"password": null}`,
+		"password: bool = False,",
+		"key: str,",
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("value redacted: in=%q out=%q", in, out)
+		}
+	}
+
+	st := cfgState()
+	for k, want := range map[string]bool{
+		"password": true, "x-api-key": true, "X-Api-Key": true, "db_password": true, "csrfToken": true, "cvv": true,
+		"author": false, "keywords": false, "ClientAuth-Enforced": false, "key": false, "auth": false, "monkey": false,
+	} {
+		if got := st.keyNamesSecret(k); got != want {
+			t.Errorf("keyNamesSecret(%q) = %v, want %v", k, got, want)
+		}
+	}
+}
