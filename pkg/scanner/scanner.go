@@ -1972,7 +1972,7 @@ func (st *configState) isSensitiveKey(key string) bool {
 
 			// Safety check: High entropy strings (likely secrets) should not be treated as keys
 			// even if they contain the word "secret" or "key".
-			if len(key) > 15 && st.calculateComplexity(key) > st.config.EntropyThreshold {
+			if len(key) > 15 && st.calculateComplexity(key) > st.config.EntropyThreshold && !st.isWordsSecretName(k) {
 				return false
 			}
 			return true
@@ -1990,6 +1990,55 @@ func (st *configState) isSensitiveKey(key string) bool {
 	}
 
 	return false
+}
+
+// isWordsSecretName reports whether a long key (lowercased) that the entropy
+// guard would reject is really a secret-bearing field name: an exact entry of
+// the sensitive-key list, or a name made of words with a strong secret word as
+// one of its segments (aws_session_token, db_password, client_secret_value).
+// The guard rejected aws_access_key_id from the default list itself: the loop
+// returns on the first partial match ("key"), so the exact entry later in the
+// list was never reached, and a low-entropy value after it came back in the
+// clear. Weak words (key, sign, auth, pass) do not qualify: as substrings
+// they sit in ordinary names (monkey, keycap_digit_one, heavy_minus_sign,
+// Keyword.Namespace), and the guard is what keeps those long names from
+// forcing their values; measured on the Go and Python source trees.
+func (st *configState) isWordsSecretName(k string) bool {
+	for _, sk := range st.config.SensitiveKeys {
+		if k == sk {
+			return true
+		}
+	}
+	if !isWordsName(k) {
+		return false
+	}
+	for _, seg := range strings.FieldsFunc(k, func(r rune) bool { return r == '_' || r == '-' }) {
+		switch seg {
+		case "password", "passwd", "passphrase", "secret", "token":
+			return true
+		}
+	}
+	return false
+}
+
+// isWordsName reports whether k (already lowercased) is a field name made of
+// words: letters joined by at least one '_' or '-', and nothing else. A random
+// token that merely contains "key" nearly always carries a digit. A dot is
+// left out on purpose: dotted names are attribute paths in code
+// (token.ADD_ASSIGN, Token.Name.Builtin), where "token" names a lexer token.
+func isWordsName(k string) bool {
+	sep := false
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c == '_' || c == '-':
+			sep = true
+		default:
+			return false
+		}
+	}
+	return sep && k[0] >= 'a' && k[0] <= 'z'
 }
 
 // indexWhitespace returns the index of the first space or tab in s, or -1.
