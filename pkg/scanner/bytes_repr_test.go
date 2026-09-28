@@ -157,3 +157,59 @@ func TestIsEscapedBinary(t *testing.T) {
 		}
 	}
 }
+
+// TestProcessBinaryBlobThresholds covers the knobs processBinaryBlob honours
+// like processSingleToken: safe rules, the lowered context threshold and the
+// adaptive baseline.
+func TestProcessBinaryBlobThresholds(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	globalBaseline.Reset()
+	defer globalBaseline.Reset()
+
+	r := rand.New(rand.NewSource(11))
+	b := make([]byte, 32)
+	r.Read(b)
+	random := pyBytesRepr(b, '\'')
+	// Scores between the context threshold (3.6-1.3) and the default one.
+	medium := `\x16\x03\x01\x00\xa5\x01\x00\x00\xa1\x03\x03`
+
+	blob := func(cfg Config, s string, context bool) string {
+		var sb strings.Builder
+		buildConfigState(cfg).processBinaryBlob(s, context, &sb)
+		return sb.String()
+	}
+
+	cfg := campaignConfig()
+	if out := blob(cfg, random, false); !isRedacted(out) {
+		t.Errorf("random blob kept: %q", out)
+	}
+	if out := blob(cfg, medium, false); out != medium {
+		t.Errorf("medium blob hidden without context: %q", out)
+	}
+	if out := blob(cfg, medium, true); !isRedacted(out) {
+		t.Errorf("medium blob kept with context: %q", out)
+	}
+
+	safe := cfg
+	if err := safe.ApplySafeRegexes([]CustomRegexConfig{{Pattern: `\\x[0-9a-f]{2}`, Name: "bin"}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := blob(safe, random, false); out != random {
+		t.Errorf("safe rule ignored: %q", out)
+	}
+
+	adaptive := cfg
+	adaptive.AdaptiveThreshold = true
+	for i := 0; i < 100; i++ {
+		globalBaseline.Update(9.0)
+	}
+	if out := blob(adaptive, random, false); out != random {
+		t.Errorf("adaptive threshold ignored: %q", out)
+	}
+
+	// Upper-case hex escapes count as bytes too.
+	if !isEscapedBinary(`\xFD\xFC\x07\x82\x9A`) {
+		t.Error(`\xFD... not taken for binary`)
+	}
+}
