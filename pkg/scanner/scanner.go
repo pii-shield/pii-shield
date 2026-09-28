@@ -1992,6 +1992,74 @@ func (st *configState) isSensitiveKey(key string) bool {
 	return false
 }
 
+// isValueLiteral reports whether a lowercased token is a JSON or Python
+// literal: true, false, null, none.
+func isValueLiteral(s string) bool {
+	return s == "true" || s == "false" || s == "null" || s == "none"
+}
+
+// keyNamesSecret reports whether a key names a secret outright rather than
+// containing a sensitive word inside another word. It does when the whole key
+// is a sensitive-key entry other than a lone weak word (password, cvv; not
+// key, auth, sign, pass), when a run of two or more of its words is one
+// (x-api-key contains api_key), or when one of its words is a strong secret
+// word (db_password, csrf-token). Words are split on
+// '_', '-', '.', spaces and camelCase boundaries. "author", "keywords" and
+// ClientAuth-Enforced (a single weak word, auth, inside a longer name) do
+// not qualify.
+func (st *configState) keyNamesSecret(key string) bool {
+	lk := strings.ToLower(key)
+	var words []string
+	var cur strings.Builder
+	prevLower := false
+	flush := func() {
+		if cur.Len() > 0 {
+			words = append(words, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range key {
+		switch {
+		case r == '_' || r == '-' || r == '.' || r == ' ':
+			flush()
+			prevLower = false
+			continue
+		case unicode.IsUpper(r) && prevLower:
+			flush()
+		}
+		cur.WriteRune(unicode.ToLower(r))
+		prevLower = unicode.IsLower(r) || unicode.IsDigit(r)
+	}
+	flush()
+
+	listed := func(s string) bool {
+		for _, sk := range st.config.SensitiveKeys {
+			if s == sk {
+				return true
+			}
+		}
+		return false
+	}
+	// A lone weak word is too common as an ordinary key ({"key": "value"},
+	// "auth": Auth); it counts only inside a longer run (api_key).
+	weak := func(s string) bool { return s == "key" || s == "auth" || s == "sign" || s == "pass" }
+	if (listed(lk) && !weak(lk)) || (len(words) == 1 && listed(words[0]) && !weak(words[0])) {
+		return true
+	}
+	for i := range words {
+		switch words[i] {
+		case "password", "passwd", "passphrase", "secret", "token":
+			return true
+		}
+		for j := i + 2; j <= len(words); j++ {
+			if listed(strings.Join(words[i:j], "_")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isWordsSecretName reports whether a long key (lowercased) that the entropy
 // guard would reject is really a secret-bearing field name: an exact entry of
 // the sensitive-key list, or a name made of words with a strong secret word as
@@ -2908,6 +2976,9 @@ type segmentState struct {
 
 	// True right after an existing [HIDDEN…] marker (see scanSegment).
 	afterMarker bool
+
+	// True if the pending key names a secret outright (see keyNamesSecret).
+	keyNamesSecret bool
 }
 
 // looksLikeSecretWord reports whether a word carries a digit, or a symbol
@@ -3032,7 +3103,16 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// carrying a digit or symbol ("password: 12345"). A short all-letter word
 	// cannot be one, so it keeps its text. key=value pairs never come through
 	// here (processEqualPair) and stay fully forced.
-	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) {
+	//
+	// Not after a key that names a secret outright, in value position:
+	// {"password": "ab"} and x-api-key: abc came back unchanged, while the
+	// compact {"password":"ab"} was hidden. The relaxation stays for keys where
+	// a sensitive word only sits inside another word ("author": None,
+	// "keywords": None, "ClientAuth-Enforced": "PASS"), which is what it
+	// protects on real code and logs.
+	// A literal (true, null, None) is never a secret, whatever the key.
+	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) &&
+		(!state.isInValuePos || !state.keyNamesSecret || isValueLiteral(lowerClean)) {
 		forced = false
 	}
 	// In prose, the same for a one- or two-character token of any kind: the
@@ -3099,6 +3179,10 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// 2. Update Context State
 	if isKey {
 		state.pendingKeySensitive = true // Next token (value) will be redacted
+		// Quoted keys only (JSON, dicts): unquoted "key: str" / "password:
+		// bool" is a type annotation or a docstring line far more often than
+		// data, measured on the Go and Python source trees.
+		state.keyNamesSecret = strings.HasPrefix(trimmed, `"`) && st.keyNamesSecret(cleanToken)
 		// Reset expectation since we found the key
 		state.nextValueIsSensitive = false
 
