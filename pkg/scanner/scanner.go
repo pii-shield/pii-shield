@@ -597,6 +597,9 @@ func (st *configState) calculateComplexity(token string) float64 {
 	// the English band. A secret is a random run, and a random run fails the
 	// part shape or scores high on its own, so it is still caught.
 	if !st.isWordCompound(token) {
+		if st.isCamelDigitCompound(token) {
+			return st.camelPartsComplexity(token)
+		}
 		return st.calculateRawComplexity(token)
 	}
 	best := 0.0
@@ -612,6 +615,67 @@ func (st *configState) calculateComplexity(token string) float64 {
 		}
 	}
 	return best
+}
+
+// isCamelDigitCompound reports whether token is a camelCase name with a number
+// inside a word (s3BucketName, http2Enabled, x509Subject) that reads like
+// words. Scored whole, the digit adds a character class and breaks two letter
+// pairs, which lifts such a name over the threshold in prose and in quoted
+// values, while the same name without the digit stays under it. The tests are
+// the ones isWordCompound applies to a compound split on - . _ /: at least two
+// parts, one of them a word of three or more letters, letter pairs averaging
+// above compoundMinBigramAvg, and no sensitive word inside (namesSecret), so
+// krb5KeyVersionNumber keeps its whole-token score because it names "key".
+func (st *configState) isCamelDigitCompound(token string) bool {
+	if st.config.DisableBigramCheck || len(token) > 128 ||
+		!strings.ContainsAny(token, "0123456789") || !isCamelCaseWithDigits(token) {
+		return false
+	}
+	nParts, hasWord := 0, false
+	sum, pairs := 0.0, 0
+	for p, next := nextCamelPart(token, 0); p != ""; p, next = nextCamelPart(token, next) {
+		nParts++
+		letters := 0
+		for letters < len(p) && isASCIILetter(p[letters]) {
+			letters++
+		}
+		if letters >= 3 {
+			hasWord = true
+		}
+		for i := 1; i < letters; i++ {
+			sum += st.letterBigram(p[i-1], p[i])
+			pairs++
+		}
+	}
+	if nParts < 2 || !hasWord || (pairs > 2 && sum/float64(pairs) <= compoundMinBigramAvg) {
+		return false
+	}
+	return !st.namesSecret(token)
+}
+
+// camelPartsComplexity scores a camelCase name as its most complex part, the
+// way calculateComplexity scores a compound split on - . _ /.
+func (st *configState) camelPartsComplexity(token string) float64 {
+	best := 0.0
+	for p, next := nextCamelPart(token, 0); p != ""; p, next = nextCamelPart(token, next) {
+		if s := st.calculateRawComplexity(p); s > best {
+			best = s
+		}
+	}
+	return best
+}
+
+// nextCamelPart returns the camelCase word of token that starts at i (krb5,
+// Key, Version...) and the index of the next one; "" at the end.
+func nextCamelPart(token string, i int) (string, int) {
+	if i >= len(token) {
+		return "", len(token)
+	}
+	j := i + 1
+	for j < len(token) && (token[j] < 'A' || token[j] > 'Z') {
+		j++
+	}
+	return token[i:j], j
 }
 
 // calculateRawComplexity scores token as one run of characters: Shannon

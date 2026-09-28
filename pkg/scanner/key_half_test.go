@@ -214,3 +214,31 @@ func TestIsCamelCaseWithDigits(t *testing.T) {
 		}
 	}
 }
+
+// TestCamelDigitNamesAsWords: the same names as plain words or quoted values.
+// Scored whole, the digit added a character class and broke two letter pairs,
+// so s3BucketName was hidden in prose while the same name without the digit was
+// not. They are now scored by camelCase part, like a compound on - . _ /.
+func TestCamelDigitNamesAsWords(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, name := range []string{"s3BucketName", "http2Enabled", "x509Subject", "sha256Sum", "ec2InstanceType"} {
+		for _, in := range []string{"field " + name + " changed", "('" + name + "', 7)", `{"` + name + `": 7}`} {
+			if out := ScanAndRedact(in); out != in {
+				t.Errorf("name redacted: in=%q out=%q", in, out)
+			}
+		}
+	}
+
+	// Still hidden: a name that carries a sensitive word keeps its whole-token
+	// score (namesSecret, the same rule as for auth_CZIenvzL), a password made
+	// of words keeps the score of its digit-bearing part, and random tokens
+	// that happen to fit the shape fail the letter-pair test.
+	for _, in := range []string{"krb5KeyVersionNumber", "Welcome1Home", "Dragon5Fire", "ZfUj2Cwy", "Bh1Yvie5CtJn"} {
+		if out := ScanAndRedact(in); !strings.Contains(out, "[HIDDEN") {
+			t.Errorf("expected a marker: in=%q out=%q", in, out)
+		}
+	}
+}
