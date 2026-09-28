@@ -99,19 +99,31 @@ jobs:
           exit 1
         fi
 
-  # Informational: this job has no baseline and no threshold, so it cannot
-  # fail on a slowdown. It fails only if a benchmark's own correctness check
-  # (b.Fatal inside the loop) fires. Performance claims need the A/B run in
-  # benchmark/run_benchmarks.sh plus benchstat, not this job. The job name is
-  # kept because the "Protect main" ruleset lists it as a required check.
+  # On a pull request this job compares the scanner benchmarks against the
+  # PR base (scripts/bench-gate.sh): both test binaries are built on this
+  # runner and run interleaved, and the job fails when a benchmark is slower
+  # by more than 15% and benchstat calls the difference significant. Shared
+  # runners are noisy, so the threshold catches regressions a reviewer would
+  # care about, not a few percent; for precise numbers use
+  # benchmark/run_benchmarks.sh on a quiet machine. On a push there is no
+  # base to compare with, so the benchmarks only run. The job name is kept
+  # because the "Protect main" ruleset lists it as a required check.
   benchmark:
     name: Performance Check
     runs-on: ubuntu-latest
     needs: test
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
       with:
         go-version-file: 'go.mod'
-    - name: Run Benchmarks (informational, no baseline or threshold)
-      run: go test -bench=. -benchmem ./pkg/scanner
+    - name: Compare benchmarks with the PR base
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.sha }}
+      run: scripts/bench-gate.sh
+    - name: Run benchmarks (push, no base to compare)
+      if: github.event_name != 'pull_request'
+      run: go test -run '^$' -bench=. -benchmem ./pkg/scanner
