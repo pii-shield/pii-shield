@@ -2,8 +2,8 @@ apiVersion: v2
 name: pii-shield
 description: A Helm chart for deploying PII-Shield as a scratch-compatible logging sidecar
 type: application
-version: 2.2.5
-appVersion: "2.2.5"
+version: 2.2.6
+appVersion: "2.2.6"
 
 annotations:
   artifacthub.io/official: "true"
