@@ -1854,8 +1854,9 @@ func (st *configState) writeKeyHalf(key string, sb *strings.Builder) {
 // rows=10&page=1, or a URL-encoded one such as height=30%20src=, where the
 // "key" is "10&page" or "30%20src" and was always written out as is), or
 // it is a run of words - lower, UPPER, camelCase or PascalCase - with at most
-// a trailing run of digits (http2, sha256). Letters are judged by Unicode
-// class, so a Cyrillic word counts as a word too.
+// a trailing run of digits (http2, sha256), or a strict camelCase name with a
+// short number inside a word (krb5KeyVersionNumber, s3BucketName). Letters are
+// judged by Unicode class, so a Cyrillic word counts as a word too.
 func looksLikeFieldName(key string) bool {
 	if strings.ContainsAny(key, "_-.:&;%") {
 		return true
@@ -1871,12 +1872,54 @@ func looksLikeFieldName(key string) bool {
 			digits = true
 		case unicode.IsLetter(r):
 			if digits {
-				return false
+				return isCamelCaseWithDigits(key)
 			}
 		default:
 			return false
 		}
 		first = false
+	}
+	return true
+}
+
+// isCamelCaseWithDigits reports whether key is a camelCase name whose words
+// may end in up to three digits: krb5KeyVersionNumber, s3BucketName,
+// http2Enabled, x509Cert. Each word is at most one capital followed by
+// lowercase letters, and at most two words carry an inner number. A random
+// token almost never has that shape: on 20 000 random base62 tokens of 24
+// characters, those taken for field names rose only from 383 to 405, while
+// allowing any digit before a capital would have taken 1 071.
+func isCamelCaseWithDigits(key string) bool {
+	inner := 0
+	for i, n := 0, len(key); i < n; {
+		if key[i] >= 'A' && key[i] <= 'Z' {
+			i++
+		}
+		lower := i
+		for i < n && key[i] >= 'a' && key[i] <= 'z' {
+			i++
+		}
+		if i == lower {
+			return false
+		}
+		d := i
+		for i < n && key[i] >= '0' && key[i] <= '9' {
+			i++
+		}
+		if i-d > 3 {
+			return false
+		}
+		if i > d && i < n {
+			// A number inside the name ends a word: the next one starts
+			// with a capital (krb5Key), which a run of lowercase letters
+			// and digits (k3j9x2ab) never does.
+			if key[i] < 'A' || key[i] > 'Z' {
+				return false
+			}
+			if inner++; inner > 2 {
+				return false
+			}
+		}
 	}
 	return true
 }

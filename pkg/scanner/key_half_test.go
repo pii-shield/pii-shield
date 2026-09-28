@@ -116,6 +116,14 @@ func TestKeyNamesAreNeverScored(t *testing.T) {
 		"sha256=abc",
 		"Аутентификация=да",
 		"host:port=1",
+		// A short number inside a camelCase name (seen as krb5KeyVersionNumber
+		// in a univention LDAP modlist).
+		"krb5KeyVersionNumber=3",
+		"utf8Encoded=yes",
+		"s3BucketName=logs",
+		"http2Enabled=true",
+		"x509Cert=1",
+		"ec2InstanceCount=2",
 	} {
 		if out := ScanAndRedact(in); out != in {
 			t.Errorf("key name redacted: in=%q out=%q", in, out)
@@ -136,6 +144,10 @@ func TestSecretAsKeyIsScored(t *testing.T) {
 		"AKIAIOSFODNN7EXAMPLE",
 		"AbC9xY2kQ8pLmN0rZq7",
 		"hqw55CTBeUqNyfgG89hHmA",
+		// Digits inside, but not camelCase words: lowercase runs, or a
+		// digit before a lowercase letter.
+		"k3j9x2ab4q7mz8wp",
+		"aB3dE5fG7hJ9kL2m",
 	} {
 		for _, in := range []string{secret + "=x", "msg " + secret + "=1 done", `"` + secret + `=x"`} {
 			out := ScanAndRedact(in)
@@ -180,6 +192,25 @@ func TestSeparatedSecretAsKeyKnownLimit(t *testing.T) {
 	} {
 		if out := ScanAndRedact(in); out != in {
 			t.Errorf("known limit changed, update KNOWN_LIMITATIONS.md and this test: in=%q out=%q", in, out)
+		}
+	}
+}
+
+func TestIsCamelCaseWithDigits(t *testing.T) {
+	for in, want := range map[string]bool{
+		"krb5KeyVersionNumber": true,
+		"s3BucketName":         true,
+		"x509Cert":             true,
+		"Ec2InstanceId":        true,
+		"k8sNamespace":         false, // a digit before a lowercase letter
+		"k3j9x2ab4q":           false,
+		"aB3dE5fG7hJ9kL":       false,
+		"ab1234Cd":             false, // more than three digits
+		"a1Bc2De3Fg":           false, // more than two inner numbers
+		"AKIAIOSFODNN7EXAMPLE": false,
+	} {
+		if got := isCamelCaseWithDigits(in); got != want {
+			t.Errorf("isCamelCaseWithDigits(%q) = %v, want %v", in, got, want)
 		}
 	}
 }
