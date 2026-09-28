@@ -44,7 +44,7 @@ jobs:
       run: go mod verify
 
     - name: Run actionlint
-      uses: reviewdog/action-actionlint@320fcdd9c860767cf17fab3b20e22e739d5d02b8
+      uses: reviewdog/action-actionlint@2085657ab2c7f48c58edcc767fba576f63bea76b
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
