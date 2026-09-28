@@ -27,6 +27,8 @@ var rescanLines = []string{
 	`{"msg": "login failed for \"bob\" token=abc123def456"}`,
 	`{"name": "password", "value": "x=hunter2"}`,
 	`name=password value=hunter`,
+	"https://h/p?token=abc123def456&aB3dE9",
+	"?keY=0&a010A",
 }
 
 // TestRescanIsStable pins invariant I3: scanning already-redacted output
@@ -99,5 +101,23 @@ func TestMarkerEdgeShapes(t *testing.T) {
 		if out := ScanAndRedact(tc.in); out != tc.want {
 			t.Errorf("in=%q\n got  %q\n want %q", tc.in, out, tc.want)
 		}
+	}
+}
+
+// TestMarkerGluedQueryTail pins the scope of the query-tail rule: a
+// parameter without '=' glued to a marker is kept, as maskURLParameters kept
+// it on the first pass; one with '=' is still scored; and a token separated
+// from the marker by a space is not a query tail at all.
+func TestMarkerGluedQueryTail(t *testing.T) {
+	useDefaultConfig(t)
+
+	if in := "https://h/p?token=[HIDDEN:78de3d]&aB3dE9"; ScanAndRedact(in) != in {
+		t.Errorf("glued query flag redacted: %q", ScanAndRedact(in))
+	}
+	if out := ScanAndRedact("https://h/p?token=[HIDDEN:78de3d]&sig=Zq8vN3pL7xR2wT9yB4mK6"); strings.Contains(out, "Zq8vN3pL7xR2wT9yB4mK6") {
+		t.Errorf("a glued parameter with a value skipped scoring: %q", out)
+	}
+	if out := ScanAndRedact("x [HIDDEN:abc123] &aB3dE9Kx9 y"); strings.Contains(out, "aB3dE9Kx9") {
+		t.Errorf("a token after a marker and a space was kept as a query flag: %q", out)
 	}
 }

@@ -1228,6 +1228,7 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
 				state.isInValuePos = false
+				state.afterMarker = true
 				i += end + 1
 				start = i
 				seenInvalid = false
@@ -1258,6 +1259,11 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 		}
 
 		if isSepRune(r) {
+			if i == start {
+				// A separator right after a marker: whatever follows is not
+				// glued to it (see afterMarker in processAndAppend).
+				state.afterMarker = false
+			}
 			if i > start {
 				token := segment[start:i]
 				if seenInvalid {
@@ -2266,7 +2272,40 @@ func isSafe(token string) bool {
 		return true
 	}
 
+	// An issuer prefix (sk_live_, ghp_, xoxb-) wins over the word shape.
+	if isSnakeCaseWords(token) && matchSignature(token) == "" {
+		return true
+	}
+
 	return false
+}
+
+// isSnakeCaseWords reports whether token is two or more lowercase ASCII words
+// joined by underscores: token_value, not_found, read_write, request_id. Such
+// identifiers sit right at the entropy threshold (the underscore adds a
+// character class) and were hidden in value position and in prose. A random
+// secret is not made of lowercase words only; one that carries a digit or an
+// uppercase letter (hqw55CTBeUqNyfgG89hH_mA) does not match.
+func isSnakeCaseWords(token string) bool {
+	if len(token) < 3 || token[0] == '_' || token[len(token)-1] == '_' || !strings.Contains(token, "_") {
+		return false
+	}
+	prevUnderscore := false
+	for i := 0; i < len(token); i++ {
+		c := token[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+			prevUnderscore = false
+		case c == '_':
+			if prevUnderscore {
+				return false
+			}
+			prevUnderscore = true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isPlainDecimal(token string) bool {
@@ -2866,6 +2905,9 @@ type segmentState struct {
 	pendingAfterCopula bool
 	// True if the previous token was a strong secret word (password, token).
 	prevStrongSecretWord bool
+
+	// True right after an existing [HIDDEN…] marker (see scanSegment).
+	afterMarker bool
 }
 
 // looksLikeSecretWord reports whether a word carries a digit, or a symbol
@@ -2993,6 +3035,13 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) {
 		forced = false
 	}
+	// In prose, the same for a one- or two-character token of any kind: the
+	// 0 in self.auth[0] or "the password 0 is" is an index or a count, not a
+	// secret. Three characters stay forced, so "cvv 123" is still hidden, and
+	// the value after "password:" keeps its force whatever its length.
+	if forced && !state.isInValuePos && utf8.RuneCountInString(cleanToken) < 3 {
+		forced = false
+	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
 		forced = true
 	}
@@ -3030,8 +3079,17 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// the full 40 characters, and a 12-character hash scores above the
 	// entropy threshold on its own, so without the key it stays hidden: bare
 	// hex of that length can just as well be a secret.
+	// A query tail glued to an earlier marker, ?token=[HIDDEN:x]&flag: on the
+	// first pass maskURLParameters wrote a parameter without '=' as is, but on
+	// a rescan the marker splits the URL and the tail arrives on its own, so
+	// a random-looking flag was scored and hidden. Keep it as the first pass
+	// did; a tail that carries '=' still goes through key=value scoring.
+	afterMarker := state.afterMarker
+	state.afterMarker = false
 	var isKey bool
-	if st.isShortHashUnderHashKey(trimmed, state.pendingHashKey) {
+	if afterMarker && strings.HasPrefix(trimmed, "&") && !strings.Contains(trimmed, "=") {
+		sb.WriteString(token)
+	} else if st.isShortHashUnderHashKey(trimmed, state.pendingHashKey) {
 		sb.WriteString(token)
 	} else {
 		isKey = st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, override, sb, depth)
