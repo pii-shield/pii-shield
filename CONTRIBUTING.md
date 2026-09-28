@@ -63,6 +63,16 @@ For scanner-only microbenchmarks, run:
 go test -bench=. -benchmem ./pkg/scanner
 ```
 
+On a pull request, the "Performance Check" job runs `scripts/bench-gate.sh`:
+it builds the scanner benchmarks at the PR base and at your branch, runs them
+interleaved, and fails when one is more than 15% slower and benchstat calls
+the difference significant. Run it locally the same way:
+```bash
+BASE_REF=origin/main scripts/bench-gate.sh
+```
+The CI runners are shared and noisy, so the gate only catches large
+regressions; the end-to-end A/B above is the evidence for a performance claim.
+
 ## Review Policy
 Pull requests should pass the required GitHub Actions checks before merge. Ownership for major areas of the repository is documented in `.github/CODEOWNERS`; use it to identify the right reviewer for scanner, operator, chart, SDK, workflow, and security-documentation changes.
 
