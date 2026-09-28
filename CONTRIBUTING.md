@@ -65,7 +65,7 @@ go test -bench=. -benchmem ./pkg/scanner
 
 On a pull request, the "Performance Check" job runs `scripts/bench-gate.sh`:
 it builds the scanner benchmarks at the PR base and at your branch, runs them
-interleaved, and fails when one is more than 15% slower and benchstat calls
+interleaved, and fails when one is more than 10% slower and benchstat calls
 the difference significant. Run it locally the same way:
 ```bash
 BASE_REF=origin/main scripts/bench-gate.sh

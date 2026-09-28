@@ -1414,22 +1414,38 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
-	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
-		st.maskURLParameters(rawToken, sb, depth)
-		return false
-	}
-
 	// A Python bytes literal (b'...' or b"..."), which is how urllib3 and
 	// http.client log the raw request they send. The prefix hid the quotes
 	// from the quoted-string handling below, and the colon pair splitter cut
 	// the dump at its first header (b'Host: ...) instead, so nothing after it
 	// was scored. Keep the prefix and scan the quoted part.
-	if !forcedSensitive && len(rawToken) >= 3 && (rawToken[0] == 'b' || rawToken[0] == 'B') &&
-		(rawToken[1] == '"' || rawToken[1] == '\'') && rawToken[len(rawToken)-1] == rawToken[1] {
+	//
+	// The same literal is also how Python prints a dict of bytes
+	// ({b'authorization': b'Basic ...'}, asgi request.headers). A value under a
+	// sensitive key is hidden whole, like a quoted str value, but without the
+	// prefix and quotes: before, it fell through to the key=value splitter,
+	// which cut 'Basic <base64>=' on its padding and wrote the credential out
+	// as an unscored key half. Binary data (b'0\x81\x9a...', a Kerberos key in
+	// an LDAP modlist) is scored as one blob: its escapes, spaces and brackets
+	// would otherwise cut it into short fragments that each pass on their own.
+	if isBytesLiteral(rawToken) {
+		inner := rawToken[2 : len(rawToken)-1]
 		sb.WriteByte(rawToken[0])
 		sb.WriteByte(rawToken[1])
-		st.scanSegment(rawToken[2:len(rawToken)-1], sb, depth+1)
+		switch {
+		case forcedSensitive:
+			st.processSingleToken(inner, inner, true, contextSensitive, false, sb)
+		case isEscapedBinary(inner):
+			st.processBinaryBlob(inner, contextSensitive, sb)
+		default:
+			st.scanSegment(inner, sb, depth+1)
+		}
 		sb.WriteByte(rawToken[1])
+		return false
+	}
+
+	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
+		st.maskURLParameters(rawToken, sb, depth)
 		return false
 	}
 
@@ -1555,6 +1571,91 @@ func isPaddedBase64Blob(s string) bool {
 	}
 	body := strings.TrimRight(s, "=")
 	return len(s)-len(body) <= 2 && strings.IndexByte(body, '=') == -1
+}
+
+// processBinaryBlob scores the inside of a bytes literal that holds binary
+// data as one token. Only the entropy score decides: the whitelists in
+// processSingleToken read its backslashes as a Windows path, and a 0x20 byte
+// prints as a space, which the space check takes for prose. A run of zero
+// bytes or a short protocol header scores low and stays; random bytes (keys,
+// ciphertext, hashes) score far above the threshold.
+func (st *configState) processBinaryBlob(content string, contextSensitive bool, sb *strings.Builder) {
+	cfg := st.config
+	for _, rule := range cfg.SafeRegexes {
+		if rule.Regexp.MatchString(content) {
+			sb.WriteString(content)
+			return
+		}
+	}
+	threshold := cfg.EntropyThreshold
+	if contextSensitive {
+		threshold -= 1.3
+	} else if cfg.AdaptiveThreshold {
+		if adaptiveThreshold, ready := globalBaseline.GetThreshold(); ready {
+			threshold = adaptiveThreshold
+		}
+	}
+	threshold *= cfg.ConfidenceThreshold
+	if st.calculateComplexity(content) <= threshold {
+		sb.WriteString(content)
+		return
+	}
+	entityType := "entropy"
+	if contextSensitive {
+		entityType = "context"
+	}
+	st.redactWithHMAC(content, st.entityLabel(entityType), "entropy", sb)
+}
+
+// minBinaryEscapes is how many \xNN escapes make the inside of a bytes literal
+// binary data rather than text with a stray byte in it. A random 16-byte key
+// prints about ten of them.
+const minBinaryEscapes = 4
+
+// isEscapedBinary reports whether s, the inside of a Python bytes literal, is
+// binary data: at least minBinaryEscapes \xNN escapes, and the bytes they
+// spell are not UTF-8 text. Non-Latin text sent as bytes (b'\xd0\x9f\xd1\x80...')
+// is all escapes too, but it decodes, and random bytes almost never do.
+func isEscapedBinary(s string) bool {
+	n := 0
+	decoded := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			decoded = append(decoded, s[i])
+			continue
+		}
+		if s[i+1] == 'x' && i+3 < len(s) && isHexByte(s[i+2]) && isHexByte(s[i+3]) {
+			decoded = append(decoded, hexByteValue(s[i+2])<<4|hexByteValue(s[i+3]))
+			n++
+			i += 3
+			continue
+		}
+		// \\, \', \n and the like are one character, so \\x41 is not a byte.
+		decoded = append(decoded, s[i+1])
+		i++
+	}
+	return n >= minBinaryEscapes && !utf8.Valid(decoded)
+}
+
+func hexByteValue(c byte) byte {
+	switch {
+	case c <= '9':
+		return c - '0'
+	case c >= 'a':
+		return c - 'a' + 10
+	default:
+		return c - 'A' + 10
+	}
+}
+
+func isHexByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+// isBytesLiteral reports whether s is a whole Python bytes literal, b'...' or
+// b"...".
+func isBytesLiteral(s string) bool {
+	return len(s) >= 3 && (s[0] == 'b' || s[0] == 'B') && (s[1] == '"' || s[1] == '\'') && s[len(s)-1] == s[1]
 }
 
 func isBalancedQuoted(s string) bool {
@@ -1880,13 +1981,14 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		if containsSep := strings.Contains(val, "=") || strings.Contains(val, ":"); containsSep && !keySensitive {
 			// Recursive handling for "data=key=val" where "data" is safe.
 			st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
-		} else if isBalancedQuoted(val) {
+		} else if isBalancedQuoted(val) || isBytesLiteral(val) {
 			// A quoted value keeps its inner spaces, so processSingleToken's
 			// space heuristic would wave the whole blob through and a secret
 			// inside `msg="user 42 token <secret>"` would survive. Route it
 			// through the same isValuePos re-tokenize path processColonPair
 			// uses, which unwraps the quotes and scores each word on its own
-			// (B15; B9 fixed only the colon path).
+			// (B15; B9 fixed only the colon path). A bytes literal
+			// (password=b'...') goes the same way, so its b'' stays.
 			st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
 		} else {
 			st.processSingleToken(val, val, keySensitive, false, false, sb)
@@ -2096,6 +2198,74 @@ func (st *configState) isSensitiveKey(key string) bool {
 		}
 	}
 
+	return false
+}
+
+// isValueLiteral reports whether a lowercased token is a JSON or Python
+// literal: true, false, null, none.
+func isValueLiteral(s string) bool {
+	return s == "true" || s == "false" || s == "null" || s == "none"
+}
+
+// keyNamesSecret reports whether a key names a secret outright rather than
+// containing a sensitive word inside another word. It does when the whole key
+// is a sensitive-key entry other than a lone weak word (password, cvv; not
+// key, auth, sign, pass), when a run of two or more of its words is one
+// (x-api-key contains api_key), or when one of its words is a strong secret
+// word (db_password, csrf-token). Words are split on
+// '_', '-', '.', spaces and camelCase boundaries. "author", "keywords" and
+// ClientAuth-Enforced (a single weak word, auth, inside a longer name) do
+// not qualify.
+func (st *configState) keyNamesSecret(key string) bool {
+	lk := strings.ToLower(key)
+	var words []string
+	var cur strings.Builder
+	prevLower := false
+	flush := func() {
+		if cur.Len() > 0 {
+			words = append(words, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range key {
+		switch {
+		case r == '_' || r == '-' || r == '.' || r == ' ':
+			flush()
+			prevLower = false
+			continue
+		case unicode.IsUpper(r) && prevLower:
+			flush()
+		}
+		cur.WriteRune(unicode.ToLower(r))
+		prevLower = unicode.IsLower(r) || unicode.IsDigit(r)
+	}
+	flush()
+
+	listed := func(s string) bool {
+		for _, sk := range st.config.SensitiveKeys {
+			if s == sk {
+				return true
+			}
+		}
+		return false
+	}
+	// A lone weak word is too common as an ordinary key ({"key": "value"},
+	// "auth": Auth); it counts only inside a longer run (api_key).
+	weak := func(s string) bool { return s == "key" || s == "auth" || s == "sign" || s == "pass" }
+	if (listed(lk) && !weak(lk)) || (len(words) == 1 && listed(words[0]) && !weak(words[0])) {
+		return true
+	}
+	for i := range words {
+		switch words[i] {
+		case "password", "passwd", "passphrase", "secret", "token":
+			return true
+		}
+		for j := i + 2; j <= len(words); j++ {
+			if listed(strings.Join(words[i:j], "_")) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -3015,6 +3185,9 @@ type segmentState struct {
 
 	// True right after an existing [HIDDEN…] marker (see scanSegment).
 	afterMarker bool
+
+	// True if the pending key names a secret outright (see keyNamesSecret).
+	keyNamesSecret bool
 }
 
 // looksLikeSecretWord reports whether a word carries a digit, or a symbol
@@ -3139,7 +3312,16 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// carrying a digit or symbol ("password: 12345"). A short all-letter word
 	// cannot be one, so it keeps its text. key=value pairs never come through
 	// here (processEqualPair) and stay fully forced.
-	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) {
+	//
+	// Not after a key that names a secret outright, in value position:
+	// {"password": "ab"} and x-api-key: abc came back unchanged, while the
+	// compact {"password":"ab"} was hidden. The relaxation stays for keys where
+	// a sensitive word only sits inside another word ("author": None,
+	// "keywords": None, "ClientAuth-Enforced": "PASS"), which is what it
+	// protects on real code and logs.
+	// A literal (true, null, None) is never a secret, whatever the key.
+	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) &&
+		(!state.isInValuePos || !state.keyNamesSecret || isValueLiteral(lowerClean)) {
 		forced = false
 	}
 	// In prose, the same for a one- or two-character token of any kind: the
@@ -3206,6 +3388,10 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// 2. Update Context State
 	if isKey {
 		state.pendingKeySensitive = true // Next token (value) will be redacted
+		// Quoted keys only (JSON, dicts): unquoted "key: str" / "password:
+		// bool" is a type annotation or a docstring line far more often than
+		// data, measured on the Go and Python source trees.
+		state.keyNamesSecret = strings.HasPrefix(trimmed, `"`) && st.keyNamesSecret(cleanToken)
 		// Reset expectation since we found the key
 		state.nextValueIsSensitive = false
 
