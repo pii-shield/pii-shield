@@ -340,6 +340,59 @@ func TestQuotedMultiWordValueAfterEquals(t *testing.T) {
 	}
 }
 
+// TestQuotedPhraseWithEqualsSign: a quoted phrase with an '=' anywhere in it
+// was split at the first '=' as one key=value pair, and the whole phrase before
+// it was written out as an unscored key half. A JSON message or a logfmt msg
+// with a pair at its end ("auth failed token=<secret> user=bob") passed whole,
+// custom rules included. The phrase is now scanned word by word.
+func TestQuotedPhraseWithEqualsSign(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	cfg := campaignConfig()
+	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Pattern: `\+1\d{10}`, Name: "us_phone"}}); err != nil {
+		t.Fatal(err)
+	}
+	UpdateConfig(cfg)
+
+	const token = "ghp_9f8Qz2LmXv7Rt4Kp1Wb6Nc3Hd5Js0YaQw12"
+	leaky := map[string]string{
+		`level=warn msg="auth failed token=` + token + ` user=bob"`:   token,
+		`{"message":"retry for: ` + token + ` attempt=2"}`:            token,
+		`{"message": "retry ` + token + ` attempt=2"}`:                token,
+		`{"msg":"auth failed token=` + token + ` user=bob"}`:          token,
+		`{"message":"sent to alice@example.com status=ok"}`:           "alice@example.com",
+		`{"message":"AI Assistant processed: +12398430670 esc=true"}`: "+12398430670",
+		`"processed +12398430670 a=b"`:                                "+12398430670",
+	}
+	for in, secret := range leaky {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, secret) {
+			t.Errorf("secret leaked: in=%q out=%q", in, out)
+		}
+		if strings.Count(out, `"`) != strings.Count(in, `"`) {
+			t.Errorf("quote count changed: in=%q out=%q", in, out)
+		}
+	}
+	// The words around the secret stay: the phone rule used to swallow
+	// "processed" and "a" into its marker.
+	if out := ScanAndRedact(`"processed +12398430670 a=b"`); !strings.HasPrefix(out, `"processed [HIDDEN:us_phone:`) || !strings.HasSuffix(out, ` a=b"`) {
+		t.Errorf("words around the phone lost: %q", out)
+	}
+
+	// Quoted phrases with ordinary pairs, and a quoted single pair, stay as they are.
+	for _, in := range []string{
+		`msg="request done status=200 duration=12ms path=/api/v1/users"`,
+		`{"msg":"retry attempt=2 of=5"}`,
+		`{"message": "user logged in, role=admin"}`,
+		`x="mode=fast"`,
+		`"a=b"`,
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("over-redaction: in=%q out=%q", in, out)
+		}
+	}
+}
+
 // TestSafeRegexWhitelistAppliesToLuhnAndURL covers B10: cfg.SafeRegexes
 // (PII_SAFE_REGEX_LIST) is a no-op for the Luhn credit-card path and the URL
 // query-parameter path. Both call redactWithHMAC directly in scanLine /

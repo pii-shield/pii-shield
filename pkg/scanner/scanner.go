@@ -1940,6 +1940,20 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 			key := trimmed[:tIdx]
 			val := trimmed[tIdx+1:]
 
+			// A key half with a space or another separator in it is not a
+			// key: the quotes hold a phrase with a pair somewhere inside
+			// ("auth failed token=<secret> user=bob", a JSON message or a
+			// logfmt msg="..."). Taken as a key, the whole phrase up to the
+			// first '=' was written out unscored, and the secret in it with
+			// it. Scan the phrase word by word, as a quoted value without an
+			// '=' already is; each pair in it is then split on its own.
+			if strings.IndexFunc(key, isSepRune) != -1 {
+				sb.WriteString(quote)
+				st.scanSegment(trimmed, sb, depth+1)
+				sb.WriteString(quote)
+				return false, true
+			}
+
 			keySensitive := st.isSensitiveKey(key) || overrideSensitivity
 
 			sb.WriteString(quote)
