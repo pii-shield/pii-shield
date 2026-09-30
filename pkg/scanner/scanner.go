@@ -603,6 +603,7 @@ func (st *configState) calculateComplexity(token string) float64 {
 		return st.calculateRawComplexity(token)
 	}
 	best := 0.0
+	dotted := !strings.ContainsAny(token, "-_/")
 	for part, next := nextCompoundPart(token, 0); part != ""; part, next = nextCompoundPart(token, next) {
 		// A part cannot score above log2(len) plus the largest class bonus
 		// (1.5) and bigram adjustment (0.5); skip it when that bound cannot
@@ -610,11 +611,63 @@ func (st *configState) calculateComplexity(token string) float64 {
 		if len(part) < len(logTable) && logTable[len(part)]+2.0 <= best {
 			continue
 		}
-		if s := st.calculateRawComplexity(part); s > best {
+		if s := st.partComplexity(part, dotted); s > best {
 			best = s
 		}
 	}
 	return best
+}
+
+// partComplexity scores one part of a compound. A camelCase part that reads
+// as words (NetworkClient, ObjectMapper, Http2FrameCodec) is scored as its
+// most complex word, the way a standalone camelCase name with a digit
+// already is: scored as one run, NetworkClient reaches 3.89 and ObjectMapper
+// 3.75, so org.apache.kafka.clients.NetworkClient was hidden on every line
+// of a Java log although every part of it is a word. The word-by-word score
+// for a letters-only camelCase part applies to dotted names only: the same
+// rule on a User-Agent component (MobileSafari/604.1, XiaoMi/MiuiBrowser)
+// changed 1 394 of 300 000 access-log lines, a separate decision. Anything
+// else is one run.
+func (st *configState) partComplexity(part string, dotted bool) float64 {
+	if st.isCamelDigitCompound(part) || (dotted && st.isCamelWordCompound(part)) {
+		return st.camelPartsComplexity(part)
+	}
+	return st.calculateRawComplexity(part)
+}
+
+// isCamelWordCompound reports whether token is a camelCase name of letters
+// only that reads like words: at least two words, each of two or more
+// letters and one of three or more, letter pairs averaging above
+// compoundMinBigramAvg, and no sensitive word inside. A run of capitals with
+// single lowercase letters between them (XkQpZm) fails the two-letter rule.
+func (st *configState) isCamelWordCompound(token string) bool {
+	if st.config.DisableBigramCheck || len(token) > 128 {
+		return false
+	}
+	nParts, hasWord := 0, false
+	sum, pairs := 0.0, 0
+	for p, next := nextCamelPart(token, 0); p != ""; p, next = nextCamelPart(token, next) {
+		nParts++
+		if len(p) < 2 {
+			return false
+		}
+		for i := 0; i < len(p); i++ {
+			if !isASCIILetter(p[i]) {
+				return false
+			}
+		}
+		if len(p) >= 3 {
+			hasWord = true
+		}
+		for i := 1; i < len(p); i++ {
+			sum += st.letterBigram(p[i-1], p[i])
+			pairs++
+		}
+	}
+	if nParts < 2 || !hasWord || (pairs > 2 && sum/float64(pairs) <= compoundMinBigramAvg) {
+		return false
+	}
+	return !st.namesSecret(token)
 }
 
 // isCamelDigitCompound reports whether token is a camelCase name with a number
@@ -718,12 +771,17 @@ func (st *configState) isWordCompound(token string) bool {
 		return false
 	}
 	first, next := nextCompoundPart(token, 0)
-	nParts, hasWord, sameLength := 0, false, len(first) >= 4
+	// Generated codes are dash-separated (abcd-efgh-ijkl-mnop,
+	// XXXXX-XXXXX-XXXXX); a dotted name with equal parts is a logger or a
+	// package (flaskUI.restapi, lights.sensors) and is judged by its letter
+	// pairs alone.
+	dotOnly := !strings.ContainsAny(token, "-_/")
+	nParts, hasWord, sameLength := 0, false, len(first) >= 4 && !dotOnly
 	sum, pairs := 0.0, 0
 	for p := first; p != ""; p, next = nextCompoundPart(token, next) {
 		nParts++
 		sameLength = sameLength && len(p) == len(first)
-		letters, ok := wordShapedPart(p)
+		letters, ok := wordShapedPart(p, dotOnly)
 		if !ok {
 			return false
 		}
@@ -790,7 +848,7 @@ const compoundMinBigramAvg = -6.5
 
 // wordShapedPart reports whether p is shaped like one part of an identifier
 // (see isWordCompound) and returns the length of its leading letter run.
-func wordShapedPart(p string) (int, bool) {
+func wordShapedPart(p string, dotted bool) (int, bool) {
 	if len(p) > 24 {
 		return 0, false
 	}
@@ -809,16 +867,49 @@ func wordShapedPart(p string) (int, bool) {
 	for i < len(p) && isASCIILetter(p[i]) {
 		i++
 	}
-	if i != len(p) || i-tail > 2 {
+	if i != len(p) {
 		return 0, false
 	}
+	if i-tail > 2 {
+		// A version or size prefix before a word: v2restapi, v1client,
+		// s3client, Http2FrameCodec. A short letter run (at most 4), one or
+		// two digits, then a word of three or more letters. Logger names in
+		// Python and Java are full of these, and scored whole they looked
+		// random (flaskUI.v2restapi scored 5.35 against 3.6).
+		// Exactly one digit, a leading run of one letter (v2, s3) or of a
+		// word (Http2), and a word after it. Two leading letters or two
+		// digits let random file names through (cm6hlrso, wlh26ayb).
+		// Dotted names only: on the access-log corpus the same shape in a
+		// URL value is a random file name (note9mmm.jpg, cm6hlrso.jpg).
+		if !dotted || letters == 0 || letters == 2 || letters > 4 || tail-letters != 1 || i-tail < 4 {
+			return 0, false
+		}
+		// A one-letter prefix is a version (v2) or s3; a word prefix (Http2)
+		// is followed by a camelCase word. note9blue.jpg and y5prime.jpg,
+		// file names on the access-log corpus, fit neither.
+		if letters == 1 && p[0] != 'v' && p[0] != 'V' && p[0] != 's' && p[0] != 'S' {
+			return 0, false
+		}
+		if letters >= 3 && (p[tail] < 'A' || p[tail] > 'Z') {
+			return 0, false
+		}
+		letters, p = i-tail, p[tail:]
+	}
 	if letters >= 4 {
+		// One lowercase letter alone between capitals is a name (MyApp,
+		// McDonald) in a dotted logger name; two or more are a random run of
+		// mixed case (XkQpZm). Outside dotted names the old rule stands: the
+		// relaxation alone changed 2 000 User-Agent lines (YaBrowser, iPhone)
+		// on the access-log corpus.
+		alone := 0
 		for j := 0; j < letters; j++ {
 			lowerAlone := p[j] >= 'a' && p[j] <= 'z' &&
 				(j == 0 || p[j-1] < 'a' || p[j-1] > 'z') &&
 				(j+1 == letters || p[j+1] < 'a' || p[j+1] > 'z')
 			if lowerAlone {
-				return 0, false
+				if alone++; alone > 1 || !dotted {
+					return 0, false
+				}
 			}
 		}
 	}
