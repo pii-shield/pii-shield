@@ -183,7 +183,7 @@ The suite above proves the scanner; it does not prove your installation. Before 
 4. With `PII_METRICS_ENABLED=true`, watch `piishield_redaction_events_total` by `type`; a drop after a deploy means a format changed somewhere upstream.
 5. After every rule that protects a value from redaction, run the planted-value check again.
 
-What the scanner cannot catch by design, such as a name in free text, is listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). The full walkthrough with a payments log before and after is in the [banking logs guide](https://pii-shield.com/guide-banking-logs-gdpr).
+What the scanner cannot catch by design, such as a name in free text, is listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). The full walkthrough with a payments log before and after is in the [banking logs guide](https://pii-shield.com/guide-banking-logs-gdpr#verify).
 
 ### Performance Benchmarks
 
