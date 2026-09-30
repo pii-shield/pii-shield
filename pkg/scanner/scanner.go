@@ -1188,28 +1188,101 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 		luhnRanges = validLuhns
 	}
 
-	chunkStart := 0
+	// Telephone numbers are carved out of the line the same way as cards:
+	// a phone is digits only, which entropy cannot tell from a timestamp,
+	// and a grouped one (+49 170 1234567) spans several tokens.
+	carves := mergeCarves(luhnRanges, FindPhoneSequences(logLine))
 
-	for _, lr := range luhnRanges {
-		if lr.Start > chunkStart {
-			safeSegment := logLine[chunkStart:lr.Start]
-			st.scanSegment(safeSegment, sb, depth)
+	chunkStart := 0
+	inQuote, quoteChar := false, rune(0)
+
+	for _, cv := range carves {
+		// A value carved out of a quoted string takes its quotes with it and
+		// gets them back around the marker. Left in the segments on either
+		// side, the opening quote of the value closed the string that comes
+		// after the carve and the one after it opened another, so a JSON line
+		// with a card or a phone in one field lost the quotes of the next
+		// ({"phone": "+49 ...", "token": "x"} came back as "token":x).
+		start, end := cv.Start, cv.End
+		quote := byte(0)
+		if start > 0 && end < len(logLine) && (logLine[start-1] == '"' || logLine[start-1] == '\'') && logLine[end] == logLine[start-1] {
+			quote = logLine[start-1]
+			start--
+			end++
+		}
+		if start > chunkStart {
+			safeSegment := logLine[chunkStart:start]
+			inQuote, quoteChar = st.scanSegmentFrom(safeSegment, sb, depth, inQuote, quoteChar)
 		}
 
-		secret := logLine[lr.Start:lr.End]
+		secret := logLine[cv.Start:cv.End]
+		if quote != 0 {
+			sb.WriteByte(quote)
+		}
+		// The operator's own rule names the value before the built-in
+		// detector does, so a us_phone rule keeps its label on a number
+		// the phone shape would also have found.
 		if st.isSafeRegexWhitelisted(secret) {
 			sb.WriteString(secret)
+		} else if name, ok := st.customRuleName(secret); ok {
+			st.redactWithHMAC(secret, name, "regex", sb)
+		} else if cv.phone {
+			st.redactWithHMAC(secret, st.entityLabel("phone"), "signature", sb)
 		} else {
 			st.redactWithHMAC(secret, st.entityLabel("card"), "luhn", sb)
 		}
+		if quote != 0 {
+			sb.WriteByte(quote)
+		}
 
-		chunkStart = lr.End
+		chunkStart = end
 	}
 
 	if chunkStart < len(logLine) {
 		safeSegment := logLine[chunkStart:]
-		st.scanSegment(safeSegment, sb, depth)
+		st.scanSegmentFrom(safeSegment, sb, depth, inQuote, quoteChar)
 	}
+}
+
+// carve is a byte range of a line hidden as one value before tokenizing: a
+// card number found by FindLuhnSequences or a phone found by
+// FindPhoneSequences.
+type carve struct {
+	Range
+	phone bool
+}
+
+// mergeCarves joins the card and phone ranges of a line in line order. Both
+// lists are sorted and internally disjoint; where the two overlap the phone
+// wins. A phone is found only with a '+', NANP punctuation or a phone key,
+// and a 13-digit German number written +49... passes Luhn as a 13-digit Visa
+// once in ten: hidden either way, but the label was a lie.
+func mergeCarves(cards, phones []Range) []carve {
+	if len(phones) == 0 && len(cards) == 0 {
+		return nil
+	}
+	out := make([]carve, 0, len(cards)+len(phones))
+	i, j := 0, 0
+	for i < len(cards) || j < len(phones) {
+		switch {
+		case j >= len(phones):
+			out = append(out, carve{Range: cards[i]})
+			i++
+		case i >= len(cards):
+			out = append(out, carve{Range: phones[j], phone: true})
+			j++
+		case phones[j].End <= cards[i].Start:
+			out = append(out, carve{Range: phones[j], phone: true})
+			j++
+		case cards[i].End <= phones[j].Start:
+			out = append(out, carve{Range: cards[i]})
+			i++
+		default:
+			// Overlap: drop the card, keep the phone.
+			i++
+		}
+	}
+	return out
 }
 
 // scanSegment implements a Quote-Aware Tokenizer.
@@ -1217,10 +1290,18 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 // scanSegment implements a Context-Aware & Quote-Aware Tokenizer.
 // It handles: escaped quotes, spaces, and sensitive key tracking.
 func (st *configState) scanSegment(segment string, sb *strings.Builder, depth int) {
+	st.scanSegmentFrom(segment, sb, depth, false, 0)
+}
+
+// scanSegmentFrom is scanSegment starting inside a quoted string when inQuote
+// is set (quoteChar is the quote to close), and reporting the quote state at
+// the end of the segment. scanLine cuts a line at every card and phone it
+// carves out; scanning the pieces with a fresh quote state each inverted the
+// quoting of everything after a number inside a quoted request line, and the
+// User-Agent that followed was hidden as a "quoted" value.
+func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, depth int, inQuote bool, quoteChar rune) (bool, rune) {
 	n := len(segment)
 	start := 0
-	inQuote := false
-	quoteChar := rune(0)
 	seenInvalid := false // Track invalid UTF-8 sequence
 
 	state := segmentState{}
@@ -1291,6 +1372,7 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 				state.pendingKeySensitive = false
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
+				state.pendingBasic = false
 				state.isInValuePos = false
 				state.afterMarker = true
 				i += end + 1
@@ -1352,6 +1434,7 @@ func (st *configState) scanSegment(segment string, sb *strings.Builder, depth in
 		}
 		st.processAndAppend(token, sb, &state, depth)
 	}
+	return inQuote, quoteChar
 }
 
 // processTokenLogic analyzes a token and returns (processedString, isSensitiveKey).
@@ -1467,6 +1550,33 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
+	// One complete ISO 8601 date-time is written as it is. The pair splitters
+	// below cut it at its colons, and the seconds with a fraction and a zone
+	// (31.478Z) scored as a secret on their own: "2026-09-27T14:15:31.478Z"
+	// came back as "2026-09-27T14:15:[HIDDEN:...]" for about a third of random
+	// timestamps, in JSON, after key= and at the start of a plain line. That is
+	// the default time format of pino, winston and most JSON loggers. A value
+	// under a sensitive key is hidden whole before this point, and a token that
+	// only starts with a timestamp still goes through the splitters.
+	if !forcedSensitive && isISO8601Timestamp(trimQuotes(rawToken)) {
+		sb.WriteString(rawToken)
+		return false
+	}
+
+	// A compact JSON pair with a quoted value, "key":"value" with no space
+	// after the colon, is one token. When the value held an '=' it went to
+	// the key=value splitter first, which took everything up to that '=' as
+	// the key half: {"password":"hunter2=x"} passed whole, {"password":"a=b"}
+	// hid only b, and {"authorization":"Basic <base64>="} was cut at its
+	// first space, so the closing quote moved and the JSON broke. The pair is
+	// a colon pair; split it as one, and the value is then handled as any
+	// quoted value under that key.
+	if _, _, ok := splitCompactPair(rawToken); ok {
+		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
+			return isKey
+		}
+	}
+
 	// 1. Check for Key=Value (e.g. key=value)
 	isKey, handled := st.processEqualPair(rawToken, forcedSensitive, overrideSensitivity, sb, depth)
 	if handled {
@@ -1565,6 +1675,30 @@ func trimQuotes(s string) string {
 // splitting it on the padding emits the whole body as a "key", which is written
 // out verbatim and never scored — which is why a padded blob survived while the
 // same blob with the padding stripped was redacted by entropy.
+// isPaddedBase64Token reports whether s is a base64 value with its '='
+// padding: a body of base64 characters (standard or URL-safe alphabet) and
+// one or two trailing '='. Unlike isPaddedBase64Blob it has no length floor,
+// so it is only consulted where the token is already known to be a secret.
+func isPaddedBase64Token(s string) bool {
+	body := strings.TrimRight(s, "=")
+	if len(body) < 2 || len(s)-len(body) > 2 || len(s)-len(body) == 0 {
+		return false
+	}
+	return isBase64Body(body)
+}
+
+// isBase64Body reports whether s has only base64 characters (standard or
+// URL-safe alphabet), with no padding.
+func isBase64Body(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '+' && c != '/' && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 func isPaddedBase64Blob(s string) bool {
 	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
 		return false
@@ -1669,6 +1803,27 @@ func isRedacted(content string) bool {
 	return strings.HasPrefix(content, "[HIDDEN") && strings.HasSuffix(content, "]")
 }
 
+// customRuleName reports whether one of the operator's custom rules matches
+// content, with the marker name to use: the rule's own name, or the "regex"
+// entity label for an unnamed rule.
+func (st *configState) customRuleName(content string) (string, bool) {
+	cfg := st.config
+	if cfg.CombinedCustomRegex == nil {
+		return "", false
+	}
+	loc := cfg.CombinedCustomRegex.FindStringSubmatchIndex(content)
+	if loc == nil {
+		return "", false
+	}
+	for i := 0; i < len(cfg.CustomRegexNames); i++ {
+		idx := 2 + (i * 2)
+		if idx < len(loc) && loc[idx] != -1 && cfg.CustomRegexNames[i] != "" {
+			return cfg.CustomRegexNames[i], true
+		}
+	}
+	return st.entityLabel("regex"), true
+}
+
 func (st *configState) processSingleToken(content, original string, forcedSensitive bool, contextSensitive bool, autoQuote bool, sb *strings.Builder) {
 	// -1. Check Idempotency (Already Redacted). An empty value holds nothing
 	// to hide: forced under a sensitive key (password=, token=&, "secret":"")
@@ -1703,17 +1858,7 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 
 	// 2. Deterministic Check: Custom Regexes
 	if cfg.CombinedCustomRegex != nil {
-		loc := cfg.CombinedCustomRegex.FindStringSubmatchIndex(content)
-		if loc != nil {
-			matchName := ""
-			for i := 0; i < len(cfg.CustomRegexNames); i++ {
-				idx := 2 + (i * 2)
-				if idx < len(loc) && loc[idx] != -1 {
-					matchName = cfg.CustomRegexNames[i]
-					break
-				}
-			}
-
+		if matchName, ok := st.customRuleName(content); ok {
 			quoteChar := byte(0)
 			if strings.HasPrefix(original, "\"") {
 				quoteChar = '"'
@@ -1731,9 +1876,6 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 			}
 
 			// Use hashed redaction for Custom Regex
-			if matchName == "" {
-				matchName = st.entityLabel("regex")
-			}
 			st.redactWithHMAC(content, matchName, "regex", sb)
 
 			if quoteChar != 0 {
@@ -1902,6 +2044,14 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	// Base64 padding is not a key/value separator — let the token through to
 	// single-token scoring, which is where the base64 rule lives.
 	if isPaddedBase64Blob(rawToken) {
+		return false, false
+	}
+	// The caller already knows this token is a secret (it sat under a
+	// sensitive key or after an auth scheme). Base64 padding on it is not a
+	// separator either: "Authorization: Basic bGVuYTpqcjBYUWdVaVpSRjM=" was
+	// split into an unscored key half and an empty value, and the credential
+	// passed whenever its body scored below the threshold.
+	if forcedSensitive && isPaddedBase64Token(rawToken) {
 		return false, false
 	}
 	// Handle quoted strings: "key=value". Require a *matching* closing quote —
@@ -2490,6 +2640,13 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 				// it again gave quoted URLs a new marker on every pass.
 				if val == "" || isRedacted(val) || st.isSafeRegexWhitelisted(val) {
 					sb.WriteString(param)
+				} else if isPhoneValue(val, isPhoneKey(key)) {
+					// ?mobile=09122654130: digits alone never reach the
+					// entropy threshold, so the phone is known by its shape
+					// and its key, as it is outside a URL.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("phone"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
@@ -2735,6 +2892,53 @@ func isTimestamp(token string) bool {
 	if len(token) >= 10 {
 		if isDigits(token[0:4]) && token[4] == '-' && isDigits(token[5:7]) && token[7] == '-' {
 			return true
+		}
+	}
+	return false
+}
+
+// isISO8601Timestamp reports whether s is exactly one RFC 3339 / ISO 8601
+// date-time: YYYY-MM-DDTHH:MM:SS, then an optional fraction ('.' or ',' and
+// one to nine digits), then an optional zone (Z, +HH:MM, +HHMM or +HH, with
+// either sign). Nothing may follow, so a token that merely starts with a
+// timestamp is not one.
+func isISO8601Timestamp(s string) bool {
+	if len(s) < 19 {
+		return false
+	}
+	if !isDigits(s[0:4]) || s[4] != '-' || !isDigits(s[5:7]) || s[7] != '-' || !isDigits(s[8:10]) {
+		return false
+	}
+	if s[10] != 'T' && s[10] != 't' {
+		return false
+	}
+	if !isDigits(s[11:13]) || s[13] != ':' || !isDigits(s[14:16]) || s[16] != ':' || !isDigits(s[17:19]) {
+		return false
+	}
+	i := 19
+	if i < len(s) && (s[i] == '.' || s[i] == ',') {
+		j := i + 1
+		for j < len(s) && j-(i+1) < 9 && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if j == i+1 {
+			return false
+		}
+		i = j
+	}
+	if i == len(s) {
+		return true
+	}
+	switch s[i] {
+	case 'Z', 'z':
+		return i+1 == len(s)
+	case '+', '-':
+		zone := s[i+1:]
+		switch len(zone) {
+		case 2, 4:
+			return isDigits(zone)
+		case 5:
+			return isDigits(zone[0:2]) && zone[2] == ':' && isDigits(zone[3:5])
 		}
 	}
 	return false
@@ -3252,6 +3456,7 @@ type segmentState struct {
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
+	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
 
@@ -3346,15 +3551,18 @@ func pairKey(tok string) (string, bool) {
 // splitCompactPair splits a quoted JSON pair with no space after the colon,
 // "k":"v", into its unquoted key and value.
 func splitCompactPair(tok string) (key, val string, ok bool) {
-	if len(tok) < 5 || tok[0] != '"' {
+	// Double quotes are JSON; single quotes are a Python dict repr
+	// ({'authorization':'Basic ...'}), which logs the same pairs.
+	if len(tok) < 5 || (tok[0] != '"' && tok[0] != '\'') {
 		return "", "", false
 	}
-	end := strings.IndexByte(tok[1:], '"') + 1
+	q := tok[0]
+	end := strings.IndexByte(tok[1:], q) + 1
 	if end == 0 || end+1 >= len(tok) || tok[end+1] != ':' {
 		return "", "", false
 	}
 	v := tok[end+2:]
-	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+	if len(v) < 2 || (v[0] != '"' && v[0] != '\'') || v[len(v)-1] != v[0] {
 		return "", "", false
 	}
 	return tok[1:end], v[1 : len(v)-1], true
@@ -3383,6 +3591,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// keeps its next word (the B1 lesson: a bare keyword must not redact
 	// ordinary text after it).
 	forced := state.pendingKeySensitive
+	// Whether this token sits in the forced slot after a key, before the
+	// rules below give the slot up: an auth scheme word is recognised there.
+	afterSensitiveKey := forced
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
 	// forced path skips MinSecretLength — so two-letter words got redacted
@@ -3421,6 +3632,14 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		forced = false
 	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
+		forced = true
+	}
+	// "Authorization: Basic <base64>" the same way: the credential is
+	// base64 of user:password and can be short (119 of 120 random ones were
+	// hidden by their score, "lena:jr0XQgUiZRF3" encoded was not). It is
+	// hidden whatever its score, as long as it has the base64 shape; a
+	// realm="..." after WWW-Authenticate: Basic has not.
+	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -3537,6 +3756,11 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	// Remember the auth scheme for exactly one token (see the forcing above).
 	state.pendingBearer = lowerClean == "bearer"
+	// "basic" is an ordinary English word; it is an auth scheme only in the
+	// value slot of an authorization key ("Authorization: Basic",
+	// "Proxy-Authorization: Basic"), so prose such as "basic
+	// internationalization support" keeps its next word.
+	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
