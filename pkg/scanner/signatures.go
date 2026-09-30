@@ -191,3 +191,61 @@ func isPrivateKeyMarker(line string) bool {
 	}
 	return true
 }
+
+// isEmailAddress reports whether s has the shape of one e-mail address:
+// a local part of letters, digits and . _ % + -, one '@', and a domain of
+// two or more dot-separated labels whose last label is letters only. An
+// address was scored by entropy alone, so one with a word-like local part
+// (marcosantos@corp.example, lena_santos@example.com) passed while
+// lena.becker@example.com was hidden: 27 of 4 212 generated first-name plus
+// last-name addresses, and 1 to 4 of 60 runs in four leak-radar entries. A
+// hostname with a user (ubuntu@ip-10-0-0-1.ec2.internal) has the same shape
+// and is hidden too; a package version (react@18.2.0) has a numeric last
+// label and is not.
+func isEmailAddress(s string) bool {
+	at := strings.IndexByte(s, '@')
+	if at < 1 || at > 64 || strings.IndexByte(s[at+1:], '@') != -1 {
+		return false
+	}
+	local, domain := s[:at], s[at+1:]
+	if local[0] == '.' || local[len(local)-1] == '.' {
+		return false
+	}
+	for i := 0; i < len(local); i++ {
+		c := local[i]
+		if !isAlnumByte(c) && c != '.' && c != '_' && c != '%' && c != '+' && c != '-' {
+			return false
+		}
+	}
+	labels := 0
+	for domain != "" {
+		label, rest, _ := strings.Cut(domain, ".")
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			if !isAlnumByte(label[i]) && label[i] != '-' {
+				return false
+			}
+		}
+		labels++
+		if rest == "" {
+			// The last label: letters only, at least two.
+			if len(label) < 2 {
+				return false
+			}
+			for i := 0; i < len(label); i++ {
+				if c := label[i]; (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+					return false
+				}
+			}
+			break
+		}
+		domain = rest
+	}
+	return labels >= 2
+}
+
+func isAlnumByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
