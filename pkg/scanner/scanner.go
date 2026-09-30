@@ -2722,7 +2722,7 @@ func urlPassword(s string) (start, end int, ok bool) {
 // Telegram bot token (https://api.telegram.org/bot<id>:<token>/sendMessage)
 // or a Google key in a path segment is hidden and nothing else changes.
 func (st *configState) writeURLPath(path string, sb *strings.Builder) {
-	if !hasPathSignature(path) {
+	if !hasPathSignature(path) && !st.hasSecretPathSegment(path) {
 		sb.WriteString(path)
 		return
 	}
@@ -2732,12 +2732,90 @@ func (st *configState) writeURLPath(path string, sb *strings.Builder) {
 		}
 		keep, label := urlPathSignature(seg)
 		if label == "" {
-			sb.WriteString(seg)
+			if st.isSecretPathSegment(seg) {
+				st.redactWithHMAC(seg, st.entityLabel("url"), "entropy", sb)
+			} else {
+				sb.WriteString(seg)
+			}
 			continue
 		}
 		sb.WriteString(seg[:keep])
 		st.redactWithHMAC(seg[keep:], st.entityLabel(label), "signature", sb)
 	}
+}
+
+// hasSecretPathSegment reports whether any '/'-separated segment of a URL
+// path is a random-looking token (see isSecretPathSegment).
+func (st *configState) hasSecretPathSegment(path string) bool {
+	if len(path) < minSignatureLength {
+		return false
+	}
+	for seg := range strings.SplitSeq(path, "/") {
+		if st.isSecretPathSegment(seg) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSecretPathSegment reports whether one URL path segment is a token used
+// as a credential in the path: an API key in
+// /mathutrice/4283fefc63f0cd0e873a0000c6d07ef7/v1/chat/completions, or a
+// base64url secret. Before, a URL path was written as it is unless a
+// segment matched an issuer signature, so any other secret in a path passed.
+// Only a plain token of 20 to 128 characters from [A-Za-z0-9_-] counts, with
+// a letter and a digit and a score above the threshold; a public identifier
+// of a known length (a 40-hex commit, a 24-hex object id, a dashed UUID) is
+// written as before, and so is a URL-encoded or dotted segment (a slug, a
+// file name with a content hash), which is a name and not a secret.
+func (st *configState) isSecretPathSegment(seg string) bool {
+	if len(seg) < 20 || len(seg) > 128 {
+		return false
+	}
+	letters, digits := false, false
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c >= '0' && c <= '9':
+			digits = true
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+			letters = true
+		case c == '-' || c == '_':
+		default:
+			return false
+		}
+	}
+	if !letters || !digits {
+		return false
+	}
+	if isGitHash(seg) || isGitHashRange(seg) || isMongoObjectID(seg) || (len(seg) == 36 && uuidRegex.MatchString(seg)) {
+		return false
+	}
+	// A content digest in a path (/blobs/sha256/<64 hex>, a SHA-512 of 128)
+	// is public. A 32-hex segment is kept in scope on purpose: an MD5 or a
+	// trace id has the same shape as the gateway key this rule is for, and
+	// the two cannot be told apart by shape.
+	if (len(seg) == 64 || len(seg) == 128) && isHexString(seg) {
+		return false
+	}
+	if isSnakeCaseWords(seg) {
+		return false
+	}
+	return st.calculateComplexity(seg) > st.config.EntropyThreshold
+}
+
+// isHexString reports whether s is non-empty and all hexadecimal digits.
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // -----------------------------------------------------------------------------
