@@ -174,6 +174,18 @@ This project is verified with a growing testing suite intended to raise confiden
 3. **Smoke Testing**: `./scripts/test-smoke.sh` runs a frozen 1000-line mixed-workload corpus end to end through the container and reports detection accuracy. A secret counts as caught only when its value is absent from the output and a redaction marker took its place; a safe line must come back unchanged. The run fails on any false positive or false negative, and also when the container exits non-zero or returns a different number of lines than it was given. Keyless secrets in prose are tracked separately as known gaps, because detecting them rests on entropy alone: the frozen corpus allows none, a fresh random corpus (`--fuzz`) allows two.
 4. **End-to-End (E2E) Testing**: The `operator/tests/run_e2e.sh` suite performs full-stack validation using Minikube and Helm. It builds local images, provisions the Operator without cert-manager, deploys target Jobs, and verifies actual log redaction by intercepting sidecar outputs.
 
+### Checking your own deployment
+
+The suite above proves the scanner; it does not prove your installation. Before trusting a redacted stream, plant values you control and look for them on the collector side:
+
+1. Log a line with a synthetic card number, a made-up email and a test account number from a pod you control, then `grep -c` for each value where the logs land. The count must be 0.
+2. Run a few thousand production-shaped lines through the CLI with a fixed `PII_SALT` and read the diff, looking for values that survived and values that should have been left alone.
+3. Repeat with `PII_ENTITY_TYPE_LABELS=true` to see which detector fired: a card reported as `entropy` rather than `card` is still hidden, but the Luhn path did not see it.
+4. With `PII_METRICS_ENABLED=true`, watch `piishield_redaction_events_total` by `type`; a drop after a deploy means a format changed somewhere upstream.
+5. After every rule that protects a value from redaction, run the planted-value check again.
+
+What the scanner cannot catch by design, such as a name in free text, is listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). The full walkthrough with a payments log before and after is in the [banking logs guide](https://pii-shield.com/guide-banking-logs-gdpr#verify).
+
 ### Performance Benchmarks
 
 To compare end-to-end CLI throughput between the current branch and a baseline ref:
