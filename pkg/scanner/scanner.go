@@ -1467,6 +1467,19 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
+	// One complete ISO 8601 date-time is written as it is. The pair splitters
+	// below cut it at its colons, and the seconds with a fraction and a zone
+	// (31.478Z) scored as a secret on their own: "2026-09-27T14:15:31.478Z"
+	// came back as "2026-09-27T14:15:[HIDDEN:...]" for about a third of random
+	// timestamps, in JSON, after key= and at the start of a plain line. That is
+	// the default time format of pino, winston and most JSON loggers. A value
+	// under a sensitive key is hidden whole before this point, and a token that
+	// only starts with a timestamp still goes through the splitters.
+	if !forcedSensitive && isISO8601Timestamp(trimQuotes(rawToken)) {
+		sb.WriteString(rawToken)
+		return false
+	}
+
 	// 1. Check for Key=Value (e.g. key=value)
 	isKey, handled := st.processEqualPair(rawToken, forcedSensitive, overrideSensitivity, sb, depth)
 	if handled {
@@ -2671,6 +2684,53 @@ func isTimestamp(token string) bool {
 	if len(token) >= 10 {
 		if isDigits(token[0:4]) && token[4] == '-' && isDigits(token[5:7]) && token[7] == '-' {
 			return true
+		}
+	}
+	return false
+}
+
+// isISO8601Timestamp reports whether s is exactly one RFC 3339 / ISO 8601
+// date-time: YYYY-MM-DDTHH:MM:SS, then an optional fraction ('.' or ',' and
+// one to nine digits), then an optional zone (Z, +HH:MM, +HHMM or +HH, with
+// either sign). Nothing may follow, so a token that merely starts with a
+// timestamp is not one.
+func isISO8601Timestamp(s string) bool {
+	if len(s) < 19 {
+		return false
+	}
+	if !isDigits(s[0:4]) || s[4] != '-' || !isDigits(s[5:7]) || s[7] != '-' || !isDigits(s[8:10]) {
+		return false
+	}
+	if s[10] != 'T' && s[10] != 't' {
+		return false
+	}
+	if !isDigits(s[11:13]) || s[13] != ':' || !isDigits(s[14:16]) || s[16] != ':' || !isDigits(s[17:19]) {
+		return false
+	}
+	i := 19
+	if i < len(s) && (s[i] == '.' || s[i] == ',') {
+		j := i + 1
+		for j < len(s) && j-(i+1) < 9 && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if j == i+1 {
+			return false
+		}
+		i = j
+	}
+	if i == len(s) {
+		return true
+	}
+	switch s[i] {
+	case 'Z', 'z':
+		return i+1 == len(s)
+	case '+', '-':
+		zone := s[i+1:]
+		switch len(zone) {
+		case 2, 4:
+			return isDigits(zone)
+		case 5:
+			return isDigits(zone[0:2]) && zone[2] == ':' && isDigits(zone[3:5])
 		}
 	}
 	return false
