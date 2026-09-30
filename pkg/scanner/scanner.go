@@ -2212,6 +2212,60 @@ func looksLikeFieldName(key string) bool {
 	return true
 }
 
+// hasPasswordAbbrevComponent reports whether a key has "pw" as one of its
+// components, or "pwd" as one component of several. Components are split
+// on '_', '-', '.', ':' and on a lower-to-upper case change (dbPwd, smtpPw).
+// Only a whole component counts, and the caller also requires the key to
+// have the shape of a field name: a suffix rule turned a random token that
+// happens to end in "pw" (criQ4E7sKZcFo8yzBMpw) into a key and stopped
+// scoring it, and the camelCase split alone did the same to
+// Dtt9WCxU5HefboTFrvzrPw. The F6 corpus test caught both.
+func hasPasswordAbbrevComponent(key string) bool {
+	// A product code or a path segment with digits (DEM-341C0K-PW in a URL
+	// path on the access-log corpus) is not a field name; as a bare "key" it
+	// would force the token after it. A password key has no digits and at
+	// most three components (db_pw, smtp_admin_pwd).
+	if len(key) < 2 || strings.ContainsAny(key, "/0123456789") || strings.Count(key, "_")+strings.Count(key, "-")+strings.Count(key, ".") > 2 {
+		return false
+	}
+	parts := 0
+	found := false
+	start := 0
+	flush := func(end int) {
+		if end <= start {
+			return
+		}
+		parts++
+		part := key[start:end]
+		switch {
+		case strings.EqualFold(part, "pw"):
+			found = true
+		case strings.EqualFold(part, "pwd"):
+			if parts > 1 || end < len(key) {
+				found = true
+			}
+		}
+	}
+	prevLower := false
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		switch {
+		case c == '_' || c == '-' || c == '.' || c == ':':
+			flush(i)
+			start = i + 1
+			prevLower = false
+		case c >= 'A' && c <= 'Z' && prevLower:
+			flush(i)
+			start = i
+			prevLower = false
+		default:
+			prevLower = c >= 'a' && c <= 'z'
+		}
+	}
+	flush(len(key))
+	return found
+}
+
 // isCamelCaseWithDigits reports whether key is a camelCase name whose words
 // may end in up to three digits: krb5KeyVersionNumber, s3BucketName,
 // http2Enabled, x509Cert. Each word is at most one capital followed by
@@ -2350,6 +2404,16 @@ func (st *configState) isSensitiveKey(key string) bool {
 			}
 			return true
 		}
+	}
+
+	// The short forms of "password": PW:maple248, db_pw=..., dbPwd: ...,
+	// smtp_pwd=.... Too short for the substring list ("pw" sits inside
+	// shipway, mapwidth, httpwrapper), so they are matched as whole
+	// components of the key. A bare pwd/PWD alone is the shell's working
+	// directory (PWD=/home/lena in every environment dump) and stays a
+	// plain key.
+	if strings.Contains(k, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+		return true
 	}
 
 	// 2. Check compiled regex (single pass, case-insensitive)
@@ -3554,6 +3618,17 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// secret. Three characters stay forced, so "cvv 123" is still hidden, and
 	// the value after "password:" keeps its force whatever its length.
 	if forced && !state.isInValuePos && utf8.RuneCountInString(cleanToken) < 3 {
+		forced = false
+	}
+	// A bare sensitive word in prose is followed by an ordinary word far more
+	// often than by a secret: "token expired", "authentication failed", "key
+	// rotation done", "authorization invalid - UN:lena". Free an all-letter
+	// token that reads as English by the bigram table. A word with a digit
+	// or a symbol keeps the force ("password hunter2"), and so does any value
+	// after a separator ("password: swordfish", "password=swordfish"), which
+	// is not prose. The cost is a dictionary-word password written bare
+	// after the word "password", which KNOWN_LIMITATIONS already gives up.
+	if forced && !state.isInValuePos && isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0 {
 		forced = false
 	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
