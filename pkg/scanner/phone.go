@@ -46,10 +46,10 @@ func FindPhoneSequences(line string) []Range {
 			continue
 		}
 		end := 0
-		switch {
-		case c == '+':
+		switch c {
+		case '+':
 			end = matchInternationalPhone(line, i)
-		case c == '(':
+		case '(':
 			end = matchNANPPhone(line, i)
 		default:
 			end = matchNANPPhone(line, i)
