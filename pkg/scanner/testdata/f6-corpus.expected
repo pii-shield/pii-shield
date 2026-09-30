@@ -16,7 +16,7 @@ safe	dictionary-word	06-08	75	0	0
 safe	dictionary-word	09-12	100	0	0
 safe	dictionary-word	13-16	100	1	0
 safe	event-name-dotted	09-12	6	0	0
-safe	event-name-dotted	13-16	31	4	0
+safe	event-name-dotted	13-16	31	0	0
 safe	event-name-dotted	17-24	5	0	0
 safe	identifier-pascal	09-12	1	0	0
 safe	identifier-pascal	13-16	8	1	1

@@ -1945,8 +1945,8 @@
 0	0	invoice.authorised
 0	0	invoice.declined
 0	0	invoice.started
-1	0	invoice.timeout
-1	0	invoice.shipped
+0	0	invoice.timeout
+0	0	invoice.shipped
 0	0	account.created
 0	0	account.timeout
 0	0	card.completed
@@ -1963,14 +1963,14 @@
 0	0	export.expired
 0	0	export.shipped
 0	0	export.evicted
-1	0	deploy.failed
+0	0	deploy.failed
 0	0	deploy.created
 0	0	deploy.expired
 0	0	job.created
 0	0	job.expired
 0	0	job.scheduled
 0	0	webhook.declined
-1	0	webhook.updated
+0	0	webhook.updated
 0	0	cache.updated
 0	0	pod.declined
 0	0	pod.expired
