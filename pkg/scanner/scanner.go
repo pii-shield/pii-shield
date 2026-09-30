@@ -1372,6 +1372,7 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 				state.pendingKeySensitive = false
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
+				state.pendingBasic = false
 				state.isInValuePos = false
 				state.afterMarker = true
 				i += end + 1
@@ -1562,6 +1563,20 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
+	// A compact JSON pair with a quoted value, "key":"value" with no space
+	// after the colon, is one token. When the value held an '=' it went to
+	// the key=value splitter first, which took everything up to that '=' as
+	// the key half: {"password":"hunter2=x"} passed whole, {"password":"a=b"}
+	// hid only b, and {"authorization":"Basic <base64>="} was cut at its
+	// first space, so the closing quote moved and the JSON broke. The pair is
+	// a colon pair; split it as one, and the value is then handled as any
+	// quoted value under that key.
+	if _, _, ok := splitCompactPair(rawToken); ok {
+		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
+			return isKey
+		}
+	}
+
 	// 1. Check for Key=Value (e.g. key=value)
 	isKey, handled := st.processEqualPair(rawToken, forcedSensitive, overrideSensitivity, sb, depth)
 	if handled {
@@ -1660,6 +1675,30 @@ func trimQuotes(s string) string {
 // splitting it on the padding emits the whole body as a "key", which is written
 // out verbatim and never scored — which is why a padded blob survived while the
 // same blob with the padding stripped was redacted by entropy.
+// isPaddedBase64Token reports whether s is a base64 value with its '='
+// padding: a body of base64 characters (standard or URL-safe alphabet) and
+// one or two trailing '='. Unlike isPaddedBase64Blob it has no length floor,
+// so it is only consulted where the token is already known to be a secret.
+func isPaddedBase64Token(s string) bool {
+	body := strings.TrimRight(s, "=")
+	if len(body) < 2 || len(s)-len(body) > 2 || len(s)-len(body) == 0 {
+		return false
+	}
+	return isBase64Body(body)
+}
+
+// isBase64Body reports whether s has only base64 characters (standard or
+// URL-safe alphabet), with no padding.
+func isBase64Body(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '+' && c != '/' && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 func isPaddedBase64Blob(s string) bool {
 	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
 		return false
@@ -2024,6 +2063,14 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	if isPaddedBase64Blob(rawToken) {
 		return false, false
 	}
+	// The caller already knows this token is a secret (it sat under a
+	// sensitive key or after an auth scheme). Base64 padding on it is not a
+	// separator either: "Authorization: Basic bGVuYTpqcjBYUWdVaVpSRjM=" was
+	// split into an unscored key half and an empty value, and the credential
+	// passed whenever its body scored below the threshold.
+	if forcedSensitive && isPaddedBase64Token(rawToken) {
+		return false, false
+	}
 	// Handle quoted strings: "key=value". Require a *matching* closing quote —
 	// entering this branch on a leading quote alone re-wraps unbalanced input
 	// and invents quote characters that were not present (B3), e.g.
@@ -2182,6 +2229,60 @@ func looksLikeFieldName(key string) bool {
 	return true
 }
 
+// hasPasswordAbbrevComponent reports whether a key has "pw" as one of its
+// components, or "pwd" as one component of several. Components are split
+// on '_', '-', '.', ':' and on a lower-to-upper case change (dbPwd, smtpPw).
+// Only a whole component counts, and the caller also requires the key to
+// have the shape of a field name: a suffix rule turned a random token that
+// happens to end in "pw" (criQ4E7sKZcFo8yzBMpw) into a key and stopped
+// scoring it, and the camelCase split alone did the same to
+// Dtt9WCxU5HefboTFrvzrPw. The F6 corpus test caught both.
+func hasPasswordAbbrevComponent(key string) bool {
+	// A product code or a path segment with digits (DEM-341C0K-PW in a URL
+	// path on the access-log corpus) is not a field name; as a bare "key" it
+	// would force the token after it. A password key has no digits and at
+	// most three components (db_pw, smtp_admin_pwd).
+	if len(key) < 2 || strings.ContainsAny(key, "/0123456789") || strings.Count(key, "_")+strings.Count(key, "-")+strings.Count(key, ".") > 2 {
+		return false
+	}
+	parts := 0
+	found := false
+	start := 0
+	flush := func(end int) {
+		if end <= start {
+			return
+		}
+		parts++
+		part := key[start:end]
+		switch {
+		case strings.EqualFold(part, "pw"):
+			found = true
+		case strings.EqualFold(part, "pwd"):
+			if parts > 1 || end < len(key) {
+				found = true
+			}
+		}
+	}
+	prevLower := false
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		switch {
+		case c == '_' || c == '-' || c == '.' || c == ':':
+			flush(i)
+			start = i + 1
+			prevLower = false
+		case c >= 'A' && c <= 'Z' && prevLower:
+			flush(i)
+			start = i
+			prevLower = false
+		default:
+			prevLower = c >= 'a' && c <= 'z'
+		}
+	}
+	flush(len(key))
+	return found
+}
+
 // isCamelCaseWithDigits reports whether key is a camelCase name whose words
 // may end in up to three digits: krb5KeyVersionNumber, s3BucketName,
 // http2Enabled, x509Cert. Each word is at most one capital followed by
@@ -2320,6 +2421,16 @@ func (st *configState) isSensitiveKey(key string) bool {
 			}
 			return true
 		}
+	}
+
+	// The short forms of "password": PW:maple248, db_pw=..., dbPwd: ...,
+	// smtp_pwd=.... Too short for the substring list ("pw" sits inside
+	// shipway, mapwidth, httpwrapper), so they are matched as whole
+	// components of the key. A bare pwd/PWD alone is the shell's working
+	// directory (PWD=/home/lena in every environment dump) and stays a
+	// plain key.
+	if strings.Contains(k, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+		return true
 	}
 
 	// 2. Check compiled regex (single pass, case-insensitive)
@@ -2634,7 +2745,7 @@ func urlPassword(s string) (start, end int, ok bool) {
 // Telegram bot token (https://api.telegram.org/bot<id>:<token>/sendMessage)
 // or a Google key in a path segment is hidden and nothing else changes.
 func (st *configState) writeURLPath(path string, sb *strings.Builder) {
-	if !hasPathSignature(path) {
+	if !hasPathSignature(path) && !st.hasSecretPathSegment(path) {
 		sb.WriteString(path)
 		return
 	}
@@ -2644,12 +2755,90 @@ func (st *configState) writeURLPath(path string, sb *strings.Builder) {
 		}
 		keep, label := urlPathSignature(seg)
 		if label == "" {
-			sb.WriteString(seg)
+			if st.isSecretPathSegment(seg) {
+				st.redactWithHMAC(seg, st.entityLabel("url"), "entropy", sb)
+			} else {
+				sb.WriteString(seg)
+			}
 			continue
 		}
 		sb.WriteString(seg[:keep])
 		st.redactWithHMAC(seg[keep:], st.entityLabel(label), "signature", sb)
 	}
+}
+
+// hasSecretPathSegment reports whether any '/'-separated segment of a URL
+// path is a random-looking token (see isSecretPathSegment).
+func (st *configState) hasSecretPathSegment(path string) bool {
+	if len(path) < minSignatureLength {
+		return false
+	}
+	for seg := range strings.SplitSeq(path, "/") {
+		if st.isSecretPathSegment(seg) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSecretPathSegment reports whether one URL path segment is a token used
+// as a credential in the path: an API key in
+// /mathutrice/4283fefc63f0cd0e873a0000c6d07ef7/v1/chat/completions, or a
+// base64url secret. Before, a URL path was written as it is unless a
+// segment matched an issuer signature, so any other secret in a path passed.
+// Only a plain token of 20 to 128 characters from [A-Za-z0-9_-] counts, with
+// a letter and a digit and a score above the threshold; a public identifier
+// of a known length (a 40-hex commit, a 24-hex object id, a dashed UUID) is
+// written as before, and so is a URL-encoded or dotted segment (a slug, a
+// file name with a content hash), which is a name and not a secret.
+func (st *configState) isSecretPathSegment(seg string) bool {
+	if len(seg) < 20 || len(seg) > 128 {
+		return false
+	}
+	letters, digits := false, false
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c >= '0' && c <= '9':
+			digits = true
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+			letters = true
+		case c == '-' || c == '_':
+		default:
+			return false
+		}
+	}
+	if !letters || !digits {
+		return false
+	}
+	if isGitHash(seg) || isGitHashRange(seg) || isMongoObjectID(seg) || (len(seg) == 36 && uuidRegex.MatchString(seg)) {
+		return false
+	}
+	// A content digest in a path (/blobs/sha256/<64 hex>, a SHA-512 of 128)
+	// is public. A 32-hex segment is kept in scope on purpose: an MD5 or a
+	// trace id has the same shape as the gateway key this rule is for, and
+	// the two cannot be told apart by shape.
+	if (len(seg) == 64 || len(seg) == 128) && isHexString(seg) {
+		return false
+	}
+	if isSnakeCaseWords(seg) {
+		return false
+	}
+	return st.calculateComplexity(seg) > st.config.EntropyThreshold
+}
+
+// isHexString reports whether s is non-empty and all hexadecimal digits.
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // -----------------------------------------------------------------------------
@@ -3368,6 +3557,7 @@ type segmentState struct {
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
+	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
 
@@ -3462,15 +3652,18 @@ func pairKey(tok string) (string, bool) {
 // splitCompactPair splits a quoted JSON pair with no space after the colon,
 // "k":"v", into its unquoted key and value.
 func splitCompactPair(tok string) (key, val string, ok bool) {
-	if len(tok) < 5 || tok[0] != '"' {
+	// Double quotes are JSON; single quotes are a Python dict repr
+	// ({'authorization':'Basic ...'}), which logs the same pairs.
+	if len(tok) < 5 || (tok[0] != '"' && tok[0] != '\'') {
 		return "", "", false
 	}
-	end := strings.IndexByte(tok[1:], '"') + 1
+	q := tok[0]
+	end := strings.IndexByte(tok[1:], q) + 1
 	if end == 0 || end+1 >= len(tok) || tok[end+1] != ':' {
 		return "", "", false
 	}
 	v := tok[end+2:]
-	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+	if len(v) < 2 || (v[0] != '"' && v[0] != '\'') || v[len(v)-1] != v[0] {
 		return "", "", false
 	}
 	return tok[1:end], v[1 : len(v)-1], true
@@ -3499,6 +3692,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// keeps its next word (the B1 lesson: a bare keyword must not redact
 	// ordinary text after it).
 	forced := state.pendingKeySensitive
+	// Whether this token sits in the forced slot after a key, before the
+	// rules below give the slot up: an auth scheme word is recognised there.
+	afterSensitiveKey := forced
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
 	// forced path skips MinSecretLength — so two-letter words got redacted
@@ -3525,7 +3721,26 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	if forced && !state.isInValuePos && utf8.RuneCountInString(cleanToken) < 3 {
 		forced = false
 	}
+	// A bare sensitive word in prose is followed by an ordinary word far more
+	// often than by a secret: "token expired", "authentication failed", "key
+	// rotation done", "authorization invalid - UN:lena". Free an all-letter
+	// token that reads as English by the bigram table. A word with a digit
+	// or a symbol keeps the force ("password hunter2"), and so does any value
+	// after a separator ("password: swordfish", "password=swordfish"), which
+	// is not prose. The cost is a dictionary-word password written bare
+	// after the word "password", which KNOWN_LIMITATIONS already gives up.
+	if forced && !state.isInValuePos && isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0 {
+		forced = false
+	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
+		forced = true
+	}
+	// "Authorization: Basic <base64>" the same way: the credential is
+	// base64 of user:password and can be short (119 of 120 random ones were
+	// hidden by their score, "lena:jr0XQgUiZRF3" encoded was not). It is
+	// hidden whatever its score, as long as it has the base64 shape; a
+	// realm="..." after WWW-Authenticate: Basic has not.
+	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -3642,6 +3857,11 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	// Remember the auth scheme for exactly one token (see the forcing above).
 	state.pendingBearer = lowerClean == "bearer"
+	// "basic" is an ordinary English word; it is an auth scheme only in the
+	// value slot of an authorization key ("Authorization: Basic",
+	// "Proxy-Authorization: Basic"), so prose such as "basic
+	// internationalization support" keeps its next word.
+	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
