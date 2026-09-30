@@ -1372,6 +1372,7 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 				state.pendingKeySensitive = false
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
+				state.pendingBasic = false
 				state.isInValuePos = false
 				state.afterMarker = true
 				i += end + 1
@@ -1562,6 +1563,20 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
+	// A compact JSON pair with a quoted value, "key":"value" with no space
+	// after the colon, is one token. When the value held an '=' it went to
+	// the key=value splitter first, which took everything up to that '=' as
+	// the key half: {"password":"hunter2=x"} passed whole, {"password":"a=b"}
+	// hid only b, and {"authorization":"Basic <base64>="} was cut at its
+	// first space, so the closing quote moved and the JSON broke. The pair is
+	// a colon pair; split it as one, and the value is then handled as any
+	// quoted value under that key.
+	if _, _, ok := splitCompactPair(rawToken); ok {
+		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
+			return isKey
+		}
+	}
+
 	// 1. Check for Key=Value (e.g. key=value)
 	isKey, handled := st.processEqualPair(rawToken, forcedSensitive, overrideSensitivity, sb, depth)
 	if handled {
@@ -1660,6 +1675,30 @@ func trimQuotes(s string) string {
 // splitting it on the padding emits the whole body as a "key", which is written
 // out verbatim and never scored — which is why a padded blob survived while the
 // same blob with the padding stripped was redacted by entropy.
+// isPaddedBase64Token reports whether s is a base64 value with its '='
+// padding: a body of base64 characters (standard or URL-safe alphabet) and
+// one or two trailing '='. Unlike isPaddedBase64Blob it has no length floor,
+// so it is only consulted where the token is already known to be a secret.
+func isPaddedBase64Token(s string) bool {
+	body := strings.TrimRight(s, "=")
+	if len(body) < 2 || len(s)-len(body) > 2 || len(s)-len(body) == 0 {
+		return false
+	}
+	return isBase64Body(body)
+}
+
+// isBase64Body reports whether s has only base64 characters (standard or
+// URL-safe alphabet), with no padding.
+func isBase64Body(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '+' && c != '/' && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 func isPaddedBase64Blob(s string) bool {
 	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
 		return false
@@ -2005,6 +2044,14 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	// Base64 padding is not a key/value separator — let the token through to
 	// single-token scoring, which is where the base64 rule lives.
 	if isPaddedBase64Blob(rawToken) {
+		return false, false
+	}
+	// The caller already knows this token is a secret (it sat under a
+	// sensitive key or after an auth scheme). Base64 padding on it is not a
+	// separator either: "Authorization: Basic bGVuYTpqcjBYUWdVaVpSRjM=" was
+	// split into an unscored key half and an empty value, and the credential
+	// passed whenever its body scored below the threshold.
+	if forcedSensitive && isPaddedBase64Token(rawToken) {
 		return false, false
 	}
 	// Handle quoted strings: "key=value". Require a *matching* closing quote —
@@ -3345,6 +3392,7 @@ type segmentState struct {
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
+	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
 
@@ -3439,15 +3487,18 @@ func pairKey(tok string) (string, bool) {
 // splitCompactPair splits a quoted JSON pair with no space after the colon,
 // "k":"v", into its unquoted key and value.
 func splitCompactPair(tok string) (key, val string, ok bool) {
-	if len(tok) < 5 || tok[0] != '"' {
+	// Double quotes are JSON; single quotes are a Python dict repr
+	// ({'authorization':'Basic ...'}), which logs the same pairs.
+	if len(tok) < 5 || (tok[0] != '"' && tok[0] != '\'') {
 		return "", "", false
 	}
-	end := strings.IndexByte(tok[1:], '"') + 1
+	q := tok[0]
+	end := strings.IndexByte(tok[1:], q) + 1
 	if end == 0 || end+1 >= len(tok) || tok[end+1] != ':' {
 		return "", "", false
 	}
 	v := tok[end+2:]
-	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+	if len(v) < 2 || (v[0] != '"' && v[0] != '\'') || v[len(v)-1] != v[0] {
 		return "", "", false
 	}
 	return tok[1:end], v[1 : len(v)-1], true
@@ -3476,6 +3527,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// keeps its next word (the B1 lesson: a bare keyword must not redact
 	// ordinary text after it).
 	forced := state.pendingKeySensitive
+	// Whether this token sits in the forced slot after a key, before the
+	// rules below give the slot up: an auth scheme word is recognised there.
+	afterSensitiveKey := forced
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
 	// forced path skips MinSecretLength — so two-letter words got redacted
@@ -3503,6 +3557,14 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		forced = false
 	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
+		forced = true
+	}
+	// "Authorization: Basic <base64>" the same way: the credential is
+	// base64 of user:password and can be short (119 of 120 random ones were
+	// hidden by their score, "lena:jr0XQgUiZRF3" encoded was not). It is
+	// hidden whatever its score, as long as it has the base64 shape; a
+	// realm="..." after WWW-Authenticate: Basic has not.
+	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -3619,6 +3681,11 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	// Remember the auth scheme for exactly one token (see the forcing above).
 	state.pendingBearer = lowerClean == "bearer"
+	// "basic" is an ordinary English word; it is an auth scheme only in the
+	// value slot of an authorization key ("Authorization: Basic",
+	// "Proxy-Authorization: Basic"), so prose such as "basic
+	// internationalization support" keeps its next word.
+	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
