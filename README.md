@@ -48,6 +48,7 @@ Developers often forget to mask sensitive data. Traditional regex filters in Flu
 - **Context-Aware Entropy Analysis:** Detected high-entropy secrets even without keys (e.g. `Error: ... 44saCk9...`) by analyzing context keywords.
 - **Custom Regex Rules:** Deterministic redaction for structured data (UUIDs, IDs) that overrides entropy checks for known patterns.
 - **Built-in Secret Signatures:** Issuer-prefixed credentials — AWS and Google API keys, GitHub, Slack and Stripe tokens, JWTs, `Bearer` credentials and PEM private-key blocks — are redacted on their format, so a valid key is caught even when its body is low-entropy or the threshold has been raised.
+- **Telephone Numbers by Shape:** International numbers with a `+`, North American `(555) 234-5678` forms and digits under a phone-named key (`phone`, `mobile`, `wa_id`, ...) are hidden even though digits alone never score as a secret.
 - **Regression & Fuzz Coverage:** Tested against stress cases including binary garbage, JSON nesting, and multilingual logs.
 - **Deterministic Hashing:** Replaces secrets with unique hashes (e.g., `[HIDDEN:a1b2c]`), allowing QA to correlate errors without seeing the raw data.
 - **Drop-in:** No code changes required. Works with any language (Node, Python, Java, Go).
@@ -172,6 +173,18 @@ This project is verified with a growing testing suite intended to raise confiden
 2. **Fuzzing**: Native Go fuzzing ensures crash safety against invalid and random binary inputs.
 3. **Smoke Testing**: `./scripts/test-smoke.sh` runs a frozen 1000-line mixed-workload corpus end to end through the container and reports detection accuracy. A secret counts as caught only when its value is absent from the output and a redaction marker took its place; a safe line must come back unchanged. The run fails on any false positive or false negative, and also when the container exits non-zero or returns a different number of lines than it was given. Keyless secrets in prose are tracked separately as known gaps, because detecting them rests on entropy alone: the frozen corpus allows none, a fresh random corpus (`--fuzz`) allows two.
 4. **End-to-End (E2E) Testing**: The `operator/tests/run_e2e.sh` suite performs full-stack validation using Minikube and Helm. It builds local images, provisions the Operator without cert-manager, deploys target Jobs, and verifies actual log redaction by intercepting sidecar outputs.
+
+### Checking your own deployment
+
+The suite above proves the scanner; it does not prove your installation. Before trusting a redacted stream, plant values you control and look for them on the collector side:
+
+1. Log a line with a synthetic card number, a made-up email and a test account number from a pod you control, then `grep -c` for each value where the logs land. The count must be 0.
+2. Run a few thousand production-shaped lines through the CLI with a fixed `PII_SALT` and read the diff, looking for values that survived and values that should have been left alone.
+3. Repeat with `PII_ENTITY_TYPE_LABELS=true` to see which detector fired: a card reported as `entropy` rather than `card` is still hidden, but the Luhn path did not see it.
+4. With `PII_METRICS_ENABLED=true`, watch `piishield_redaction_events_total` by `type`; a drop after a deploy means a format changed somewhere upstream.
+5. After every rule that protects a value from redaction, run the planted-value check again.
+
+What the scanner cannot catch by design, such as a name in free text, is listed in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). The full walkthrough with a payments log before and after is in the [banking logs guide](https://pii-shield.com/guide-banking-logs-gdpr#verify).
 
 ### Performance Benchmarks
 
