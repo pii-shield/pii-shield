@@ -1780,7 +1780,23 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 	// length, space and entropy heuristics, because a valid-format token with a
 	// low-entropy body — AKIA followed by sixteen A's — is a real key that the
 	// threshold would let through.
-	if label := matchSignature(content); label != "" {
+	// An e-mail address is hidden by its shape, whatever its score, the same
+	// way. A trailing '.' or ',' is sentence punctuation and stays outside
+	// the marker.
+	label := matchSignature(content)
+	trail := ""
+	if label == "" && strings.IndexByte(content, '@') > 0 {
+		body := content
+		if n := len(body); n > 1 && (body[n-1] == '.' || body[n-1] == ',') {
+			body, trail = body[:n-1], body[n-1:]
+		}
+		if isEmailAddress(body) {
+			label, content = "email", body
+		} else {
+			trail = ""
+		}
+	}
+	if label != "" {
 		quoteChar := byte(0)
 		if strings.HasPrefix(original, "\"") {
 			quoteChar = '"'
@@ -1791,6 +1807,7 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 			sb.WriteByte(quoteChar)
 		}
 		st.redactWithHMAC(content, st.entityLabel(label), "signature", sb)
+		sb.WriteString(trail)
 		if quoteChar != 0 {
 			sb.WriteByte(quoteChar)
 		}
@@ -2426,6 +2443,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 				// it again gave quoted URLs a new marker on every pass.
 				if val == "" || isRedacted(val) || st.isSafeRegexWhitelisted(val) {
 					sb.WriteString(param)
+				} else if isEmailAddress(val) {
+					// ?email=marcosantos@corp.example: the address is hidden
+					// by its shape here as it is in processSingleToken.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("email"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
