@@ -597,7 +597,13 @@ func (st *configState) calculateComplexity(token string) float64 {
 	// the English band. A secret is a random run, and a random run fails the
 	// part shape or scores high on its own, so it is still caught.
 	if !st.isWordCompound(token) {
-		if st.isCamelDigitCompound(token) {
+		// A letters-only camelCase name with no separator at all
+		// (SecurityCtrlr, an OCPP 2.0.1 component) is scored word by word too:
+		// scored as one run, an abbreviated word (Ctrlr) breaks the English
+		// pairs and lifts the name over the threshold. A token with / or -
+		// stays one run (see partComplexity).
+		if st.isCamelDigitCompound(token) ||
+			(!strings.ContainsAny(token, "-._/") && st.isCamelWordCompound(token)) {
 			return st.camelPartsComplexity(token)
 		}
 		return st.calculateRawComplexity(token)
