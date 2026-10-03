@@ -20,11 +20,11 @@ safe	event-name-dotted	13-16	31	0	0
 safe	event-name-dotted	17-24	5	0	0
 safe	identifier-pascal	09-12	1	0	0
 safe	identifier-pascal	13-16	8	1	1
-safe	identifier-pascal	17-24	20	3	0
+safe	identifier-pascal	17-24	20	1	0
 safe	identifier-pascal	25-40	1	0	0
 safe	log-field-camel	06-08	14	0	0
-safe	log-field-camel	09-12	50	3	0
-safe	log-field-camel	13-16	16	1	0
+safe	log-field-camel	09-12	50	0	0
+safe	log-field-camel	13-16	16	0	0
 safe	log-field-snake	06-08	6	0	0
 safe	log-field-snake	09-12	51	0	0
 safe	log-field-snake	13-16	23	0	0

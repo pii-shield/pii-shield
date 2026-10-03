@@ -1814,7 +1814,7 @@
 0	0	client_ip
 0	0	clientIp
 0	0	geo_country
-1	0	geoCountry
+0	0	geoCountry
 0	0	device_type
 0	0	deviceType
 0	0	app_version
@@ -1844,7 +1844,7 @@
 0	0	merchant_id
 0	0	merchantId
 0	0	batch_size
-1	0	batchSize
+0	0	batchSize
 0	0	queue_name
 0	0	queueName
 0	0	topic_name
@@ -1872,9 +1872,9 @@
 0	0	db_statement
 0	0	dbStatement
 0	0	db_rows_affected
-1	0	dbRowsAffected
+0	0	dbRowsAffected
 0	0	lock_wait_ms
-1	0	lockWaitMs
+0	0	lockWaitMs
 0	0	gc_pause_ms
 0	0	gcPauseMs
 0	0	heap_used_bytes
@@ -1907,10 +1907,10 @@
 0	0	spanKind
 0	0	UserAccountService
 0	0	PaymentAuthorizationHandler
-1	0	HttpClientFactory
+0	0	HttpClientFactory
 0	0	KafkaConsumerCoordinator
 0	0	OrderRepository
-1	0	RetryPolicyConfig
+0	0	RetryPolicyConfig
 0	0	TokenBucketLimiter
 0	0	InvoiceGenerator
 0	0	NullPointerException

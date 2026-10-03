@@ -71,3 +71,35 @@ func TestWordShapedPartVersionPrefix(t *testing.T) {
 		}
 	}
 }
+
+// TestStandaloneCamelCaseNamesKept: a letters-only camelCase name with no
+// separator was scored as one run, so an abbreviated word (Ctrlr) broke the
+// English pairs and the OCPP 2.0.1 component name SecurityCtrlr was hidden
+// while SecurityController was not. Such a name is scored word by word, as a
+// camelCase part of a dotted name already is. A run of capitals with single
+// lowercase letters between them still fails the word rule and is scored
+// whole.
+func TestStandaloneCamelCaseNamesKept(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, in := range []string{
+		`[{"component":{"name":"SecurityCtrlr"},"variable":{"name":"BasicAuthPassword"}}]`,
+		"component SecurityCtrlr ready",
+		"TxCtrlr SampledDataCtrlr SecurityCtrl",
+		"GET /search?sort=productModel&page=2",
+		"HttpClientFactory RetryPolicyConfig dbRowsAffected",
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("camelCase name hidden:\n in: %s\nout: %s", in, out)
+		}
+	}
+
+	st := cfgState()
+	for _, tok := range []string{"XkQpZmWvRt", "aBcDeFgHiJkL"} {
+		if st.calculateComplexity(tok) != st.calculateRawComplexity(tok) {
+			t.Errorf("%q scored word by word, want one run", tok)
+		}
+	}
+}
