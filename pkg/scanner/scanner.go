@@ -2218,7 +2218,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 				return false, true
 			}
 
-			keySensitive := st.isSensitiveKey(key) || overrideSensitivity
+			keySensitive := st.isSensitivePairKey(key) || overrideSensitivity
 
 			sb.WriteString(quote)
 			st.writeKeyHalf(key, sb)
@@ -2251,7 +2251,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		key := rawToken[:idx] // Up to =
 		val := rawToken[idx+1:]
 
-		keySensitive := st.isSensitiveKey(key) || overrideSensitivity
+		keySensitive := st.isSensitivePairKey(key) || overrideSensitivity
 
 		st.writeKeyHalf(key, sb)
 		sb.WriteRune('=')
@@ -2275,6 +2275,22 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		return keySensitive && val == "", true
 	}
 	return false, false
+}
+
+// isSensitivePairKey reports whether the key half of a key=value pair is
+// sensitive. A key glued to a log prefix with colons (INFO:root:password=...,
+// Python's default log format) is also judged by the name after its last
+// colon: the whole string is long and mixed enough for the entropy guard in
+// isSensitiveKey to take it for a random token, so the value went unforced
+// (x:password=... was hidden, INFO:root:password=... was not).
+func (st *configState) isSensitivePairKey(key string) bool {
+	if st.isSensitiveKey(key) {
+		return true
+	}
+	if i := strings.LastIndexByte(key, ':'); i >= 0 && i+1 < len(key) {
+		return st.isSensitiveKey(key[i+1:])
+	}
+	return false
 }
 
 // writeKeyHalf writes the key side of a key=value pair. A key that looks like a
@@ -2478,14 +2494,22 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 		// compact JSON with no space after ':') must be unwrapped and
 		// re-tokenized so an embedded secret is scored on its own, the same way
 		// it already is when whitespace follows the colon (B9).
-		st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
+		inner := st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
 
 		// The value was consumed right here, so the pair is complete and the
-		// next token is not its value. Reporting a key would force-redact that
+		// next token is not its value. Reporting this key would force-redact that
 		// next token: in compact JSON {"password":"x","query":"a=b"} the
 		// neighbour "query":"a=b" was hidden whole, key included, and the line
 		// stopped being valid JSON.
-		return false, true
+		//
+		// The one thing still pending is a key that the consumed part itself
+		// ends in. Python's default log format glues the message to its prefix
+		// (DEBUG:pkg.module:Password: <value>), so the prefix and the key arrive
+		// as one token and the inner call is the one that sees "Password:".
+		// Dropping its answer sent the value on unforced, and a word-like
+		// password passed. The inner call reports a key only for a sensitive
+		// name with an empty value, so a complete pair still returns false.
+		return inner, true
 	}
 	return false, false
 }
