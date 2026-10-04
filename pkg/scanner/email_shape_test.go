@@ -91,3 +91,64 @@ func TestIsEmailAddress(t *testing.T) {
 		}
 	}
 }
+
+// TestEmailAddressBeforeColonHidden: an address directly followed by a colon
+// is the key half of a colon pair, which is written out unscored, so the
+// shape rule never saw it: "reset key for user 'lena@example.com': 543963"
+// kept the address, in quotes or without, while the same address with no
+// colon after it was hidden. The marker is the one the bare address gets,
+// and the quotes and the colon stay.
+func TestEmailAddressBeforeColonHidden(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	const addr = "sven.fischer40@example.com"
+	marker := ScanAndRedact(addr)
+	if !isRedacted(marker) {
+		t.Fatalf("bare address not hidden: %q", marker)
+	}
+
+	for _, c := range []struct{ in, want string }{
+		{"Password reset key for user '" + addr + "': 543963", "Password reset key for user '" + marker + "': 543963"},
+		{`reset for user "` + addr + `": done`, `reset for user "` + marker + `": done`},
+		{"user " + addr + ": 543963", "user " + marker + ": 543963"},
+		{addr + ": login failed", marker + ": login failed"},
+		{"INFO:root:" + addr + ": login failed", "INFO:root:" + marker + ": login failed"},
+		{`{"` + addr + `": {"role": "admin"}}`, `{"` + marker + `": {"role": "admin"}}`},
+		{`{"` + addr + `":{"role":"admin"}}`, `{"` + marker + `":{"role":"admin"}}`},
+		{"{'" + addr + "': 3}", "{'" + marker + "': 3}"},
+	} {
+		out := ScanAndRedact(c.in)
+		if out != c.want {
+			t.Errorf("address before a colon:\n  in: %s\n got: %s\nwant: %s", c.in, out, c.want)
+		}
+		if strings.HasPrefix(c.in, `{"`) && !json.Valid([]byte(out)) {
+			t.Errorf("output is not valid JSON:\n in: %s\nout: %s", c.in, out)
+		}
+		if again := ScanAndRedact(out); again != out {
+			t.Errorf("second scan changed the line:\n 1st: %s\n 2nd: %s", out, again)
+		}
+	}
+}
+
+// TestColonAfterAtSignKept: with a value after the colon the token is an scp
+// target or a host with a port, and a name with an '@' that is not an address
+// stays a plain key.
+func TestColonAfterAtSignKept(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, in := range []string{
+		"git clone git@github.com:org/repo.git",
+		"scp build.tar deploy@build-01.example.com:/srv/releases/",
+		"user@localhost: ok",
+		"pkg@v1: installed",
+		"@handle: hello",
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("changed:\n in: %s\nout: %s", in, out)
+		}
+	}
+}
