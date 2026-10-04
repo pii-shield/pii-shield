@@ -609,7 +609,9 @@ func (st *configState) calculateComplexity(token string) float64 {
 		return st.calculateRawComplexity(token)
 	}
 	best := 0.0
-	dotted := !strings.ContainsAny(token, "-_/")
+	// A name with an index (SyncWorker_3) has its camelCase name scored word
+	// by word, like a part of a dotted name: see isIndexedName.
+	dotted := !strings.ContainsAny(token, "-_/") || isIndexedName(token)
 	for part, next := nextCompoundPart(token, 0); part != ""; part, next = nextCompoundPart(token, next) {
 		// A part cannot score above log2(len) plus the largest class bonus
 		// (1.5) and bigram adjustment (0.5); skip it when that bound cannot
@@ -622,6 +624,15 @@ func (st *configState) calculateComplexity(token string) float64 {
 		}
 	}
 	return best
+}
+
+// readsAsWords reports whether calculateComplexity scores token word by word:
+// a compound of word-shaped parts, or a camelCase name that reads as words.
+// processAndAppend asks it for the name in a log prefix (see
+// segmentState.bracketAfterContext).
+func (st *configState) readsAsWords(token string) bool {
+	return st.isWordCompound(token) || st.isCamelDigitCompound(token) ||
+		(!strings.ContainsAny(token, "-._/") && st.isCamelWordCompound(token))
 }
 
 // partComplexity scores one part of a compound. A camelCase part that reads
@@ -805,6 +816,37 @@ func (st *configState) isWordCompound(token string) bool {
 		return false
 	}
 	return !st.namesSecret(token)
+}
+
+// isIndexedName reports whether token is one name followed by a number or
+// several, joined by '_' or '-': SyncWorker_3, TaskRunner_10, SyncWorker-3.
+// That is how thread pools and worker pools name their members, and the name
+// sits in the prefix of every line a worker logs. The camelCase name is then
+// scored word by word, as it already is when it stands alone: scored as one
+// run, SyncWorker reaches 3.622 against the 3.6 threshold, so Home Assistant's
+// (SyncWorker_3) was hidden on every line from a worker thread while a bare
+// SyncWorker and (MainThread) were not. The index says nothing about the
+// name: on 20 000 random letter and letter-digit tokens with an index, none
+// is kept by this rule that main does not already keep without the index. A
+// token with '.' or '/' is not an indexed name, so MobileSafari/604.1 in a
+// User-Agent keeps its one-run score (see partComplexity).
+func isIndexedName(token string) bool {
+	if strings.ContainsAny(token, "./") {
+		return false
+	}
+	_, next := nextCompoundPart(token, 0)
+	n := 0
+	for p := ""; ; n++ {
+		if p, next = nextCompoundPart(token, next); p == "" {
+			break
+		}
+		for i := 0; i < len(p); i++ {
+			if !isASCIIDigit(p[i]) {
+				return false
+			}
+		}
+	}
+	return n > 0
 }
 
 // nextCompoundPart returns the first non-empty part of token at or after i,
@@ -1506,6 +1548,9 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 				// A separator right after a marker: whatever follows is not
 				// glued to it (see afterMarker in processAndAppend).
 				state.afterMarker = false
+				if (r == '(' || r == '[') && state.pendingContextSensitive {
+					state.bracketAfterContext = true
+				}
 			}
 			if i > start {
 				token := segment[start:i]
@@ -3667,6 +3712,12 @@ type segmentState struct {
 	// True right after an existing [HIDDEN…] marker (see scanSegment).
 	afterMarker bool
 
+	// True when a '(' or '[' opened right after a context word and no token
+	// has followed yet: "WARNING (SyncWorker_3) [pkg.module] ...", "ERROR
+	// [http-nio-8080-exec-1] ...". What sits in the brackets there is a field
+	// of the log prefix (thread, logger), not the thing the error is about.
+	bracketAfterContext bool
+
 	// True if the pending key names a secret outright (see keyNamesSecret).
 	keyNamesSecret bool
 }
@@ -3887,8 +3938,21 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	} else if st.isShortHashUnderHashKey(trimmed, state.pendingHashKey) {
 		sb.WriteString(token)
 	} else {
-		isKey = st.processTokenLogic(token, forced, state.pendingContextSensitive, state.isInValuePos, override, sb, depth)
+		// A context word ("Error", "WARNING") lowers the threshold for the
+		// token after it. In a log prefix that token is the thread or logger
+		// name in brackets, and a name that reads as words kept only its
+		// normal score: Sync in SyncWorker_3 scores 2.5 against the lowered
+		// 2.3, so the thread name was hidden on every WARNING and ERROR line
+		// of a Home Assistant log. Anything else in the brackets, and any
+		// token not in brackets, is scored against the lowered threshold as
+		// before.
+		contextSensitive := state.pendingContextSensitive
+		if contextSensitive && state.bracketAfterContext && st.readsAsWords(cleanToken) {
+			contextSensitive = false
+		}
+		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos, override, sb, depth)
 	}
+	state.bracketAfterContext = false
 	// sb is updated inside processTokenLogic
 
 	// 2. Update Context State
