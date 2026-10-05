@@ -1330,7 +1330,9 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 	// Telephone numbers are carved out of the line the same way as cards:
 	// a phone is digits only, which entropy cannot tell from a timestamp,
 	// and a grouped one (+49 170 1234567) spans several tokens.
-	carves := mergeCarves(luhnRanges, FindPhoneSequences(logLine))
+	// Identity numbers under a key ("idNumber": "141638835") come from
+	// the same pass.
+	carves := mergeCarves(luhnRanges, findShapedNumbers(logLine))
 
 	chunkStart := 0
 	inQuote, quoteChar := false, rune(0)
@@ -1365,8 +1367,8 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 			sb.WriteString(secret)
 		} else if name, ok := st.customRuleName(secret); ok {
 			st.redactWithHMAC(secret, name, "regex", sb)
-		} else if cv.phone {
-			st.redactWithHMAC(secret, st.entityLabel("phone"), "signature", sb)
+		} else if cv.label != "" {
+			st.redactWithHMAC(secret, st.entityLabel(cv.label), "signature", sb)
 		} else {
 			st.redactWithHMAC(secret, st.entityLabel("card"), "luhn", sb)
 		}
@@ -1384,40 +1386,47 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 }
 
 // carve is a byte range of a line hidden as one value before tokenizing: a
-// card number found by FindLuhnSequences or a phone found by
-// FindPhoneSequences.
+// card number found by FindLuhnSequences (label ""), or a phone or an
+// identity number found by findShapedNumbers.
 type carve struct {
 	Range
-	phone bool
+	label string
 }
 
-// mergeCarves joins the card and phone ranges of a line in line order. Both
-// lists are sorted and internally disjoint; where the two overlap the phone
-// wins. A phone is found only with a '+', NANP punctuation or a phone key,
-// and a 13-digit German number written +49... passes Luhn as a 13-digit Visa
-// once in ten: hidden either way, but the label was a lie.
-func mergeCarves(cards, phones []Range) []carve {
-	if len(phones) == 0 && len(cards) == 0 {
+// mergeCarves joins the card ranges and the shaped numbers of a line in line
+// order. Both lists are sorted and internally disjoint; where the two overlap
+// the shaped number wins. A phone is found only with a '+', NANP punctuation
+// or a phone key, and a 13-digit German number written +49... passes Luhn as
+// a 13-digit Visa once in ten: hidden either way, but the label was a lie.
+// The same goes for an identity number under its key.
+func mergeCarves(cards []Range, nums []shapedNumber) []carve {
+	if len(nums) == 0 && len(cards) == 0 {
 		return nil
 	}
-	out := make([]carve, 0, len(cards)+len(phones))
+	label := func(sn shapedNumber) string {
+		if sn.id {
+			return "id-number"
+		}
+		return "phone"
+	}
+	out := make([]carve, 0, len(cards)+len(nums))
 	i, j := 0, 0
-	for i < len(cards) || j < len(phones) {
+	for i < len(cards) || j < len(nums) {
 		switch {
-		case j >= len(phones):
+		case j >= len(nums):
 			out = append(out, carve{Range: cards[i]})
 			i++
 		case i >= len(cards):
-			out = append(out, carve{Range: phones[j], phone: true})
+			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
 			j++
-		case phones[j].End <= cards[i].Start:
-			out = append(out, carve{Range: phones[j], phone: true})
+		case nums[j].End <= cards[i].Start:
+			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
 			j++
-		case cards[i].End <= phones[j].Start:
+		case cards[i].End <= nums[j].Start:
 			out = append(out, carve{Range: cards[i]})
 			i++
 		default:
-			// Overlap: drop the card, keep the phone.
+			// Overlap: drop the card, keep the shaped number.
 			i++
 		}
 	}
@@ -2849,6 +2858,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 					sb.WriteString(key)
 					sb.WriteByte('=')
 					st.redactWithHMAC(val, st.entityLabel("phone"), "signature", sb)
+				} else if isIDNumberValue(val) && isIDKey(key) {
+					// ?national_id=141638835: known by its key, like the
+					// phone above.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("id-number"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
