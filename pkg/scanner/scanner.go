@@ -1648,7 +1648,7 @@ func hasChainBoundary(tok string) bool {
 // assignmentFollows reports whether s starts with a field name directly
 // followed by '=': a letter or '_', then letters, digits, '_', '.' or '-'.
 func assignmentFollows(s string) bool {
-	if len(s) < 2 || !(isASCIILetter(s[0]) || s[0] == '_') {
+	if len(s) < 2 || (!isASCIILetter(s[0]) && s[0] != '_') {
 		return false
 	}
 	for i := 1; i < len(s); i++ {
