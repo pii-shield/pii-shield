@@ -2549,7 +2549,7 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 			// as it is, anything else is scored. A 12-character hex id is left
 			// alone: it is how docker pull and docker build name a layer on
 			// every progress line (3f4e5d6c7b8a: Pull complete).
-			if keyRaw == key && !keySensitive && !(len(key) == 12 && isHexString(key)) {
+			if keyRaw == key && !keySensitive && (len(key) != 12 || !isHexString(key)) {
 				st.writeKeyHalf(key, sb)
 				sb.WriteByte(':')
 				return false, true
