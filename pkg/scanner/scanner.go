@@ -3819,6 +3819,21 @@ func (st *configState) isShortHashUnderHashKey(tok string, afterHashKey bool) bo
 // {"setting": "token", "data": "…"}.
 var genericValueKeys = map[string]bool{"value": true, "val": true, "values": true, "data": true}
 
+// isGenericValueKey reports whether k carries the value of a generic pair: one
+// of genericValueKeys, or a name whose last word is "value" (attributeValue in
+// an OCPP 2.0.1 SetVariables frame, attribute_value, newValue).
+func isGenericValueKey(k string) bool {
+	lk := strings.ToLower(k)
+	if genericValueKeys[lk] {
+		return true
+	}
+	i := len(k) - len("value")
+	if i <= 0 || lk[i:] != "value" {
+		return false
+	}
+	return k[i] == 'V' || k[i-1] == '_' || k[i-1] == '-' || k[i-1] == '.'
+}
+
 // pairKey returns the key of a token that opens or holds a key/value pair:
 // "k": or k= (value in the next token), "k":"v" or k=v (both in this one).
 func pairKey(tok string) (string, bool) {
@@ -3945,14 +3960,15 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	}
 	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=")
 	// {"name": "password", "value": …} makes the value sensitive, but only the
-	// pair that carries it: a "value" or "data" key, which spends the flag.
+	// pair that carries it: a "value" or "data" key, or a name that ends in
+	// the word value (see isGenericValueKey), which spends the flag.
 	// Other keys pass untouched and leave it armed, so
 	// {"name": "password", "type": "string", "value": …} keeps its type and
 	// still hides the value, and a word in prose after "name: password" is
 	// not treated as a key.
 	override := false
 	if state.nextValueIsSensitive {
-		if k, isPair := pairKey(trimmed); isPair && genericValueKeys[strings.ToLower(k)] {
+		if k, isPair := pairKey(trimmed); isPair && isGenericValueKey(k) {
 			override = true
 			state.nextValueIsSensitive = false
 		}
