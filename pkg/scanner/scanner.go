@@ -1543,6 +1543,32 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 			continue
 		}
 
+		// A chain of assignments in one token: the lines of a .env file in a
+		// JSON string ("$ cat .env\nOPENAI_API_KEY=sk-...\nDEBUG=false") and
+		// a form-urlencoded body with no '?' in front
+		// (Login=tom&Password=x&RememberMe=true). The key=value splitter cut
+		// such a token at its first '=' and took everything up to the next
+		// '=' as a key name, so a secret between two assignments was written
+		// out as the unscored half of "<secret>\nDEBUG" or
+		// "<secret>&RememberMe". The separator before the next assignment
+		// separates two tokens (see chainBoundary).
+		if r == '&' || r == '\\' || r == '\n' {
+			if w := chainBoundary(segment, start, i); w > 0 {
+				if i > start {
+					token := segment[start:i]
+					if seenInvalid {
+						token = strings.ToValidUTF8(token, "\uFFFD")
+					}
+					st.processAndAppend(token, sb, &state, depth)
+				}
+				sb.WriteString(segment[i : i+w])
+				i += w
+				start = i
+				seenInvalid = false
+				continue
+			}
+		}
+
 		if isSepRune(r) {
 			if i == start {
 				// A separator right after a marker: whatever follows is not
@@ -1577,6 +1603,71 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 		st.processAndAppend(token, sb, &state, depth)
 	}
 	return inQuote, quoteChar
+}
+
+// chainBoundary reports the width of the separator at segment[i] when it
+// starts a new assignment inside the token that began at start, or 0. A
+// line break - the two characters of a literal "\n", or a real one in a
+// decoded JSON string - or a '&' counts when a field name and '=' follow it
+// directly. The '&' also needs an assignment on its left and no URL there:
+// maskURLParameters walks the parameters of a URL itself. A Windows path
+// (C:\new\table) has no "name=" after its "\n".
+func chainBoundary(segment string, start, i int) int {
+	switch segment[i] {
+	case '\\':
+		if strings.HasPrefix(segment[i:], `\n`) && assignmentFollows(segment[i+2:]) {
+			return 2
+		}
+	case '\n':
+		if assignmentFollows(segment[i+1:]) {
+			return 1
+		}
+	case '&':
+		if i > start && assignmentFollows(segment[i+1:]) && isBareAssignment(segment[start:i]) {
+			return 1
+		}
+	}
+	return 0
+}
+
+// hasChainBoundary reports whether tok holds a chain of assignments that
+// scanSegment would cut (see chainBoundary).
+func hasChainBoundary(tok string) bool {
+	for i := 0; ; i++ {
+		j := strings.IndexAny(tok[i:], "&\\\n")
+		if j < 0 {
+			return false
+		}
+		i += j
+		if chainBoundary(tok, 0, i) > 0 {
+			return true
+		}
+	}
+}
+
+// assignmentFollows reports whether s starts with a field name directly
+// followed by '=': a letter or '_', then letters, digits, '_', '.' or '-'.
+func assignmentFollows(s string) bool {
+	if len(s) < 2 || !(isASCIILetter(s[0]) || s[0] == '_') {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '=':
+			return true
+		case isASCIILetter(c) || isASCIIDigit(c) || c == '_' || c == '.' || c == '-':
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// isBareAssignment reports whether tok is a key=value token that is not part
+// of a URL: it has an '=' and neither a '?' nor a scheme.
+func isBareAssignment(tok string) bool {
+	return strings.IndexByte(tok, '=') >= 0 && strings.IndexByte(tok, '?') < 0 && !strings.Contains(tok, "://")
 }
 
 // processTokenLogic analyzes a token and returns (processedString, isSensitiveKey).
@@ -1716,6 +1807,20 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if _, _, ok := splitCompactPair(rawToken); ok {
 		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
 			return isKey
+		}
+	}
+
+	// A quoted chain of assignments ("Login=tom&Password=x&RememberMe=true" as
+	// a JSON value) reaches the pair splitters without passing the tokenizer,
+	// which is where a chain is cut. Unwrap it and scan the content, so each
+	// assignment is its own token. A value under a sensitive key is hidden
+	// whole further down, as before.
+	if !forcedSensitive && isBalancedQuoted(rawToken) && strings.IndexByte(rawToken, '=') >= 0 {
+		if inner := rawToken[1 : len(rawToken)-1]; strings.IndexByte(inner, rawToken[0]) < 0 && hasChainBoundary(inner) {
+			sb.WriteByte(rawToken[0])
+			st.scanSegment(inner, sb, depth+1)
+			sb.WriteByte(rawToken[0])
+			return false
 		}
 	}
 
