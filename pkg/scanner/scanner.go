@@ -2483,6 +2483,19 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 
 		// Recursively process val? Val might be empty if "key:"
 		if val == "" {
+			// An e-mail address in front of the colon is data, not a field
+			// name: "reset key for user 'lena@example.com': 543963", "user
+			// lena@example.com: login failed", a JSON object keyed by address.
+			// The key half of a colon pair is written out unscored, so the
+			// shape rule never saw it. Hide it the way it is hidden anywhere
+			// else, quotes kept. With a value after the colon the token is as
+			// likely an scp target (git@github.com:org/repo.git) and is left
+			// as it was.
+			if strings.IndexByte(key, '@') > 0 && (keyRaw == key || isBalancedQuoted(keyRaw)) && isEmailAddress(key) {
+				st.processSingleToken(key, keyRaw, false, false, false, sb)
+				sb.WriteByte(':')
+				return keySensitive, true
+			}
 			sb.WriteString(rawToken)
 			return keySensitive, true
 		}
