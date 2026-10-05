@@ -2784,10 +2784,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 
 	// A trailing quote closes the enclosing quoted token; it is structure,
 	// not URL text. Peel it off first so it neither lands inside a parameter
-	// value nor reaches the segment scanner as a lone unbalanced quote.
-	if n := len(url); n > 0 && (url[n-1] == '"' || url[n-1] == '\'') {
-		st.maskURLParameters(url[:n-1], sb, depth)
-		sb.WriteByte(url[n-1])
+	// value nor reaches the segment scanner as a lone unbalanced quote. The
+	// backslash of an escaped quote and the punctuation after the quote go
+	// with it (see urlClosingTail).
+	if tail := urlClosingTail(url); tail < len(url) {
+		st.maskURLParameters(url[:tail], sb, depth)
+		sb.WriteString(url[tail:])
 		return
 	}
 
@@ -2868,6 +2870,48 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 			}
 		}
 	}
+}
+
+// urlClosingTail returns the index where the closing structure of a quoted URL
+// starts, or len(url) when the URL does not end in a closing quote.
+//
+// The structure is the last quote after the '?', the backslash that escapes
+// it, and closing punctuation after it. Before, only a bare quote at the very
+// end was peeled, so the rest landed in the last parameter value and was
+// hashed with it. A Go url.Error (`Get "https://host/a?key=<value>": dial tcp`)
+// lost the quote and the colon. A quoted URL inside a JSON string
+// (`"msg":"fetch \"https://host/a?key=<value>\" failed"`) lost the backslash
+// of its closing `\"`, which ended the string early and broke the line's
+// JSON. The same value also got a different marker in each of these shapes.
+//
+// A quote counts as escaped when an odd number of backslashes stands before
+// it (`\\"` is an escaped backslash and a plain quote). A quote followed by
+// anything but closing punctuation is left alone: it may be an unencoded
+// quote inside the query (?q="a"&token=...), and the parameters after it
+// still have to be scored.
+func urlClosingTail(url string) int {
+	q := strings.LastIndexByte(url, '"')
+	if s := strings.LastIndexByte(url, '\''); s > q {
+		q = s
+	}
+	if q < strings.IndexByte(url, '?') {
+		return len(url)
+	}
+	for i := q + 1; i < len(url); i++ {
+		switch url[i] {
+		case ':', ',', '.', ';', ')', ']', '}', '>':
+		default:
+			return len(url)
+		}
+	}
+	b := q
+	for b > 0 && url[b-1] == '\\' {
+		b--
+	}
+	if (q-b)%2 == 1 {
+		return q - 1
+	}
+	return q
 }
 
 // urlPassword finds the password of a user:password@ userinfo right after the
