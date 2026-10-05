@@ -2541,6 +2541,19 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 				sb.WriteByte(':')
 				return keySensitive, true
 			}
+			// A bare token in front of the colon that does not have the shape
+			// of a field name is as likely a value as a key: "key <secret>:
+			// rejected", "token <hex>: not found", the Go and Rust error form
+			// "for key <secret>: reason". Judge it the way the key half of
+			// key=value is judged (see writeKeyHalf): a field name is written
+			// as it is, anything else is scored. A 12-character hex id is left
+			// alone: it is how docker pull and docker build name a layer on
+			// every progress line (3f4e5d6c7b8a: Pull complete).
+			if keyRaw == key && !keySensitive && !(len(key) == 12 && isHexString(key)) {
+				st.writeKeyHalf(key, sb)
+				sb.WriteByte(':')
+				return false, true
+			}
 			sb.WriteString(rawToken)
 			return keySensitive, true
 		}
