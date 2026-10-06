@@ -1552,6 +1552,32 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 			continue
 		}
 
+		// A chain of assignments in one token: the lines of a .env file in a
+		// JSON string ("$ cat .env\nOPENAI_API_KEY=sk-...\nDEBUG=false") and
+		// a form-urlencoded body with no '?' in front
+		// (Login=tom&Password=x&RememberMe=true). The key=value splitter cut
+		// such a token at its first '=' and took everything up to the next
+		// '=' as a key name, so a secret between two assignments was written
+		// out as the unscored half of "<secret>\nDEBUG" or
+		// "<secret>&RememberMe". The separator before the next assignment
+		// separates two tokens (see chainBoundary).
+		if r == '&' || r == '\\' || r == '\n' {
+			if w := chainBoundary(segment, start, i); w > 0 {
+				if i > start {
+					token := segment[start:i]
+					if seenInvalid {
+						token = strings.ToValidUTF8(token, "\uFFFD")
+					}
+					st.processAndAppend(token, sb, &state, depth)
+				}
+				sb.WriteString(segment[i : i+w])
+				i += w
+				start = i
+				seenInvalid = false
+				continue
+			}
+		}
+
 		if isSepRune(r) {
 			if i == start {
 				// A separator right after a marker: whatever follows is not
@@ -1586,6 +1612,71 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 		st.processAndAppend(token, sb, &state, depth)
 	}
 	return inQuote, quoteChar
+}
+
+// chainBoundary reports the width of the separator at segment[i] when it
+// starts a new assignment inside the token that began at start, or 0. A
+// line break - the two characters of a literal "\n", or a real one in a
+// decoded JSON string - or a '&' counts when a field name and '=' follow it
+// directly. The '&' also needs an assignment on its left and no URL there:
+// maskURLParameters walks the parameters of a URL itself. A Windows path
+// (C:\new\table) has no "name=" after its "\n".
+func chainBoundary(segment string, start, i int) int {
+	switch segment[i] {
+	case '\\':
+		if strings.HasPrefix(segment[i:], `\n`) && assignmentFollows(segment[i+2:]) {
+			return 2
+		}
+	case '\n':
+		if assignmentFollows(segment[i+1:]) {
+			return 1
+		}
+	case '&':
+		if i > start && assignmentFollows(segment[i+1:]) && isBareAssignment(segment[start:i]) {
+			return 1
+		}
+	}
+	return 0
+}
+
+// hasChainBoundary reports whether tok holds a chain of assignments that
+// scanSegment would cut (see chainBoundary).
+func hasChainBoundary(tok string) bool {
+	for i := 0; ; i++ {
+		j := strings.IndexAny(tok[i:], "&\\\n")
+		if j < 0 {
+			return false
+		}
+		i += j
+		if chainBoundary(tok, 0, i) > 0 {
+			return true
+		}
+	}
+}
+
+// assignmentFollows reports whether s starts with a field name directly
+// followed by '=': a letter or '_', then letters, digits, '_', '.' or '-'.
+func assignmentFollows(s string) bool {
+	if len(s) < 2 || (!isASCIILetter(s[0]) && s[0] != '_') {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '=':
+			return true
+		case isASCIILetter(c) || isASCIIDigit(c) || c == '_' || c == '.' || c == '-':
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// isBareAssignment reports whether tok is a key=value token that is not part
+// of a URL: it has an '=' and neither a '?' nor a scheme.
+func isBareAssignment(tok string) bool {
+	return strings.IndexByte(tok, '=') >= 0 && strings.IndexByte(tok, '?') < 0 && !strings.Contains(tok, "://")
 }
 
 // processTokenLogic analyzes a token and returns (processedString, isSensitiveKey).
@@ -1725,6 +1816,20 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if _, _, ok := splitCompactPair(rawToken); ok {
 		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
 			return isKey
+		}
+	}
+
+	// A quoted chain of assignments ("Login=tom&Password=x&RememberMe=true" as
+	// a JSON value) reaches the pair splitters without passing the tokenizer,
+	// which is where a chain is cut. Unwrap it and scan the content, so each
+	// assignment is its own token. A value under a sensitive key is hidden
+	// whole further down, as before.
+	if !forcedSensitive && isBalancedQuoted(rawToken) && strings.IndexByte(rawToken, '=') >= 0 {
+		if inner := rawToken[1 : len(rawToken)-1]; strings.IndexByte(inner, rawToken[0]) < 0 && hasChainBoundary(inner) {
+			sb.WriteByte(rawToken[0])
+			st.scanSegment(inner, sb, depth+1)
+			sb.WriteByte(rawToken[0])
+			return false
 		}
 	}
 
@@ -2550,6 +2655,19 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 				sb.WriteByte(':')
 				return keySensitive, true
 			}
+			// A bare token in front of the colon that does not have the shape
+			// of a field name is as likely a value as a key: "key <secret>:
+			// rejected", "token <hex>: not found", the Go and Rust error form
+			// "for key <secret>: reason". Judge it the way the key half of
+			// key=value is judged (see writeKeyHalf): a field name is written
+			// as it is, anything else is scored. A 12-character hex id is left
+			// alone: it is how docker pull and docker build name a layer on
+			// every progress line (3f4e5d6c7b8a: Pull complete).
+			if keyRaw == key && !keySensitive && (len(key) != 12 || !isHexString(key)) {
+				st.writeKeyHalf(key, sb)
+				sb.WriteByte(':')
+				return false, true
+			}
 			sb.WriteString(rawToken)
 			return keySensitive, true
 		}
@@ -2793,10 +2911,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 
 	// A trailing quote closes the enclosing quoted token; it is structure,
 	// not URL text. Peel it off first so it neither lands inside a parameter
-	// value nor reaches the segment scanner as a lone unbalanced quote.
-	if n := len(url); n > 0 && (url[n-1] == '"' || url[n-1] == '\'') {
-		st.maskURLParameters(url[:n-1], sb, depth)
-		sb.WriteByte(url[n-1])
+	// value nor reaches the segment scanner as a lone unbalanced quote. The
+	// backslash of an escaped quote and the punctuation after the quote go
+	// with it (see urlClosingTail).
+	if tail := urlClosingTail(url); tail < len(url) {
+		st.maskURLParameters(url[:tail], sb, depth)
+		sb.WriteString(url[tail:])
 		return
 	}
 
@@ -2883,6 +3003,48 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 			}
 		}
 	}
+}
+
+// urlClosingTail returns the index where the closing structure of a quoted URL
+// starts, or len(url) when the URL does not end in a closing quote.
+//
+// The structure is the last quote after the '?', the backslash that escapes
+// it, and closing punctuation after it. Before, only a bare quote at the very
+// end was peeled, so the rest landed in the last parameter value and was
+// hashed with it. A Go url.Error (`Get "https://host/a?key=<value>": dial tcp`)
+// lost the quote and the colon. A quoted URL inside a JSON string
+// (`"msg":"fetch \"https://host/a?key=<value>\" failed"`) lost the backslash
+// of its closing `\"`, which ended the string early and broke the line's
+// JSON. The same value also got a different marker in each of these shapes.
+//
+// A quote counts as escaped when an odd number of backslashes stands before
+// it (`\\"` is an escaped backslash and a plain quote). A quote followed by
+// anything but closing punctuation is left alone: it may be an unencoded
+// quote inside the query (?q="a"&token=...), and the parameters after it
+// still have to be scored.
+func urlClosingTail(url string) int {
+	q := strings.LastIndexByte(url, '"')
+	if s := strings.LastIndexByte(url, '\''); s > q {
+		q = s
+	}
+	if q < strings.IndexByte(url, '?') {
+		return len(url)
+	}
+	for i := q + 1; i < len(url); i++ {
+		switch url[i] {
+		case ':', ',', '.', ';', ')', ']', '}', '>':
+		default:
+			return len(url)
+		}
+	}
+	b := q
+	for b > 0 && url[b-1] == '\\' {
+		b--
+	}
+	if (q-b)%2 == 1 {
+		return q - 1
+	}
+	return q
 }
 
 // urlPassword finds the password of a user:password@ userinfo right after the
@@ -3834,6 +3996,21 @@ func (st *configState) isShortHashUnderHashKey(tok string, afterHashKey bool) bo
 // {"setting": "token", "data": "…"}.
 var genericValueKeys = map[string]bool{"value": true, "val": true, "values": true, "data": true}
 
+// isGenericValueKey reports whether k carries the value of a generic pair: one
+// of genericValueKeys, or a name whose last word is "value" (attributeValue in
+// an OCPP 2.0.1 SetVariables frame, attribute_value, newValue).
+func isGenericValueKey(k string) bool {
+	lk := strings.ToLower(k)
+	if genericValueKeys[lk] {
+		return true
+	}
+	i := len(k) - len("value")
+	if i <= 0 || lk[i:] != "value" {
+		return false
+	}
+	return k[i] == 'V' || k[i-1] == '_' || k[i-1] == '-' || k[i-1] == '.'
+}
+
 // pairKey returns the key of a token that opens or holds a key/value pair:
 // "k": or k= (value in the next token), "k":"v" or k=v (both in this one).
 func pairKey(tok string) (string, bool) {
@@ -3960,14 +4137,15 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	}
 	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=")
 	// {"name": "password", "value": …} makes the value sensitive, but only the
-	// pair that carries it: a "value" or "data" key, which spends the flag.
+	// pair that carries it: a "value" or "data" key, or a name that ends in
+	// the word value (see isGenericValueKey), which spends the flag.
 	// Other keys pass untouched and leave it armed, so
 	// {"name": "password", "type": "string", "value": …} keeps its type and
 	// still hides the value, and a word in prose after "name: password" is
 	// not treated as a key.
 	override := false
 	if state.nextValueIsSensitive {
-		if k, isPair := pairKey(trimmed); isPair && genericValueKeys[strings.ToLower(k)] {
+		if k, isPair := pairKey(trimmed); isPair && isGenericValueKey(k) {
 			override = true
 			state.nextValueIsSensitive = false
 		}

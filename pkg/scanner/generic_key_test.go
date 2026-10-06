@@ -65,3 +65,51 @@ func TestGenericKeyPair(t *testing.T) {
 		}
 	}
 }
+
+// TestGenericValueKeyBySuffix: the value of a generic pair can sit under a
+// name that ends in the word value. An OCPP 2.0.1 SetVariables frame names the
+// variable in one object and carries its value as attributeValue, so a
+// word-like charger password passed (seen in shiv3/ocpp-cp-simulator#400).
+func TestGenericValueKeyBySuffix(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, in := range []string{
+		`Received: [2,"19","SetVariables",{"setVariableData":[{"component":{"name":"SecurityCtrlr"},"variable":{"name":"BasicAuthPassword"},"attributeValue":"Winter7413#"}]}]`,
+		`{"variable": {"name": "BasicAuthPassword"}, "attributeValue": "Winter7413#"}`,
+		`{"name":"password","attribute_value":"Winter7413#"}`,
+		`{"name":"password","newValue":"Winter7413#"}`,
+		`name=password newValue=Winter7413#`,
+	} {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, "Winter7413#") {
+			t.Errorf("value leaked:\n in:  %s\n out: %s", in, out)
+		}
+		if strings.Contains(in, "SecurityCtrlr") && !strings.Contains(out, `"name":"SecurityCtrlr"`) {
+			t.Errorf("component name lost: %s", out)
+		}
+	}
+
+	// A name that only ends in the letters "value", and a value key with no
+	// secret name in front, change nothing.
+	for _, in := range []string{
+		`{"name":"password","devalue":"Winter7413"}`,
+		`{"name":"OfflineThreshold","attributeValue":"Winter7413"}`,
+		`{"variable":{"name":"HeartbeatInterval"},"attributeValue":"300"}`,
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("line changed:\n in:  %s\n out: %s", in, out)
+		}
+	}
+
+	for k, want := range map[string]bool{
+		"value": true, "data": true, "attributeValue": true, "attribute_value": true,
+		"new-value": true, "old.value": true, "Value": true,
+		"devalue": false, "evaluevalue": false, "values2": false, "valued": false,
+	} {
+		if got := isGenericValueKey(k); got != want {
+			t.Errorf("isGenericValueKey(%q) = %v, want %v", k, got, want)
+		}
+	}
+}
