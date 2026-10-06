@@ -49,6 +49,7 @@ Developers often forget to mask sensitive data. Traditional regex filters in Flu
 - **Custom Regex Rules:** Deterministic redaction for structured data (UUIDs, IDs) that overrides entropy checks for known patterns.
 - **Built-in Secret Signatures:** Issuer-prefixed credentials — AWS and Google API keys, GitHub, Slack and Stripe tokens, JWTs, `Bearer` credentials and PEM private-key blocks — are redacted on their format, so a valid key is caught even when its body is low-entropy or the threshold has been raised.
 - **Telephone Numbers by Shape:** International numbers with a `+`, North American `(555) 234-5678` forms and digits under a phone-named key (`phone`, `mobile`, `wa_id`, ...) are hidden even though digits alone never score as a secret.
+- **Identity Numbers by Key:** Digits under a key that names an identity document (`idNumber`, `national_id`, `ssn`, `passport_number`, `tax_id`, ...) are hidden; a record id such as `user_id` or `order_id` is not.
 - **Regression & Fuzz Coverage:** Tested against stress cases including binary garbage, JSON nesting, and multilingual logs.
 - **Deterministic Hashing:** Replaces secrets with unique hashes (e.g., `[HIDDEN:a1b2c]`), allowing QA to correlate errors without seeing the raw data.
 - **Drop-in:** No code changes required. Works with any language (Node, Python, Java, Go).
