@@ -154,3 +154,38 @@ func TestChainBoundary(t *testing.T) {
 		t.Errorf("hasChainBoundary")
 	}
 }
+
+// TestEnvDumpWithURLLineIsCutToo: a .env dump that holds a URL line
+// (DATABASE_URL=postgres://...) contains "://", so the whole quoted value went
+// to the URL handling before the chain was cut, and only the URL password was
+// hidden (the lp_tool_result shape of leak-radar complaints 2026-10-04).
+func TestEnvDumpWithURLLineIsCutToo(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	pw := "giM72rwT7VuBqAwQoeDZ"
+	for _, in := range []string{
+		`{"role": "tool", "content": "$ cat .env\nOPENAI_API_KEY=` + chainOpenAIKey + `\nDATABASE_URL=postgres://app:` + pw + `@db.internal:5432/app\nDEBUG=false\n"}`,
+		`{"content":"DATABASE_URL=postgres://app:` + pw + `@db.internal:5432/app\nGITHUB_TOKEN=` + chainGitHubToken + `\nDEBUG=false"}`,
+	} {
+		out := ScanAndRedact(in)
+		for _, secret := range []string{chainOpenAIKey, chainGitHubToken, pw} {
+			if strings.Contains(in, secret) && strings.Contains(out, secret) {
+				t.Errorf("secret passed through: %q", out)
+			}
+		}
+		if !strings.Contains(out, "DEBUG=false") || !strings.Contains(out, "@db.internal:5432/app") {
+			t.Errorf("neighbouring text lost: %q", out)
+		}
+		if !json.Valid([]byte(out)) {
+			t.Errorf("JSON broken: %q", out)
+		}
+	}
+
+	// A quoted URL with a query chain still goes to the URL handling as one.
+	in := `msg="GET https://host/a?x=1&token=AbC123XyZ987qwerty&y=2 done"`
+	if out := ScanAndRedact(in); strings.Contains(out, "AbC123XyZ987qwerty") || !strings.Contains(out, "?x=1&token=[HIDDEN:") || !strings.Contains(out, "&y=2 done") {
+		t.Errorf("quoted URL: %q", out)
+	}
+}

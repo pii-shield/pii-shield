@@ -1769,6 +1769,39 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
+	// A quoted chain of assignments ("Login=tom&Password=x&RememberMe=true" as
+	// a JSON value) reaches the pair splitters without passing the tokenizer,
+	// which is where a chain is cut. Unwrap it and scan the content, so each
+	// assignment is its own token. This comes before the URL branch: a .env
+	// dump with a DATABASE_URL line in it holds "://" and went to the URL
+	// handling whole, which hid the URL password and nothing else. A quoted
+	// URL on its own has no chain boundary (see isBareAssignment), so it still
+	// goes to the URL handling. A value under a sensitive key is hidden whole
+	// further down, as before.
+	// Both checks need a quote first, an '=' and a '&' or a line break, which
+	// most tokens do not have; the cheap tests come first.
+	if !forcedSensitive && len(rawToken) > 0 && (rawToken[0] == '"' || rawToken[0] == '\'') && strings.IndexByte(rawToken, '=') >= 0 && strings.ContainsAny(rawToken, "&\\\n") {
+		if isBalancedQuoted(rawToken) {
+			if inner := rawToken[1 : len(rawToken)-1]; strings.IndexByte(inner, rawToken[0]) < 0 && hasChainBoundary(inner) {
+				sb.WriteByte(rawToken[0])
+				st.scanSegment(inner, sb, depth+1)
+				sb.WriteByte(rawToken[0])
+				return false
+			}
+		}
+		// The same chain as the value of a compact JSON pair
+		// ({"content":"A=1\nB=2"}) is split here, key and value, so the value
+		// reaches the check above. processColonPair would do that, but it
+		// declines any token with "://" in it, and a .env dump has one on its
+		// DATABASE_URL line.
+		if k, v, ok := splitCompactPair(rawToken); ok && hasChainBoundary(v) {
+			sb.WriteString(rawToken[:len(k)+2])
+			sb.WriteByte(':')
+			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, false, sb, depth+1)
+			return false
+		}
+	}
+
 	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
 		st.maskURLParameters(rawToken, sb, depth)
 		return false
@@ -1816,20 +1849,6 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if _, _, ok := splitCompactPair(rawToken); ok {
 		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
 			return isKey
-		}
-	}
-
-	// A quoted chain of assignments ("Login=tom&Password=x&RememberMe=true" as
-	// a JSON value) reaches the pair splitters without passing the tokenizer,
-	// which is where a chain is cut. Unwrap it and scan the content, so each
-	// assignment is its own token. A value under a sensitive key is hidden
-	// whole further down, as before.
-	if !forcedSensitive && isBalancedQuoted(rawToken) && strings.IndexByte(rawToken, '=') >= 0 {
-		if inner := rawToken[1 : len(rawToken)-1]; strings.IndexByte(inner, rawToken[0]) < 0 && hasChainBoundary(inner) {
-			sb.WriteByte(rawToken[0])
-			st.scanSegment(inner, sb, depth+1)
-			sb.WriteByte(rawToken[0])
-			return false
 		}
 	}
 
