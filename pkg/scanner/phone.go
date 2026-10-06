@@ -27,10 +27,32 @@ import "strings"
 // The same phone came back unchanged in 40 of 40 runs of the WhatsApp
 // webhook shape from leak-radar (repo-risks 2026-09-30, btw-so/btw).
 func FindPhoneSequences(line string) []Range {
+	var ranges []Range
+	for _, sn := range findShapedNumbers(line) {
+		if !sn.id {
+			ranges = append(ranges, sn.Range)
+		}
+	}
+	return ranges
+}
+
+// shapedNumber is a digit run hidden by its shape or its key: a telephone
+// number, or an identity document number when id is set (see idnumber.go).
+type shapedNumber struct {
+	Range
+	id bool
+}
+
+// findShapedNumbers returns the telephone numbers (see FindPhoneSequences)
+// and the identity numbers under a key (see matchKeyedIDNumber) of a line, in
+// the order they appear. One pass finds both: each is digits that entropy
+// cannot see, and a second walk over every line cost about 3% of throughput
+// when the phone detector was added.
+func findShapedNumbers(line string) []shapedNumber {
 	if !strings.ContainsAny(line, "0123456789") {
 		return nil
 	}
-	var ranges []Range
+	var ranges []shapedNumber
 	n := len(line)
 	for i := 0; i < n; {
 		c := line[i]
@@ -45,7 +67,7 @@ func FindPhoneSequences(line string) []Range {
 			i = skipPhoneRun(line, i)
 			continue
 		}
-		end := 0
+		end, id := 0, false
 		switch c {
 		case '+':
 			end = matchInternationalPhone(line, i)
@@ -54,11 +76,11 @@ func FindPhoneSequences(line string) []Range {
 		default:
 			end = matchNANPPhone(line, i)
 			if end == 0 {
-				end = matchKeyedPhone(line, i)
+				end, id = matchKeyedNumber(line, i)
 			}
 		}
 		if end > 0 && !phoneGluedAfter(line, end) && !insideURL(line, i) {
-			ranges = append(ranges, Range{Start: i, End: end})
+			ranges = append(ranges, shapedNumber{Range: Range{Start: i, End: end}, id: id})
 			i = end
 			continue
 		}
@@ -334,16 +356,33 @@ func digitGroup(line string, j, k int) bool {
 	return true
 }
 
+// matchKeyedNumber matches the digits at line[i:] as the value of a key that
+// names a phone or an identity document: <key><sep><value> where <sep> is ':'
+// or '=' with optional spaces and quotes around it. It returns the end index,
+// or 0, and whether the key names an identity document.
+func matchKeyedNumber(line string, i int) (end int, id bool) {
+	key := phoneKeyBefore(line, i)
+	if key == "" {
+		return 0, false
+	}
+	var words [maxKeyWords]string
+	n := splitKeyWords(key, &words)
+	switch {
+	case n == 0:
+		return 0, false
+	case isPhoneKeyWords(words[:n]):
+		return matchKeyedPhone(line, i), false
+	case isIDKeyWords(words[:n]):
+		return matchKeyedIDNumber(line, i), true
+	}
+	return 0, false
+}
+
 // matchKeyedPhone matches 7-15 digits at line[i:], compact or in groups
 // separated by one space, '-' or '.', with an optional parenthesised first
-// group, when the run is the value of a phone key: <key><sep><value> where
-// <sep> is ':' or '=' with optional spaces and quotes around it. It returns
-// the end index or 0.
+// group. The caller has checked that the run is the value of a phone key. It
+// returns the end index or 0.
 func matchKeyedPhone(line string, i int) int {
-	key := phoneKeyBefore(line, i)
-	if key == "" || !isPhoneKey(key) {
-		return 0
-	}
 	n := len(line)
 	j := i
 	digits := 0
@@ -418,10 +457,23 @@ var phoneKeyWords = map[string]bool{
 // word; "wa_id" (the WhatsApp Cloud API sender id, a phone) is a special case,
 // and "contact" counts only as contact_number / contactNo.
 func isPhoneKey(key string) bool {
+	var words [maxKeyWords]string
+	n := splitKeyWords(key, &words)
+	return n > 0 && isPhoneKeyWords(words[:n])
+}
+
+// maxKeyWords is the most words a key may have to be judged by its last ones.
+const maxKeyWords = 8
+
+// splitKeyWords splits a key into lowercase words on '_', '-', '.' and
+// camelCase boundaries, writes them into parts and returns how many there
+// are. It returns 0 for an empty key, one longer than 64 bytes or one with
+// more than maxKeyWords words. The caller owns the array, so a key on the
+// hot path costs no allocation.
+func splitKeyWords(key string, parts *[maxKeyWords]string) int {
 	if len(key) > 64 {
-		return false
+		return 0
 	}
-	var parts [8]string
 	np := 0
 	start := 0
 	for i := 0; i <= len(key); i++ {
@@ -432,7 +484,7 @@ func isPhoneKey(key string) bool {
 		}
 		if i > start {
 			if np == len(parts) {
-				return false
+				return 0
 			}
 			parts[np] = strings.ToLower(key[start:i])
 			np++
@@ -443,15 +495,23 @@ func isPhoneKey(key string) bool {
 			start = i
 		}
 	}
-	if np == 0 {
-		return false
-	}
+	return np
+}
+
+// isNumberSuffix reports whether w is a word that only says "number" at the
+// end of a key (phone_number, passportNo, id_nr).
+func isNumberSuffix(w string) bool {
+	return w == "number" || w == "no" || w == "num" || w == "nr"
+}
+
+func isPhoneKeyWords(parts []string) bool {
+	np := len(parts)
 	last := parts[np-1]
 	if last == "id" && np >= 2 && parts[np-2] == "wa" {
 		return true
 	}
 	stripped := false
-	if (last == "number" || last == "no" || last == "num" || last == "nr") && np >= 2 {
+	if isNumberSuffix(last) && np >= 2 {
 		last = parts[np-2]
 		stripped = true
 	}
