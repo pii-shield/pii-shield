@@ -99,6 +99,23 @@ You can build the binary directly from the source code:
 go build -o pii-shield ./cmd/cleaner
 ```
 
+### Go Library
+
+The scanner can run inside a Go program, for example in a `slog.Handler` that redacts each record before it is written. It needs only the standard library:
+
+```bash
+go get github.com/pii-shield/pii-shield/v2/pkg/scanner
+```
+
+```go
+import "github.com/pii-shield/pii-shield/v2/pkg/scanner"
+
+clean := scanner.ScanAndRedact(line)         // one line
+cleanText := scanner.ScanAndRedactText(text) // several lines, line endings kept
+```
+
+The package reads the same `PII_*` environment variables as the CLI when it loads. Releases before v2.2.8 declare the module path without `/v2`, so `go get` rejects them.
+
 ## Configuration
 See [CONFIGURATION.md](CONFIGURATION.md) for a full list of environment variables, including:
 - `PII_SALT`: Custom HMAC salt (Required for production).

@@ -12,7 +12,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pii-shield/pii-shield/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
 )
 
 type parityCase struct {
