@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pii-shield/pii-shield/pkg/metrics"
-	"github.com/pii-shield/pii-shield/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
