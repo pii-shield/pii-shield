@@ -5,7 +5,7 @@ package main
 import (
 	"unsafe"
 
-	"github.com/pii-shield/pii-shield/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
 )
 
 // We use a map to pin memory allocations. This prevents Go's Garbage Collector

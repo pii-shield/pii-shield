@@ -17,8 +17,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/pii-shield/pii-shield/pkg/metrics"
-	"github.com/pii-shield/pii-shield/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
 )
 
 func main() {
