@@ -10,7 +10,7 @@ Test the Observability Layer locally without setting up an entire Kubernetes clu
    ```bash
    export PII_METRICS_ENABLED=true
    export PII_METRICS_PORT=9090
-   echo '{"user": "aragossa", "token": "abc123secretXYZ", "cc": "4111111111111111"}' | go run cmd/cleaner/main.go
+   echo '{"user": "aragossa", "token": "abc123secretXYZ", "cc": "4111111111111111"}' | go run ./cmd/cleaner
    ```
 2. Once the log is processed, open a separate terminal and fetch the RED (Rate, Errors, Duration) metrics exposed:
    ```bash
