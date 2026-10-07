@@ -96,7 +96,7 @@ docker pull ghcr.io/pii-shield/pii-shield:2.2.7
 You can build the binary directly from the source code:
 
 ```bash
-go build -o pii-shield ./cmd/cleaner/main.go
+go build -o pii-shield ./cmd/cleaner
 ```
 
 ## Configuration

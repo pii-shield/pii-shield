@@ -41,7 +41,7 @@ Common commands:
 ```bash
 go mod verify
 go test -race -coverprofile=coverage.out ./...
-go build -o pii-shield ./cmd/cleaner/main.go
+go build -o pii-shield ./cmd/cleaner
 ```
 
 Operator tests:
