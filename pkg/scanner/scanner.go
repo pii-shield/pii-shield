@@ -1398,16 +1398,10 @@ type carve struct {
 // the shaped number wins. A phone is found only with a '+', NANP punctuation
 // or a phone key, and a 13-digit German number written +49... passes Luhn as
 // a 13-digit Visa once in ten: hidden either way, but the label was a lie.
-// The same goes for an identity number under its key.
+// The same goes for an identity number or a session id under its key.
 func mergeCarves(cards []Range, nums []shapedNumber) []carve {
 	if len(nums) == 0 && len(cards) == 0 {
 		return nil
-	}
-	label := func(sn shapedNumber) string {
-		if sn.id {
-			return "id-number"
-		}
-		return "phone"
 	}
 	out := make([]carve, 0, len(cards)+len(nums))
 	i, j := 0, 0
@@ -1417,10 +1411,10 @@ func mergeCarves(cards []Range, nums []shapedNumber) []carve {
 			out = append(out, carve{Range: cards[i]})
 			i++
 		case i >= len(cards):
-			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
+			out = append(out, carve{Range: nums[j].Range, label: nums[j].label})
 			j++
 		case nums[j].End <= cards[i].Start:
-			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
+			out = append(out, carve{Range: nums[j].Range, label: nums[j].label})
 			j++
 		case cards[i].End <= nums[j].Start:
 			out = append(out, carve{Range: cards[i]})
@@ -3059,6 +3053,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 					sb.WriteString(key)
 					sb.WriteByte('=')
 					st.redactWithHMAC(val, st.entityLabel("id-number"), "signature", sb)
+				} else if isSessionNumberValue(val) && isSessionKey(key) {
+					// ?JSESSIONID=8092026976377529079: a session id is a
+					// credential, and digits never reach the threshold.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
@@ -3516,6 +3516,11 @@ func isIPv6(token string) bool {
 // dot, IPv4 addresses and version strings end in digits, e-mails carry "@",
 // URLs are handled before this rule. Extensionless names (Dockerfile,
 // Makefile) and dot-files with an empty stem (.gitignore) do not match.
+// randomPartMinLength is the shortest part of a file-name-shaped token that
+// isFileName reads as a random run when it mixes capitals, small letters and
+// digits.
+const randomPartMinLength = 32
+
 func isFileName(token string) bool {
 	if len(token) < 3 || len(token) > 256 || token[0] == '.' && token[1] == '/' {
 		return false // "./x" and "../x" are isPath's job
@@ -3524,10 +3529,32 @@ func isFileName(token string) bool {
 		return false // no extension possible; cheap exit for the common token
 	}
 	lastDot, lastSlash := -1, -1
-	for i := 0; i < len(token); i++ {
+	partStart, upper, lower, digit := 0, false, false, false
+	for i := 0; i <= len(token); i++ {
+		if i == len(token) || token[i] == '.' || token[i] == '/' {
+			// A long part that mixes capitals, small letters and digits is a
+			// random run, not a name: a Gigya login token
+			// (st2.s.<34>.<80>.<50>.sc3) ends in a short part that reads as
+			// an extension and was passed whole. A content hash in a built
+			// file name (main.3f9a8b7c6d5e.js) is one case and short, and a
+			// long camelCase name is still scored word by word after this.
+			if i-partStart >= randomPartMinLength && upper && lower && digit {
+				return false
+			}
+			partStart, upper, lower, digit = i+1, false, false, false
+		}
+		if i == len(token) {
+			break
+		}
 		c := token[i]
 		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		case c >= 'a' && c <= 'z':
+			lower = true
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= '0' && c <= '9':
+			digit = true
+		case c == '_', c == '-':
 		case c == '.':
 			if i > 0 && token[i-1] == '.' {
 				return false // "file..txt", "../x"
