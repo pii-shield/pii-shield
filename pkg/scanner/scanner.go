@@ -4016,6 +4016,10 @@ type segmentState struct {
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
+	// True if the previous token was a lone "=" or ":" right after a
+	// sensitive key: the auth scheme may still follow ("Authorization = Basic").
+	sepAfterSensitiveKey bool
+	prevClean            string // the previous token without quotes and a trailing separator
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
 
@@ -4159,6 +4163,32 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	cleanToken = trimQuotes(cleanToken)
 	lowerClean := strings.ToLower(cleanToken)
 
+	// "Authorization=Basic <base64>" in one token (a Java Map printed with
+	// toString, logfmt): the pair's value is the scheme, and the forced
+	// value was the word Basic while the credential after it passed. Keep
+	// the scheme word and force the credential, as after "Authorization:
+	// Basic".
+	// The last letter is checked first, as this runs on every token.
+	if n := len(trimmed); n > 0 && (trimmed[n-1]|0x20 == 'c' || trimmed[n-1]|0x20 == 'r') {
+		if k, v, ok := strings.Cut(trimmed, "="); ok && k != "" &&
+			(strings.EqualFold(v, "basic") || strings.EqualFold(v, "bearer")) && st.isSensitiveKey(trimQuotes(k)) {
+			sb.WriteString(token)
+			state.pendingKeySensitive = false
+			state.pendingContextSensitive = false
+			state.pendingAfterCopula = false
+			state.prevStrongSecretWord = false
+			state.pendingHashKey = false
+			state.bracketAfterContext = false
+			state.afterMarker = false
+			state.isInValuePos = false
+			state.pendingBearer = strings.EqualFold(v, "bearer")
+			state.pendingBasic = strings.EqualFold(v, "basic")
+			state.sepAfterSensitiveKey = false
+			state.prevClean = ""
+			return
+		}
+	}
+
 	// Check if this token is a "Generic Key" identifier (e.g. "key", "name")
 	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
 
@@ -4174,6 +4204,19 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// Whether this token sits in the forced slot after a key, before the
 	// rules below give the slot up: an auth scheme word is recognised there.
 	afterSensitiveKey := forced
+	// "Authorization = Basic <base64>": the separator standing alone spent
+	// the key's forced slot, so the scheme word after it was not recognised
+	// and the credential was left to its score (8 of 150 random Basic values
+	// passed whole, and the padding of most others was cut off the marker).
+	// The scheme slot survives the separator; the force on an ordinary value
+	// does not ("password = password" in code stays, see the copula rule).
+	// The key may also arrive in value position, where it is not reported as
+	// a key ("Header: Authorization = Basic ..."): the lone separator after a
+	// sensitive word opens the slot the same way.
+	schemeSlot := afterSensitiveKey || state.sepAfterSensitiveKey
+	state.sepAfterSensitiveKey = (trimmed == "=" || trimmed == ":") &&
+		(forced || (state.prevClean != "" && st.isSensitiveKey(state.prevClean)))
+	state.prevClean = cleanToken
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
 	// forced path skips MinSecretLength — so two-letter words got redacted
@@ -4219,7 +4262,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// hidden by their score, "lena:jr0XQgUiZRF3" encoded was not). It is
 	// hidden whatever its score, as long as it has the base64 shape; a
 	// realm="..." after WWW-Authenticate: Basic has not.
-	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 {
+	// A word that reads as English is not one ("auth = basic support").
+	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
+		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0) {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -4354,7 +4399,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// value slot of an authorization key ("Authorization: Basic",
 	// "Proxy-Authorization: Basic"), so prose such as "basic
 	// internationalization support" keeps its next word.
-	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
+	state.pendingBasic = lowerClean == "basic" && schemeSlot
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
