@@ -3516,6 +3516,11 @@ func isIPv6(token string) bool {
 // dot, IPv4 addresses and version strings end in digits, e-mails carry "@",
 // URLs are handled before this rule. Extensionless names (Dockerfile,
 // Makefile) and dot-files with an empty stem (.gitignore) do not match.
+// randomPartMinLength is the shortest part of a file-name-shaped token that
+// isFileName reads as a random run when it mixes capitals, small letters and
+// digits.
+const randomPartMinLength = 32
+
 func isFileName(token string) bool {
 	if len(token) < 3 || len(token) > 256 || token[0] == '.' && token[1] == '/' {
 		return false // "./x" and "../x" are isPath's job
@@ -3524,10 +3529,32 @@ func isFileName(token string) bool {
 		return false // no extension possible; cheap exit for the common token
 	}
 	lastDot, lastSlash := -1, -1
-	for i := 0; i < len(token); i++ {
+	partStart, upper, lower, digit := 0, false, false, false
+	for i := 0; i <= len(token); i++ {
+		if i == len(token) || token[i] == '.' || token[i] == '/' {
+			// A long part that mixes capitals, small letters and digits is a
+			// random run, not a name: a Gigya login token
+			// (st2.s.<34>.<80>.<50>.sc3) ends in a short part that reads as
+			// an extension and was passed whole. A content hash in a built
+			// file name (main.3f9a8b7c6d5e.js) is one case and short, and a
+			// long camelCase name is still scored word by word after this.
+			if i-partStart >= randomPartMinLength && upper && lower && digit {
+				return false
+			}
+			partStart, upper, lower, digit = i+1, false, false, false
+		}
+		if i == len(token) {
+			break
+		}
 		c := token[i]
 		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		case c >= 'a' && c <= 'z':
+			lower = true
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= '0' && c <= '9':
+			digit = true
+		case c == '_', c == '-':
 		case c == '.':
 			if i > 0 && token[i-1] == '.' {
 				return false // "file..txt", "../x"
