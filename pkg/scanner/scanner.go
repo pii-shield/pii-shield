@@ -63,6 +63,10 @@ type configState struct {
 	config         Config
 	sensitiveRegex *regexp.Regexp // compiled sensitive-key patterns, may be nil
 	hmacPool       *sync.Pool     // HMAC hashers keyed by config.Salt
+	// asciiSensitiveKeys is config.SensitiveKeys without its non-ASCII
+	// entries, the list an ASCII key is matched against; it aliases
+	// config.SensitiveKeys when every entry is ASCII.
+	asciiSensitiveKeys []string
 }
 
 // activeConfig holds the currently published *configState.
@@ -142,10 +146,33 @@ func init() {
 	}
 }
 
+// fullWidthColon is U+FF1A, the key separator of Chinese and Japanese text.
+const fullWidthColon = "\uFF1A"
+
 // isSepRune reports whether r is one of scanSegment's token separators,
 // equivalent to strings.ContainsRune(" \t,;[]{}()<>", r).
 func isSepRune(r rune) bool {
 	return r >= 0 && r < utf8.RuneSelf && sepTable[r]
+}
+
+// hasNonASCII reports whether s has a byte outside ASCII in it.
+func hasNonASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return true
+		}
+	}
+	return false
+}
+
+// hasASCII reports whether s has an ASCII byte in it.
+func hasASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < utf8.RuneSelf {
+			return true
+		}
+	}
+	return false
 }
 
 // isAllLetters reports whether s is non-empty and made of letters only.
@@ -362,6 +389,9 @@ func DefaultConfig() Config {
 			"pass", "secret", "token", "key", "cvv", "cvc", "auth", "sign",
 			"password", "passwd", "api_key", "apikey", "access_token", "client_secret",
 			"aws_access_key_id", "aws_secret_access_key", "gcp_credentials", "slack_token",
+			// Chinese and Japanese: password, passphrase, secret key, token,
+			// password (katakana).
+			"密码", "口令", "密钥", "令牌", "パスワード",
 		},
 	}
 	for i, k := range cfg.SensitiveKeys {
@@ -541,10 +571,25 @@ func buildConfigState(cfg Config) *configState {
 		},
 	}
 
+	asciiKeys := cfg.SensitiveKeys
+	for i, sk := range cfg.SensitiveKeys {
+		if hasNonASCII(sk) {
+			asciiKeys = make([]string, 0, len(cfg.SensitiveKeys)-1)
+			asciiKeys = append(asciiKeys, cfg.SensitiveKeys[:i]...)
+			for _, k := range cfg.SensitiveKeys[i+1:] {
+				if !hasNonASCII(k) {
+					asciiKeys = append(asciiKeys, k)
+				}
+			}
+			break
+		}
+	}
+
 	return &configState{
-		config:         cfg,
-		sensitiveRegex: re,
-		hmacPool:       pool,
+		config:             cfg,
+		sensitiveRegex:     re,
+		hmacPool:           pool,
+		asciiSensitiveKeys: asciiKeys,
 	}
 }
 
@@ -1885,6 +1930,22 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	}
 
 	// 2. Check for Key:Value (e.g. "key": "value" or "key":value)
+	// A full-width colon (U+FF1A) is the key separator of Chinese and
+	// Japanese logs (密码：hunter2x, password：x). It was no separator at
+	// all: the token was scored whole, so a weak value passed and a strong
+	// one took the key into the marker with it. Split on it the way the
+	// ASCII colon splits, when the token has no ASCII separator of its own.
+	// The lead byte is checked first: this runs on every token.
+	if i := strings.IndexByte(rawToken, fullWidthColon[0]); i > 0 && strings.HasPrefix(rawToken[i:], fullWidthColon) && !strings.ContainsAny(rawToken, ":=\"'") {
+		key, val := rawToken[:i], rawToken[i+len(fullWidthColon):]
+		keySensitive := st.isSensitiveKey(key) || overrideSensitivity
+		st.writeKeyHalf(key, sb)
+		sb.WriteString(fullWidthColon)
+		if val == "" {
+			return keySensitive
+		}
+		return st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
+	}
 	isKey, handled = st.processColonPair(rawToken, overrideSensitivity, sb, depth)
 	if handled {
 		return isKey
@@ -2781,8 +2842,14 @@ func (st *configState) isSensitiveKey(key string) bool {
 
 	k := strings.ToLower(key)
 
-	// Check substring matching (backward compatible)
-	for _, sk := range st.config.SensitiveKeys {
+	// Check substring matching (backward compatible). A non-ASCII entry
+	// (密码, パスワード) cannot be inside an ASCII key, so an ASCII key is
+	// checked against the ASCII entries only (see asciiSensitiveKeys).
+	keys := st.config.SensitiveKeys
+	if !hasNonASCII(k) {
+		keys = st.asciiSensitiveKeys
+	}
+	for _, sk := range keys {
 		if strings.Contains(k, sk) {
 			// Fast reject for 'public_key' or 'pubkey' or 'pub_key'
 			if strings.Contains(k, "pub") && strings.Contains(k, "key") {
@@ -4208,7 +4275,10 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// after a separator ("password: swordfish", "password=swordfish"), which
 	// is not prose. The cost is a dictionary-word password written bare
 	// after the word "password", which KNOWN_LIMITATIONS already gives up.
-	if forced && !state.isInValuePos && isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0 {
+	if forced && !state.isInValuePos && isAllLetters(cleanToken) && (st.calculateBigramAdjustment(lowerClean) < 0 || !hasASCII(cleanToken)) {
+		// A word with no ASCII in it at all (密码错误 请重试, "wrong
+		// password, retry") cannot be judged by the English table and is a
+		// word; a secret has ASCII in it.
 		forced = false
 	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
@@ -4373,7 +4443,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	// Fix: Detect separators attached to end of token (e.g. "key":)
 	// This ensures the NEXT token is treated as a value.
-	hasSuffixSep := strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")
+	hasSuffixSep := strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=") || strings.HasSuffix(trimmed, fullWidthColon)
 
 	if trimmed == ":" || trimmed == "=" || hasSuffixSep {
 		state.isInValuePos = true
