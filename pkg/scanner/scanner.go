@@ -77,8 +77,8 @@ var (
 
 	logTable [256]float64
 
-	// sepTable marks scanSegment's separator set " \t,;[]{}()<>"; all
-	// separators are ASCII, so runes >= utf8.RuneSelf are never separators.
+	// sepTable marks scanSegment's ASCII separator set " \t,;[]{}()<>"; the
+	// CJK and full-width brackets are checked in isSepRune.
 	sepTable [utf8.RuneSelf]bool
 
 	bufferPool = sync.Pool{
@@ -142,10 +142,22 @@ func init() {
 	}
 }
 
-// isSepRune reports whether r is one of scanSegment's token separators,
-// equivalent to strings.ContainsRune(" \t,;[]{}()<>", r).
+// isSepRune reports whether r is one of scanSegment's token separators:
+// " \t,;[]{}()<>", and the CJK and full-width brackets that Chinese and
+// Japanese logs use the same way (【acct_1】, 「user」, （id）). Without them
+// a label in such brackets was one token with the brackets in it, and the
+// three-byte brackets lifted a plain id like acct_1 over the threshold, so
+// the account label at the start of every line was hidden.
 func isSepRune(r rune) bool {
-	return r >= 0 && r < utf8.RuneSelf && sepTable[r]
+	if r < utf8.RuneSelf {
+		return r >= 0 && sepTable[r]
+	}
+	switch r {
+	case '【', '】', '「', '」', '『', '』', '〔', '〕', '〈', '〉', '《', '》', '〖', '〗',
+		'（', '）', '［', '］', '｛', '｝':
+		return true
+	}
+	return false
 }
 
 // isAllLetters reports whether s is non-empty and made of letters only.
