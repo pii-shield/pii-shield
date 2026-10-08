@@ -4024,6 +4024,10 @@ type segmentState struct {
 	pendingAfterCopula bool
 	// True if the previous token was a strong secret word (password, token).
 	prevStrongSecretWord bool
+	// The previous token without quotes, when it had no separator of its
+	// own: a lone "=" or ":" may follow, and then it is read as a key
+	// ("api_key = x").
+	prevClean string
 
 	// True right after an existing [HIDDEN…] marker (see scanSegment).
 	afterMarker bool
@@ -4237,7 +4241,18 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			forced = true
 		}
 	}
-	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=")
+	// A lone "=" or ":" after any sensitive key carries the force the same
+	// way: "api_key = <value>", "client_secret = <value>" and "key =
+	// <base64>" went by score alone, while "api_key=<value>" was hidden. The
+	// value still has to look like a secret (see above), so "key = value",
+	// "api_key = api_key if api_key is not None" and "the key = 3" keep
+	// their words. The key is taken wherever it stands, since after a
+	// prefix ("Header: api_key = x") it is in value position and is not
+	// reported as a key.
+	// The key check runs only on a lone separator: on every token it cost
+	// 30% of throughput and four allocations.
+	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=") ||
+		(trimmed == "=" || trimmed == ":") && state.prevClean != "" && st.isSensitiveKey(state.prevClean)
 	// {"name": "password", "value": …} makes the value sensitive, but only the
 	// pair that carries it: a "value" or "data" key, or a name that ends in
 	// the word value (see isGenericValueKey), which spends the flag.
@@ -4357,6 +4372,11 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
+	if strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=") {
+		state.prevClean = ""
+	} else {
+		state.prevClean = cleanToken
+	}
 
 	if k, isPair := pairKey(trimmed); isPair && (strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")) {
 		state.pendingHashKey = isHashKeyName(k) && !st.isSensitiveKey(k)
