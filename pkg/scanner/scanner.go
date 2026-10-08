@@ -1803,6 +1803,38 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	}
 
 	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
+		// A quoted phrase with a URL in it ("curl -H 'Authorization: Bearer
+		// <key>' https://api/x" as a JSON value, msg="fetched https://... with
+		// <key>") is text, not a URL: a URL has no spaces. It went to the URL
+		// handling whole, which only looks at the query and the password, so
+		// every other word passed unscored. Scan the content word by word
+		// instead; the URL in it is then a token of its own and still reaches
+		// this branch. A value under a sensitive key is hidden whole further
+		// down, as before.
+		if isQuotedPhrase(rawToken) {
+			if forcedSensitive {
+				st.processSingleToken(trimQuotes(rawToken), rawToken, true, contextSensitive, isValuePos, sb)
+				return false
+			}
+			sb.WriteByte(rawToken[0])
+			st.scanSegment(rawToken[1:len(rawToken)-1], sb, depth+1)
+			sb.WriteByte(rawToken[0])
+			return false
+		}
+		// The same phrase as the value of a pair is one token with its key:
+		// compact JSON ("command":"curl ... https://...") or logfmt
+		// (msg="fetched https://... with <key>"). Split the key off, so the
+		// value reaches the check above, under its key's sensitivity.
+		if k, _, ok := splitCompactPair(rawToken); ok && isQuotedPhrase(rawToken[len(k)+3:]) {
+			sb.WriteString(rawToken[:len(k)+3])
+			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, false, sb, depth+1)
+			return false
+		}
+		if eq := strings.IndexByte(rawToken, '='); eq > 0 && !strings.ContainsAny(rawToken[:eq], "\"' :/?&") && isQuotedPhrase(rawToken[eq+1:]) {
+			sb.WriteString(rawToken[:eq+1])
+			st.processTokenLogic(rawToken[eq+1:], st.isSensitiveKey(rawToken[:eq]) || overrideSensitivity, false, true, false, sb, depth+1)
+			return false
+		}
 		st.maskURLParameters(rawToken, sb, depth)
 		return false
 	}
@@ -2072,6 +2104,30 @@ func isBalancedQuoted(s string) bool {
 		return false
 	}
 	return (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0]
+}
+
+// isQuotedPhrase reports whether s is one quoted string with a space or a tab
+// inside and no other quote of its own kind, the shape of a sentence or a
+// shell command held in a JSON value or a logfmt msg="...".
+func isQuotedPhrase(s string) bool {
+	if !isBalancedQuoted(s) {
+		return false
+	}
+	inner := s[1 : len(s)-1]
+	return strings.ContainsAny(inner, " \t") && strings.IndexByte(inner, s[0]) < 0 && !startsWithProductToken(inner)
+}
+
+// startsWithProductToken reports whether s opens with a product/version token
+// (Mozilla/5.0, AhrefsBot/6.1, curl/8.4.0), the shape of a User-Agent. A
+// quoted User-Agent with a bot's URL in it stays with the URL handling, which
+// leaves it as it is: scanned word by word, the bot names and versions in it
+// (AhrefsBot/6.1;, MJ12bot/v1.4.8;) score as secrets.
+func startsWithProductToken(s string) bool {
+	i := 0
+	for i < len(s) && (isAlnumByte(s[i]) || s[i] == '.' || s[i] == '_' || s[i] == '-') {
+		i++
+	}
+	return i > 0 && i+1 < len(s) && s[i] == '/' && (s[i+1] >= '0' && s[i+1] <= '9' || s[i+1] == 'v')
 }
 
 func isRedacted(content string) bool {
