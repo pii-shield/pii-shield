@@ -79,3 +79,27 @@ func TestFileNameRuleDoesNotHideSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A token whose last part reads as an extension but whose other parts are
+// long random runs is not a file name: a Gigya login token
+// (st2.s.<34>.<80>.<50>.sc3) was passed whole by the file-name rule.
+func TestRandomPartIsNotFileName(t *testing.T) {
+	gigya := "st2.s.AcbHk3T9xQ2mLp7RzW4vN8yB6dF1gJ5sKe.Zt7Pq2Lm9Xv4Rk8Nw3Hy6Bd1Gf5Js0Ac-T_uE2oI7pY4rW9qZ3xV6nM8kL1hD5gF0sA2dQ7wE4rT9yU6iO3pL8kJ.Mn5Bv8Cx2Zl7Kj4Hg9Fd3Sa6Qw1Er0Ty5Ui8Op2As7Df4Gh9Jk3Lz.sc3"
+	if isFileName(gigya) {
+		t.Errorf("isFileName(gigya token) = true, want false")
+	}
+	for _, tok := range []string{
+		"main.3f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c.js",
+		"550e8400-e29b-41d4-a716-446655440000.png",
+		"AbstractSingletonProxyFactoryBean.java",
+		"src/components/UserProfileSettingsPanelView2.tsx",
+	} {
+		if !isFileName(tok) {
+			t.Errorf("isFileName(%q) = false, want true", tok)
+		}
+	}
+	s := newFileNameScanner(t)
+	if got := s.ScanAndRedact("Cookie: " + gigya); strings.Contains(got, "AcbHk3T9xQ2mLp7RzW4vN8yB6dF1gJ5sKe") {
+		t.Errorf("Gigya token survived: %q", got)
+	}
+}
