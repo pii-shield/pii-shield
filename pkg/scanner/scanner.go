@@ -3588,8 +3588,14 @@ func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <
 func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
 
 func isPath(token string) bool {
-	// Unix Paths
-	if strings.HasPrefix(token, "/") || strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") {
+	// Unix Paths. One segment after the slash (/tmp, /python3, /app.log) is
+	// a path only when it reads as a name: a base64 value starts with '/'
+	// about once in 64 (sgcookie: /BQtKx2y0rd...), and as a "path" it was
+	// never scored.
+	if strings.HasPrefix(token, "/") {
+		return strings.IndexByte(token[1:], '/') >= 0 || looksLikeFieldName(token[1:])
+	}
+	if strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") {
 		return true
 	}
 
