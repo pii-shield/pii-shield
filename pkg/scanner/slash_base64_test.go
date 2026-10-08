@@ -15,7 +15,7 @@ func TestSlashBase64NotAPath(t *testing.T) {
 			t.Errorf("ScanAndRedact(%q) = %q, want hidden", line, got)
 		}
 	}
-	for _, p := range []string{"/", "/tmp", "/python3", "/app.log", "/data-dir", "/wp-login.php", "/usr/local/bin/python3"} {
+	for _, p := range []string{"/", "/tmp", "/python3", "/app.log", "/data-dir", "/wp-login.php", "/usr/local/bin/python3", "./run.sh", "../x"} {
 		if !isPath(p) {
 			t.Errorf("isPath(%q) = false, want true", p)
 		}
