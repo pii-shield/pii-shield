@@ -1398,16 +1398,10 @@ type carve struct {
 // the shaped number wins. A phone is found only with a '+', NANP punctuation
 // or a phone key, and a 13-digit German number written +49... passes Luhn as
 // a 13-digit Visa once in ten: hidden either way, but the label was a lie.
-// The same goes for an identity number under its key.
+// The same goes for an identity number or a session id under its key.
 func mergeCarves(cards []Range, nums []shapedNumber) []carve {
 	if len(nums) == 0 && len(cards) == 0 {
 		return nil
-	}
-	label := func(sn shapedNumber) string {
-		if sn.id {
-			return "id-number"
-		}
-		return "phone"
 	}
 	out := make([]carve, 0, len(cards)+len(nums))
 	i, j := 0, 0
@@ -1417,10 +1411,10 @@ func mergeCarves(cards []Range, nums []shapedNumber) []carve {
 			out = append(out, carve{Range: cards[i]})
 			i++
 		case i >= len(cards):
-			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
+			out = append(out, carve{Range: nums[j].Range, label: nums[j].label})
 			j++
 		case nums[j].End <= cards[i].Start:
-			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
+			out = append(out, carve{Range: nums[j].Range, label: nums[j].label})
 			j++
 		case cards[i].End <= nums[j].Start:
 			out = append(out, carve{Range: cards[i]})
@@ -3059,6 +3053,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 					sb.WriteString(key)
 					sb.WriteByte('=')
 					st.redactWithHMAC(val, st.entityLabel("id-number"), "signature", sb)
+				} else if isSessionNumberValue(val) && isSessionKey(key) {
+					// ?JSESSIONID=8092026976377529079: a session id is a
+					// credential, and digits never reach the threshold.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
