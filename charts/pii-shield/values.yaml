@@ -91,10 +91,11 @@ piiConfig:
   minSecretLength: "6"
   
   # PII_SENSITIVE_KEYS: Comma-separated list of keys whose values are always
-  # redacted. Leave empty to keep the scanner's built-in 18-key default
+  # redacted. Leave empty to keep the scanner's built-in 23-key default
   # (password, secret, token, key, cvv, cvc, auth, sign, api_key, apikey,
   # access_token, client_secret, aws_access_key_id, aws_secret_access_key,
-  # gcp_credentials, slack_token, ...). Setting this REPLACES that default list
+  # gcp_credentials, slack_token, the Chinese and Japanese words for
+  # password, passphrase, secret key and token, ...). Setting this REPLACES that default list
   # rather than extending it, so include every key you want redacted.
   sensitiveKeys: ""
   
