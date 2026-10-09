@@ -1689,7 +1689,9 @@ func isBareAssignment(tok string) bool {
 // forcedSensitive: if true, treat this token as a Value that MUST be protected (skips MinLength).
 // contextSensitive: if true, reduce entropy threshold (Context Aware).
 // isValuePos: if true, this token MUST be a value (skiye key checks).
-func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, contextSensitive bool, isValuePos bool, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool) {
+// autoQuote says the value belongs to a quoted key, so a hidden bare number
+// or literal is written in quotes to keep the JSON valid; see processAndAppend.
+func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, contextSensitive bool, isValuePos bool, autoQuote bool, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool) {
 	// Recursion bound: past the limit, score the remainder as one opaque
 	// token instead of descending further (see maxTokenRecursionDepth).
 	if depth > maxTokenRecursionDepth {
@@ -1803,7 +1805,7 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		if k, v, ok := splitCompactPair(rawToken); ok && hasChainBoundary(v) {
 			sb.WriteString(rawToken[:len(k)+2])
 			sb.WriteByte(':')
-			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, false, sb, depth+1)
+			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, true, false, sb, depth+1)
 			return false
 		}
 	}
@@ -1833,12 +1835,12 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		// value reaches the check above, under its key's sensitivity.
 		if k, _, ok := splitCompactPair(rawToken); ok && isQuotedPhrase(rawToken[len(k)+3:]) {
 			sb.WriteString(rawToken[:len(k)+3])
-			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, false, sb, depth+1)
+			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, true, false, sb, depth+1)
 			return false
 		}
 		if eq := strings.IndexByte(rawToken, '='); eq > 0 && !strings.ContainsAny(rawToken[:eq], "\"' :/?&") && isQuotedPhrase(rawToken[eq+1:]) {
 			sb.WriteString(rawToken[:eq+1])
-			st.processTokenLogic(rawToken[eq+1:], st.isSensitiveKey(rawToken[:eq]) || overrideSensitivity, false, true, false, sb, depth+1)
+			st.processTokenLogic(rawToken[eq+1:], st.isSensitiveKey(rawToken[:eq]) || overrideSensitivity, false, true, false, false, sb, depth+1)
 			return false
 		}
 		st.maskURLParameters(rawToken, sb, depth)
@@ -1940,10 +1942,11 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	}
 
 	// Not a key. Process as value. A hidden bare number or literal is quoted
-	// only in value position, where it keeps a JSON value valid ({"pin":
-	// 123456} -> {"pin": "[HIDDEN:x]"}); in prose ("password 123456") the
-	// quotes would be text that was never there.
-	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, isValuePos, sb)
+	// only as the value of a quoted key, where it keeps a JSON value valid
+	// ({"pin": 123456} -> {"pin": "[HIDDEN:x]"}); after a bare key (token:
+	// 123456, a Python log line) and in prose ("password 123456") the quotes
+	// would be text that was never there.
+	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, autoQuote, sb)
 	return false
 }
 
@@ -2500,7 +2503,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 					// Pass overrideSensitivity (likely false here).
 					// Depth-bounded: processTokenLogic stops descending past
 					// maxTokenRecursionDepth.
-					st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
+					st.processTokenLogic(val, false, false, false, false, overrideSensitivity, sb, depth+1)
 				} else {
 					// Recursive scan for non-sensitive keys (e.g. "data=key=val")
 					st.scanLine(val, sb, depth+1)
@@ -2523,7 +2526,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 
 		if containsSep := strings.Contains(val, "=") || strings.Contains(val, ":"); containsSep && !keySensitive {
 			// Recursive handling for "data=key=val" where "data" is safe.
-			st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
+			st.processTokenLogic(val, false, false, false, false, overrideSensitivity, sb, depth+1)
 		} else if isBalancedQuoted(val) || isBytesLiteral(val) {
 			// A quoted value keeps its inner spaces, so processSingleToken's
 			// space heuristic would wave the whole blob through and a secret
@@ -2532,7 +2535,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 			// uses, which unwraps the quotes and scores each word on its own
 			// (B15; B9 fixed only the colon path). A bytes literal
 			// (password=b'...') goes the same way, so its b'' stays.
-			st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
+			st.processTokenLogic(val, keySensitive, false, true, false, false, sb, depth+1)
 		} else {
 			st.processSingleToken(val, val, keySensitive, false, false, sb)
 		}
@@ -2785,7 +2788,7 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 		// compact JSON with no space after ':') must be unwrapped and
 		// re-tokenized so an embedded secret is scored on its own, the same way
 		// it already is when whitespace follows the colon (B9).
-		inner := st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
+		inner := st.processTokenLogic(val, keySensitive, false, true, keyRaw != "" && (keyRaw[0] == '"' || keyRaw[0] == '\''), false, sb, depth+1)
 
 		// The value was consumed right here, so the pair is complete and the
 		// next token is not its value. Reporting this key would force-redact that
@@ -4046,6 +4049,8 @@ type segmentState struct {
 	pendingKeySensitive     bool
 	pendingContextSensitive bool // NEW: For "Error: secret"
 	isInValuePos            bool // Tracks if we are physically after a ':' or '=' separator
+	valueOfQuotedKey        bool // The key before the separator was quoted (JSON), so a hidden bare value is quoted too
+	lastTokenQuoted         bool // The previous token started with a quote
 
 	// Generic KV Support
 	pendingGenericKey    bool // True if last key was "key", "name"
@@ -4364,7 +4369,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		if contextSensitive && state.bracketAfterContext && st.readsAsWords(cleanToken) {
 			contextSensitive = false
 		}
-		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos, override, sb, depth)
+		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos, state.isInValuePos && state.valueOfQuotedKey, override, sb, depth)
 	}
 	state.bracketAfterContext = false
 	// sb is updated inside processTokenLogic
@@ -4457,10 +4462,15 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// This ensures the NEXT token is treated as a value.
 	hasSuffixSep := strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")
 
-	if trimmed == ":" || trimmed == "=" || hasSuffixSep {
+	if trimmed == ":" || trimmed == "=" {
 		state.isInValuePos = true
+		state.valueOfQuotedKey = state.lastTokenQuoted
+	} else if hasSuffixSep {
+		state.isInValuePos = true
+		state.valueOfQuotedKey = trimmed[0] == '"' || trimmed[0] == '\''
 	} else if trimmed != "" {
 		// Reset if it was a normal token (key or value)
 		state.isInValuePos = false
 	}
+	state.lastTokenQuoted = trimmed != "" && (trimmed[0] == '"' || trimmed[0] == '\'')
 }
