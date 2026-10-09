@@ -29,18 +29,20 @@ import "strings"
 func FindPhoneSequences(line string) []Range {
 	var ranges []Range
 	for _, sn := range findShapedNumbers(line) {
-		if !sn.id {
+		if sn.label == "phone" {
 			ranges = append(ranges, sn.Range)
 		}
 	}
 	return ranges
 }
 
-// shapedNumber is a digit run hidden by its shape or its key: a telephone
-// number, or an identity document number when id is set (see idnumber.go).
+// shapedNumber is a digit run hidden by its shape or its key, with the label
+// its marker carries: a telephone number ("phone"), an identity document
+// number ("id-number", see idnumber.go) or a session id under a cookie or
+// session key ("key", see session.go).
 type shapedNumber struct {
 	Range
-	id bool
+	label string
 }
 
 // findShapedNumbers returns the telephone numbers (see FindPhoneSequences)
@@ -67,7 +69,7 @@ func findShapedNumbers(line string) []shapedNumber {
 			i = skipPhoneRun(line, i)
 			continue
 		}
-		end, id := 0, false
+		end, label := 0, "phone"
 		switch c {
 		case '+':
 			end = matchInternationalPhone(line, i)
@@ -76,11 +78,11 @@ func findShapedNumbers(line string) []shapedNumber {
 		default:
 			end = matchNANPPhone(line, i)
 			if end == 0 {
-				end, id = matchKeyedNumber(line, i)
+				end, label = matchKeyedNumber(line, i)
 			}
 		}
 		if end > 0 && !phoneGluedAfter(line, end) && !insideURL(line, i) {
-			ranges = append(ranges, shapedNumber{Range: Range{Start: i, End: end}, id: id})
+			ranges = append(ranges, shapedNumber{Range: Range{Start: i, End: end}, label: label})
 			i = end
 			continue
 		}
@@ -357,25 +359,27 @@ func digitGroup(line string, j, k int) bool {
 }
 
 // matchKeyedNumber matches the digits at line[i:] as the value of a key that
-// names a phone or an identity document: <key><sep><value> where <sep> is ':'
-// or '=' with optional spaces and quotes around it. It returns the end index,
-// or 0, and whether the key names an identity document.
-func matchKeyedNumber(line string, i int) (end int, id bool) {
+// names a phone, an identity document or a session: <key><sep><value> where
+// <sep> is ':' or '=' with optional spaces and quotes around it. It returns
+// the end index, or 0, and the label of the marker.
+func matchKeyedNumber(line string, i int) (end int, label string) {
 	key := phoneKeyBefore(line, i)
 	if key == "" {
-		return 0, false
+		return 0, ""
 	}
 	var words [maxKeyWords]string
 	n := splitKeyWords(key, &words)
 	switch {
 	case n == 0:
-		return 0, false
+		return 0, ""
 	case isPhoneKeyWords(words[:n]):
-		return matchKeyedPhone(line, i), false
+		return matchKeyedPhone(line, i), "phone"
 	case isIDKeyWords(words[:n]):
-		return matchKeyedIDNumber(line, i), true
+		return matchKeyedIDNumber(line, i), "id-number"
+	case isSessionKeyWords(words[:n]):
+		return matchSessionNumber(line, i), "key"
 	}
-	return 0, false
+	return 0, ""
 }
 
 // matchKeyedPhone matches 7-15 digits at line[i:], compact or in groups
