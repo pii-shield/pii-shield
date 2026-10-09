@@ -77,8 +77,8 @@ var (
 
 	logTable [256]float64
 
-	// sepTable marks scanSegment's separator set " \t,;[]{}()<>"; all
-	// separators are ASCII, so runes >= utf8.RuneSelf are never separators.
+	// sepTable marks scanSegment's ASCII separator set " \t,;[]{}()<>"; the
+	// CJK and full-width brackets are checked in isSepRune.
 	sepTable [utf8.RuneSelf]bool
 
 	bufferPool = sync.Pool{
@@ -142,10 +142,22 @@ func init() {
 	}
 }
 
-// isSepRune reports whether r is one of scanSegment's token separators,
-// equivalent to strings.ContainsRune(" \t,;[]{}()<>", r).
+// isSepRune reports whether r is one of scanSegment's token separators:
+// " \t,;[]{}()<>", and the CJK and full-width brackets that Chinese and
+// Japanese logs use the same way (【acct_1】, 「user」, （id）). Without them
+// a label in such brackets was one token with the brackets in it, and the
+// three-byte brackets lifted a plain id like acct_1 over the threshold, so
+// the account label at the start of every line was hidden.
 func isSepRune(r rune) bool {
-	return r >= 0 && r < utf8.RuneSelf && sepTable[r]
+	if r < utf8.RuneSelf {
+		return r >= 0 && sepTable[r]
+	}
+	switch r {
+	case '【', '】', '「', '」', '『', '』', '〔', '〕', '〈', '〉', '《', '》', '〖', '〗',
+		'（', '）', '［', '］', '｛', '｝':
+		return true
+	}
+	return false
 }
 
 // isAllLetters reports whether s is non-empty and made of letters only.
@@ -1677,7 +1689,9 @@ func isBareAssignment(tok string) bool {
 // forcedSensitive: if true, treat this token as a Value that MUST be protected (skips MinLength).
 // contextSensitive: if true, reduce entropy threshold (Context Aware).
 // isValuePos: if true, this token MUST be a value (skiye key checks).
-func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, contextSensitive bool, isValuePos bool, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool) {
+// autoQuote says the value belongs to a quoted key, so a hidden bare number
+// or literal is written in quotes to keep the JSON valid; see processAndAppend.
+func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, contextSensitive bool, isValuePos bool, autoQuote bool, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool) {
 	// Recursion bound: past the limit, score the remainder as one opaque
 	// token instead of descending further (see maxTokenRecursionDepth).
 	if depth > maxTokenRecursionDepth {
@@ -1791,7 +1805,7 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		if k, v, ok := splitCompactPair(rawToken); ok && hasChainBoundary(v) {
 			sb.WriteString(rawToken[:len(k)+2])
 			sb.WriteByte(':')
-			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, false, sb, depth+1)
+			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, true, false, sb, depth+1)
 			return false
 		}
 	}
@@ -1821,12 +1835,12 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		// value reaches the check above, under its key's sensitivity.
 		if k, _, ok := splitCompactPair(rawToken); ok && isQuotedPhrase(rawToken[len(k)+3:]) {
 			sb.WriteString(rawToken[:len(k)+3])
-			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, false, sb, depth+1)
+			st.processTokenLogic(rawToken[len(k)+3:], st.isSensitiveKey(k) || overrideSensitivity, false, true, true, false, sb, depth+1)
 			return false
 		}
 		if eq := strings.IndexByte(rawToken, '='); eq > 0 && !strings.ContainsAny(rawToken[:eq], "\"' :/?&") && isQuotedPhrase(rawToken[eq+1:]) {
 			sb.WriteString(rawToken[:eq+1])
-			st.processTokenLogic(rawToken[eq+1:], st.isSensitiveKey(rawToken[:eq]) || overrideSensitivity, false, true, false, sb, depth+1)
+			st.processTokenLogic(rawToken[eq+1:], st.isSensitiveKey(rawToken[:eq]) || overrideSensitivity, false, true, false, false, sb, depth+1)
 			return false
 		}
 		st.maskURLParameters(rawToken, sb, depth)
@@ -1928,10 +1942,11 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	}
 
 	// Not a key. Process as value. A hidden bare number or literal is quoted
-	// only in value position, where it keeps a JSON value valid ({"pin":
-	// 123456} -> {"pin": "[HIDDEN:x]"}); in prose ("password 123456") the
-	// quotes would be text that was never there.
-	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, isValuePos, sb)
+	// only as the value of a quoted key, where it keeps a JSON value valid
+	// ({"pin": 123456} -> {"pin": "[HIDDEN:x]"}); after a bare key (token:
+	// 123456, a Python log line) and in prose ("password 123456") the quotes
+	// would be text that was never there.
+	st.processSingleToken(trimmed, rawToken, forcedSensitive, contextSensitive, autoQuote, sb)
 	return false
 }
 
@@ -1999,6 +2014,31 @@ func isBase64Body(s string) bool {
 	}
 	return s != ""
 }
+
+// isElidedBase64 reports whether s is a padded base64 value shortened with
+// three dots in the middle, the way code prints a secret it means to hide
+// (Python value[:30] + "..." + value[-20:]): a base64 head and tail of at
+// least minElidedPart characters each, and one or two '=' of padding. The
+// padding is not a key/value separator here either: split on it, the head
+// and tail went out as a dotted "key", which is never scored, and the first
+// thirty characters of a cookie stayed readable in 40 of 40 runs.
+func isElidedBase64(s string) bool {
+	if !strings.HasSuffix(s, "=") {
+		return false
+	}
+	body := strings.TrimRight(s, "=")
+	if len(s)-len(body) > 2 {
+		return false
+	}
+	head, tail, ok := strings.Cut(body, "...")
+	return ok && len(head) >= minElidedPart && len(tail) >= minElidedPart &&
+		isBase64Body(head) && isBase64Body(tail)
+}
+
+// minElidedPart is the shortest head or tail isElidedBase64 accepts; a
+// shorter one shows too little to be worth hiding, and "loading...done="
+// is text.
+const minElidedPart = 8
 
 func isPaddedBase64Blob(s string) bool {
 	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
@@ -2385,7 +2425,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	}
 	// Base64 padding is not a key/value separator — let the token through to
 	// single-token scoring, which is where the base64 rule lives.
-	if isPaddedBase64Blob(rawToken) {
+	if isPaddedBase64Blob(rawToken) || isElidedBase64(rawToken) {
 		return false, false
 	}
 	// The caller already knows this token is a secret (it sat under a
@@ -2409,7 +2449,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		// Same guard as the one on the raw token, applied to the quoted content:
 		// base64 padding is not a separator, and re-parsing on it hands the
 		// body back as an unscored "key".
-		if isPaddedBase64Blob(trimmed) {
+		if isPaddedBase64Blob(trimmed) || isElidedBase64(trimmed) {
 			sb.WriteString(quote)
 			st.processSingleToken(trimmed, trimmed, forcedSensitive, false, false, sb)
 			sb.WriteString(quote)
@@ -2463,7 +2503,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 					// Pass overrideSensitivity (likely false here).
 					// Depth-bounded: processTokenLogic stops descending past
 					// maxTokenRecursionDepth.
-					st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
+					st.processTokenLogic(val, false, false, false, false, overrideSensitivity, sb, depth+1)
 				} else {
 					// Recursive scan for non-sensitive keys (e.g. "data=key=val")
 					st.scanLine(val, sb, depth+1)
@@ -2486,7 +2526,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 
 		if containsSep := strings.Contains(val, "=") || strings.Contains(val, ":"); containsSep && !keySensitive {
 			// Recursive handling for "data=key=val" where "data" is safe.
-			st.processTokenLogic(val, false, false, false, overrideSensitivity, sb, depth+1)
+			st.processTokenLogic(val, false, false, false, false, overrideSensitivity, sb, depth+1)
 		} else if isBalancedQuoted(val) || isBytesLiteral(val) {
 			// A quoted value keeps its inner spaces, so processSingleToken's
 			// space heuristic would wave the whole blob through and a secret
@@ -2495,7 +2535,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 			// uses, which unwraps the quotes and scores each word on its own
 			// (B15; B9 fixed only the colon path). A bytes literal
 			// (password=b'...') goes the same way, so its b'' stays.
-			st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
+			st.processTokenLogic(val, keySensitive, false, true, false, false, sb, depth+1)
 		} else {
 			st.processSingleToken(val, val, keySensitive, false, false, sb)
 		}
@@ -2748,7 +2788,7 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 		// compact JSON with no space after ':') must be unwrapped and
 		// re-tokenized so an embedded secret is scored on its own, the same way
 		// it already is when whitespace follows the colon (B9).
-		inner := st.processTokenLogic(val, keySensitive, false, true, false, sb, depth+1)
+		inner := st.processTokenLogic(val, keySensitive, false, true, keyRaw != "" && (keyRaw[0] == '"' || keyRaw[0] == '\''), false, sb, depth+1)
 
 		// The value was consumed right here, so the pair is complete and the
 		// next token is not its value. Reporting this key would force-redact that
@@ -3588,8 +3628,14 @@ func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <
 func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
 
 func isPath(token string) bool {
-	// Unix Paths
-	if strings.HasPrefix(token, "/") || strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") {
+	// Unix Paths. One segment after the slash (/tmp, /python3, /app.log) is
+	// a path only when it reads as a name: a base64 value starts with '/'
+	// about once in 64 (sgcookie: /BQtKx2y0rd...), and as a "path" it was
+	// never scored.
+	if strings.HasPrefix(token, "/") {
+		return strings.IndexByte(token[1:], '/') >= 0 || looksLikeFieldName(token[1:])
+	}
+	if strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") {
 		return true
 	}
 
@@ -4009,6 +4055,8 @@ type segmentState struct {
 	pendingKeySensitive     bool
 	pendingContextSensitive bool // NEW: For "Error: secret"
 	isInValuePos            bool // Tracks if we are physically after a ':' or '=' separator
+	valueOfQuotedKey        bool // The key before the separator was quoted (JSON), so a hidden bare value is quoted too
+	lastTokenQuoted         bool // The previous token started with a quote
 
 	// Generic KV Support
 	pendingGenericKey    bool // True if last key was "key", "name"
@@ -4016,6 +4064,10 @@ type segmentState struct {
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
+	// True if the previous token was a lone "=" or ":" right after a
+	// sensitive key: the auth scheme may still follow ("Authorization = Basic").
+	sepAfterSensitiveKey bool
+	prevClean            string // the previous token without quotes and a trailing separator
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
 
@@ -4163,6 +4215,32 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	cleanToken = trimQuotes(cleanToken)
 	lowerClean := strings.ToLower(cleanToken)
 
+	// "Authorization=Basic <base64>" in one token (a Java Map printed with
+	// toString, logfmt): the pair's value is the scheme, and the forced
+	// value was the word Basic while the credential after it passed. Keep
+	// the scheme word and force the credential, as after "Authorization:
+	// Basic".
+	// The last letter is checked first, as this runs on every token.
+	if n := len(trimmed); n > 0 && (trimmed[n-1]|0x20 == 'c' || trimmed[n-1]|0x20 == 'r') {
+		if k, v, ok := strings.Cut(trimmed, "="); ok && k != "" &&
+			(strings.EqualFold(v, "basic") || strings.EqualFold(v, "bearer")) && st.isSensitiveKey(trimQuotes(k)) {
+			sb.WriteString(token)
+			state.pendingKeySensitive = false
+			state.pendingContextSensitive = false
+			state.pendingAfterCopula = false
+			state.prevStrongSecretWord = false
+			state.pendingHashKey = false
+			state.bracketAfterContext = false
+			state.afterMarker = false
+			state.isInValuePos = false
+			state.pendingBearer = strings.EqualFold(v, "bearer")
+			state.pendingBasic = strings.EqualFold(v, "basic")
+			state.sepAfterSensitiveKey = false
+			state.prevClean = ""
+			return
+		}
+	}
+
 	// Check if this token is a "Generic Key" identifier (e.g. "key", "name")
 	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
 
@@ -4178,6 +4256,19 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// Whether this token sits in the forced slot after a key, before the
 	// rules below give the slot up: an auth scheme word is recognised there.
 	afterSensitiveKey := forced
+	// "Authorization = Basic <base64>": the separator standing alone spent
+	// the key's forced slot, so the scheme word after it was not recognised
+	// and the credential was left to its score (8 of 150 random Basic values
+	// passed whole, and the padding of most others was cut off the marker).
+	// The scheme slot survives the separator; the force on an ordinary value
+	// does not ("password = password" in code stays, see the copula rule).
+	// The key may also arrive in value position, where it is not reported as
+	// a key ("Header: Authorization = Basic ..."): the lone separator after a
+	// sensitive word opens the slot the same way.
+	schemeSlot := afterSensitiveKey || state.sepAfterSensitiveKey
+	state.sepAfterSensitiveKey = (trimmed == "=" || trimmed == ":") &&
+		(forced || (state.prevClean != "" && st.isSensitiveKey(state.prevClean)))
+	state.prevClean = cleanToken
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
 	// forced path skips MinSecretLength — so two-letter words got redacted
@@ -4223,7 +4314,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// hidden by their score, "lena:jr0XQgUiZRF3" encoded was not). It is
 	// hidden whatever its score, as long as it has the base64 shape; a
 	// realm="..." after WWW-Authenticate: Basic has not.
-	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 {
+	// A word that reads as English is not one ("auth = basic support").
+	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
+		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0) {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -4297,7 +4390,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		if contextSensitive && state.bracketAfterContext && st.readsAsWords(cleanToken) {
 			contextSensitive = false
 		}
-		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos, override, sb, depth)
+		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos, state.isInValuePos && state.valueOfQuotedKey, override, sb, depth)
 	}
 	state.bracketAfterContext = false
 	// sb is updated inside processTokenLogic
@@ -4369,7 +4462,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// value slot of an authorization key ("Authorization: Basic",
 	// "Proxy-Authorization: Basic"), so prose such as "basic
 	// internationalization support" keeps its next word.
-	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
+	state.pendingBasic = lowerClean == "basic" && schemeSlot
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 	if strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=") {
@@ -4395,10 +4488,15 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// This ensures the NEXT token is treated as a value.
 	hasSuffixSep := strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")
 
-	if trimmed == ":" || trimmed == "=" || hasSuffixSep {
+	if trimmed == ":" || trimmed == "=" {
 		state.isInValuePos = true
+		state.valueOfQuotedKey = state.lastTokenQuoted
+	} else if hasSuffixSep {
+		state.isInValuePos = true
+		state.valueOfQuotedKey = trimmed[0] == '"' || trimmed[0] == '\''
 	} else if trimmed != "" {
 		// Reset if it was a normal token (key or value)
 		state.isInValuePos = false
 	}
+	state.lastTokenQuoted = trimmed != "" && (trimmed[0] == '"' || trimmed[0] == '\'')
 }

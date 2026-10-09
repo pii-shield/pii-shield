@@ -51,9 +51,9 @@ func TestScanner_CustomRegexRedaction(t *testing.T) {
 			name:        "Short rule fires on a short token",
 			regexConfig: `[{"pattern": "^[0-9]{4}$", "name": "PIN"}]`,
 			input:       "Code: 1234",
-			// After "Code:" the number is in value position, so it is quoted
-			// the way a hidden JSON number is.
-			expectedOutput: `^Code: "\[HIDDEN:PIN:[a-f0-9]{6}\]"$`,
+			// "Code:" is a bare key, not a JSON one, so the marker is not
+			// quoted: the quotes would be text that was never there.
+			expectedOutput: `^Code: \[HIDDEN:PIN:[a-f0-9]{6}\]$`,
 		},
 		{
 			name:           "Short rule leaves a token it does not match",

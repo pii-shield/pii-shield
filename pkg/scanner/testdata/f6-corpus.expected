@@ -43,7 +43,7 @@ secret	human-password	09-12	27	17	16
 secret	human-password	13-16	1	1	0
 secret	human-password	25-40	1	0	0
 secret	random-base64	06-08	40	16	14
-secret	random-base64	09-12	40	37	32
+secret	random-base64	09-12	40	39	34
 secret	random-base64	13-16	40	39	37
 secret	random-base64	17-24	40	39	39
 secret	random-base64	25-40	40	40	40
