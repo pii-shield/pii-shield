@@ -2000,6 +2000,31 @@ func isBase64Body(s string) bool {
 	return s != ""
 }
 
+// isElidedBase64 reports whether s is a padded base64 value shortened with
+// three dots in the middle, the way code prints a secret it means to hide
+// (Python value[:30] + "..." + value[-20:]): a base64 head and tail of at
+// least minElidedPart characters each, and one or two '=' of padding. The
+// padding is not a key/value separator here either: split on it, the head
+// and tail went out as a dotted "key", which is never scored, and the first
+// thirty characters of a cookie stayed readable in 40 of 40 runs.
+func isElidedBase64(s string) bool {
+	if !strings.HasSuffix(s, "=") {
+		return false
+	}
+	body := strings.TrimRight(s, "=")
+	if len(s)-len(body) > 2 {
+		return false
+	}
+	head, tail, ok := strings.Cut(body, "...")
+	return ok && len(head) >= minElidedPart && len(tail) >= minElidedPart &&
+		isBase64Body(head) && isBase64Body(tail)
+}
+
+// minElidedPart is the shortest head or tail isElidedBase64 accepts; a
+// shorter one shows too little to be worth hiding, and "loading...done="
+// is text.
+const minElidedPart = 8
+
 func isPaddedBase64Blob(s string) bool {
 	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
 		return false
@@ -2385,7 +2410,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	}
 	// Base64 padding is not a key/value separator — let the token through to
 	// single-token scoring, which is where the base64 rule lives.
-	if isPaddedBase64Blob(rawToken) {
+	if isPaddedBase64Blob(rawToken) || isElidedBase64(rawToken) {
 		return false, false
 	}
 	// The caller already knows this token is a secret (it sat under a
@@ -2409,7 +2434,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		// Same guard as the one on the raw token, applied to the quoted content:
 		// base64 padding is not a separator, and re-parsing on it hands the
 		// body back as an unscored "key".
-		if isPaddedBase64Blob(trimmed) {
+		if isPaddedBase64Blob(trimmed) || isElidedBase64(trimmed) {
 			sb.WriteString(quote)
 			st.processSingleToken(trimmed, trimmed, forcedSensitive, false, false, sb)
 			sb.WriteString(quote)
