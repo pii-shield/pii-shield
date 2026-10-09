@@ -4262,8 +4262,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// a key ("Header: Authorization = Basic ..."): the lone separator after a
 	// sensitive word opens the slot the same way.
 	schemeSlot := afterSensitiveKey || state.sepAfterSensitiveKey
+	prevClean := state.prevClean
 	state.sepAfterSensitiveKey = (trimmed == "=" || trimmed == ":") &&
-		(forced || (state.prevClean != "" && st.isSensitiveKey(state.prevClean)))
+		(forced || (prevClean != "" && st.isSensitiveKey(prevClean)))
 	state.prevClean = cleanToken
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
@@ -4330,7 +4331,18 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			forced = true
 		}
 	}
-	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=")
+	// A lone "=" or ":" after any sensitive key carries the force the same
+	// way: "api_key = <value>", "client_secret = <value>" and "key =
+	// <base64>" went by score alone, while "api_key=<value>" was hidden. The
+	// value still has to look like a secret (see above), so "key = value",
+	// "api_key = api_key if api_key is not None" and "the key = 3" keep
+	// their words. The key is taken wherever it stands, since after a
+	// prefix ("Header: api_key = x") it is in value position and is not
+	// reported as a key.
+	// The key check runs only on a lone separator: on every token it cost
+	// 30% of throughput and four allocations.
+	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=") ||
+		(trimmed == "=" || trimmed == ":") && prevClean != "" && st.isSensitiveKey(prevClean)
 	// {"name": "password", "value": …} makes the value sensitive, but only the
 	// pair that carries it: a "value" or "data" key, or a name that ends in
 	// the word value (see isGenericValueKey), which spends the flag.
