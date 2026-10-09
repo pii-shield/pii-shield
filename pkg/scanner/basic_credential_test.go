@@ -117,3 +117,42 @@ func TestCompactJSONPairWithEqualsInValue(t *testing.T) {
 		t.Errorf("phrase scan regressed:\n in: %s\nout: %s", in, out)
 	}
 }
+
+// TestBasicCredentialAfterSpacedSeparator: "Authorization = Basic <base64>"
+// (a header logger that writes name = value) and "Authorization=Basic
+// <base64>" (a Java Map printed with toString) hide the whole credential,
+// padding included; the scheme word stays. An English word after the scheme
+// is not a credential.
+func TestBasicCredentialAfterSpacedSeparator(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	const short = "bGVuYTpoNllvNGdmcQ==" // lena:h6Yo4gfq, passed whole on main
+	for _, in := range []string{
+		"Header: Authorization = Basic " + short,
+		"Authorization = Basic " + short,
+		"Proxy-Authorization = Basic " + basicLowScore,
+		"Authorization : Basic " + short,
+		"Authorization=Basic " + short,
+		"headers={Authorization=Basic " + short + ", Accept=*/*}",
+		"Authorization=Bearer abcdefghijklmnopqrstuv12",
+	} {
+		out := ScanAndRedact(in)
+		if strings.Contains(out, "bGVuYTpoNllvNGdmcQ") || strings.Contains(out, "bGVuYTpqcjBYUWdVaVpSRjM") ||
+			strings.Contains(out, "abcdefghijklmnopqrstuv12") || strings.Contains(out, "]=") ||
+			(!strings.Contains(out, "Basic [HIDDEN") && !strings.Contains(out, "Bearer [HIDDEN")) {
+			t.Errorf("ScanAndRedact(%q) = %q, want the scheme kept and the whole credential hidden", in, out)
+		}
+	}
+	for _, in := range []string{
+		"auth = basic support",
+		"Authorization: Basic support",
+		"mode = basic ok",
+		"password = password",
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("ScanAndRedact(%q) = %q, want unchanged", in, out)
+		}
+	}
+}

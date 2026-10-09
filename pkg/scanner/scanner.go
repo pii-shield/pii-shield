@@ -1410,16 +1410,10 @@ type carve struct {
 // the shaped number wins. A phone is found only with a '+', NANP punctuation
 // or a phone key, and a 13-digit German number written +49... passes Luhn as
 // a 13-digit Visa once in ten: hidden either way, but the label was a lie.
-// The same goes for an identity number under its key.
+// The same goes for an identity number or a session id under its key.
 func mergeCarves(cards []Range, nums []shapedNumber) []carve {
 	if len(nums) == 0 && len(cards) == 0 {
 		return nil
-	}
-	label := func(sn shapedNumber) string {
-		if sn.id {
-			return "id-number"
-		}
-		return "phone"
 	}
 	out := make([]carve, 0, len(cards)+len(nums))
 	i, j := 0, 0
@@ -1429,10 +1423,10 @@ func mergeCarves(cards []Range, nums []shapedNumber) []carve {
 			out = append(out, carve{Range: cards[i]})
 			i++
 		case i >= len(cards):
-			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
+			out = append(out, carve{Range: nums[j].Range, label: nums[j].label})
 			j++
 		case nums[j].End <= cards[i].Start:
-			out = append(out, carve{Range: nums[j].Range, label: label(nums[j])})
+			out = append(out, carve{Range: nums[j].Range, label: nums[j].label})
 			j++
 		case cards[i].End <= nums[j].Start:
 			out = append(out, carve{Range: cards[i]})
@@ -2018,6 +2012,31 @@ func isBase64Body(s string) bool {
 	return s != ""
 }
 
+// isElidedBase64 reports whether s is a padded base64 value shortened with
+// three dots in the middle, the way code prints a secret it means to hide
+// (Python value[:30] + "..." + value[-20:]): a base64 head and tail of at
+// least minElidedPart characters each, and one or two '=' of padding. The
+// padding is not a key/value separator here either: split on it, the head
+// and tail went out as a dotted "key", which is never scored, and the first
+// thirty characters of a cookie stayed readable in 40 of 40 runs.
+func isElidedBase64(s string) bool {
+	if !strings.HasSuffix(s, "=") {
+		return false
+	}
+	body := strings.TrimRight(s, "=")
+	if len(s)-len(body) > 2 {
+		return false
+	}
+	head, tail, ok := strings.Cut(body, "...")
+	return ok && len(head) >= minElidedPart && len(tail) >= minElidedPart &&
+		isBase64Body(head) && isBase64Body(tail)
+}
+
+// minElidedPart is the shortest head or tail isElidedBase64 accepts; a
+// shorter one shows too little to be worth hiding, and "loading...done="
+// is text.
+const minElidedPart = 8
+
 func isPaddedBase64Blob(s string) bool {
 	if len(s) <= 64 || !strings.HasSuffix(s, "=") || strings.ContainsAny(s, "-_ \t\n") {
 		return false
@@ -2403,7 +2422,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	}
 	// Base64 padding is not a key/value separator — let the token through to
 	// single-token scoring, which is where the base64 rule lives.
-	if isPaddedBase64Blob(rawToken) {
+	if isPaddedBase64Blob(rawToken) || isElidedBase64(rawToken) {
 		return false, false
 	}
 	// The caller already knows this token is a secret (it sat under a
@@ -2427,7 +2446,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		// Same guard as the one on the raw token, applied to the quoted content:
 		// base64 padding is not a separator, and re-parsing on it hands the
 		// body back as an unscored "key".
-		if isPaddedBase64Blob(trimmed) {
+		if isPaddedBase64Blob(trimmed) || isElidedBase64(trimmed) {
 			sb.WriteString(quote)
 			st.processSingleToken(trimmed, trimmed, forcedSensitive, false, false, sb)
 			sb.WriteString(quote)
@@ -3071,6 +3090,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 					sb.WriteString(key)
 					sb.WriteByte('=')
 					st.redactWithHMAC(val, st.entityLabel("id-number"), "signature", sb)
+				} else if isSessionNumberValue(val) && isSessionKey(key) {
+					// ?JSESSIONID=8092026976377529079: a session id is a
+					// credential, and digits never reach the threshold.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
@@ -3528,6 +3553,11 @@ func isIPv6(token string) bool {
 // dot, IPv4 addresses and version strings end in digits, e-mails carry "@",
 // URLs are handled before this rule. Extensionless names (Dockerfile,
 // Makefile) and dot-files with an empty stem (.gitignore) do not match.
+// randomPartMinLength is the shortest part of a file-name-shaped token that
+// isFileName reads as a random run when it mixes capitals, small letters and
+// digits.
+const randomPartMinLength = 32
+
 func isFileName(token string) bool {
 	if len(token) < 3 || len(token) > 256 || token[0] == '.' && token[1] == '/' {
 		return false // "./x" and "../x" are isPath's job
@@ -3536,10 +3566,32 @@ func isFileName(token string) bool {
 		return false // no extension possible; cheap exit for the common token
 	}
 	lastDot, lastSlash := -1, -1
-	for i := 0; i < len(token); i++ {
+	partStart, upper, lower, digit := 0, false, false, false
+	for i := 0; i <= len(token); i++ {
+		if i == len(token) || token[i] == '.' || token[i] == '/' {
+			// A long part that mixes capitals, small letters and digits is a
+			// random run, not a name: a Gigya login token
+			// (st2.s.<34>.<80>.<50>.sc3) ends in a short part that reads as
+			// an extension and was passed whole. A content hash in a built
+			// file name (main.3f9a8b7c6d5e.js) is one case and short, and a
+			// long camelCase name is still scored word by word after this.
+			if i-partStart >= randomPartMinLength && upper && lower && digit {
+				return false
+			}
+			partStart, upper, lower, digit = i+1, false, false, false
+		}
+		if i == len(token) {
+			break
+		}
 		c := token[i]
 		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		case c >= 'a' && c <= 'z':
+			lower = true
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= '0' && c <= '9':
+			digit = true
+		case c == '_', c == '-':
 		case c == '.':
 			if i > 0 && token[i-1] == '.' {
 				return false // "file..txt", "../x"
@@ -4001,6 +4053,10 @@ type segmentState struct {
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
+	// True if the previous token was a lone "=" or ":" right after a
+	// sensitive key: the auth scheme may still follow ("Authorization = Basic").
+	sepAfterSensitiveKey bool
+	prevClean            string // the previous token without quotes and a trailing separator
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
 
@@ -4144,6 +4200,32 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	cleanToken = trimQuotes(cleanToken)
 	lowerClean := strings.ToLower(cleanToken)
 
+	// "Authorization=Basic <base64>" in one token (a Java Map printed with
+	// toString, logfmt): the pair's value is the scheme, and the forced
+	// value was the word Basic while the credential after it passed. Keep
+	// the scheme word and force the credential, as after "Authorization:
+	// Basic".
+	// The last letter is checked first, as this runs on every token.
+	if n := len(trimmed); n > 0 && (trimmed[n-1]|0x20 == 'c' || trimmed[n-1]|0x20 == 'r') {
+		if k, v, ok := strings.Cut(trimmed, "="); ok && k != "" &&
+			(strings.EqualFold(v, "basic") || strings.EqualFold(v, "bearer")) && st.isSensitiveKey(trimQuotes(k)) {
+			sb.WriteString(token)
+			state.pendingKeySensitive = false
+			state.pendingContextSensitive = false
+			state.pendingAfterCopula = false
+			state.prevStrongSecretWord = false
+			state.pendingHashKey = false
+			state.bracketAfterContext = false
+			state.afterMarker = false
+			state.isInValuePos = false
+			state.pendingBearer = strings.EqualFold(v, "bearer")
+			state.pendingBasic = strings.EqualFold(v, "basic")
+			state.sepAfterSensitiveKey = false
+			state.prevClean = ""
+			return
+		}
+	}
+
 	// Check if this token is a "Generic Key" identifier (e.g. "key", "name")
 	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
 
@@ -4159,6 +4241,19 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// Whether this token sits in the forced slot after a key, before the
 	// rules below give the slot up: an auth scheme word is recognised there.
 	afterSensitiveKey := forced
+	// "Authorization = Basic <base64>": the separator standing alone spent
+	// the key's forced slot, so the scheme word after it was not recognised
+	// and the credential was left to its score (8 of 150 random Basic values
+	// passed whole, and the padding of most others was cut off the marker).
+	// The scheme slot survives the separator; the force on an ordinary value
+	// does not ("password = password" in code stays, see the copula rule).
+	// The key may also arrive in value position, where it is not reported as
+	// a key ("Header: Authorization = Basic ..."): the lone separator after a
+	// sensitive word opens the slot the same way.
+	schemeSlot := afterSensitiveKey || state.sepAfterSensitiveKey
+	state.sepAfterSensitiveKey = (trimmed == "=" || trimmed == ":") &&
+		(forced || (state.prevClean != "" && st.isSensitiveKey(state.prevClean)))
+	state.prevClean = cleanToken
 	// A bare sensitive word in prose ("password was rejected", "pass an
 	// extraordinary resolution", "token to the") forces its next token, and the
 	// forced path skips MinSecretLength — so two-letter words got redacted
@@ -4204,7 +4299,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// hidden by their score, "lena:jr0XQgUiZRF3" encoded was not). It is
 	// hidden whatever its score, as long as it has the base64 shape; a
 	// realm="..." after WWW-Authenticate: Basic has not.
-	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 {
+	// A word that reads as English is not one ("auth = basic support").
+	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
+		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0) {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -4339,7 +4436,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// value slot of an authorization key ("Authorization: Basic",
 	// "Proxy-Authorization: Basic"), so prose such as "basic
 	// internationalization support" keeps its next word.
-	state.pendingBasic = lowerClean == "basic" && afterSensitiveKey
+	state.pendingBasic = lowerClean == "basic" && schemeSlot
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
