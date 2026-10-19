@@ -22,6 +22,8 @@ func FuzzScanner(f *testing.F) {
 	f.Add("key\tvalue")                                       // Tab
 	f.Add(strings.Repeat("a=", 10_000) + "b")                 // Deep '=' chain (recursion depth bound, SCN-S 2d)
 	f.Add("\u043A\u0430\u0440\u0442\u04304539148803436467 x") // Multibyte neighbor at Luhn boundary (SCN-S 2c)
+	f.Add(`pAss":"h`)                                         // Unterminated quoted value after a sensitive key
+	f.Add(`0=" ?X02aA`)                                       // Marker after an unterminated quote
 
 	f.Fuzz(func(t *testing.T, input string) {
 		// 1. Crash Check: Should not panic
@@ -37,21 +39,15 @@ func FuzzScanner(f *testing.F) {
 			t.Errorf("Output size exploded. Input: %d, Output: %d", len(input), len(output))
 		}
 
-		// 4. Idempotency Check: Scanning already redacted output should be stable
-		// (unless the redacted placeholder itself triggers detection, which shouldn't happen)
-		// Note: We scan the output. Ideally, Scan(Scan(input)) should be == Scan(input)
-		// BUT, if Scan(input) produces [HIDDEN:xyz], scanning that again *might* be safe.
-		// However, if we have "password=secret", output is "password=[HIDDEN:...]".
-		// Scanning "password=[HIDDEN:...]" should result in "password=[HIDDEN:...]" (no change).
-		// doubleOutput := ScanAndRedact(output)
-		// if doubleOutput != output {
-		// 	 t.Errorf("Idempotency failure!\nInput:  %q\nOnce:   %q\nTwice:  %q", input, output, doubleOutput)
-		// }
-		// COMMENTED OUT: Idempotency is hard because "[HIDDEN:xyz]" might be seen as a value for "password".
-		// If the scanner logic determines "password" is a key, it will redact the value.
-		// The value is "[HIDDEN:xyz]".
-		// If we redact "[HIDDEN:xyz]", we get "[HIDDEN:newhash]".
-		// So strict idempotency Scan(Scan(x)) == Scan(x) requires the scanner to recognize its own redaction.
-		// Verify idempotency (should not crash or double-redact if logic works)
+		// 4. Rescan keeps markers: every marker of the first pass survives a
+		// second pass whole and in order, and none is nested. Strict
+		// Scan(Scan(x)) == Scan(x) does not hold on arbitrary bytes: hiding a
+		// token that held a quote changes the quoting of the rest of the line,
+		// and an invalid byte comes back as U+FFFD, so the second pass reads
+		// different text. FuzzLogShapes checks the strict form on log-shaped
+		// lines.
+		if twice := ScanAndRedact(output); !keepsMarkers(output, twice) {
+			t.Errorf("Rescan broke a marker\nInput: %q\nOnce:  %q\nTwice: %q", input, output, twice)
+		}
 	})
 }

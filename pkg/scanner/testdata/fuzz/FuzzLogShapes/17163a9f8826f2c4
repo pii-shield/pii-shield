@@ -1,0 +1,5 @@
+go test fuzz v1
+byte('®')
+byte('f')
+string("+00000000~+00000000")
+string("0")

@@ -57,7 +57,9 @@ jobs:
         install-mode: goinstall
 
     - name: Run Fuzz Checks (Sanity)
-      run: go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner
+      run: |
+        go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner
+        go test -fuzz=FuzzLogShapes -fuzztime=15s ./pkg/scanner
 
     - name: Run Tests (Race & Coverage)
       run: go test -race -coverprofile=coverage.out ./...

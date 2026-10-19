@@ -1371,6 +1371,30 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 	// JSON lines are handled by the tokenizer itself (quotes, braces, colon
 	// pairs) — deliberately no encoding/json parse here; see compact_json_test.go.
 
+	// A carve can uncover another: a phone glued to a card
+	// (4111111111111111+447911123456) has no boundary until the card is a
+	// marker. Three rounds cover every case seen; each round only adds
+	// markers. A further round runs only when a digit, '+' or '(' touched a
+	// carved number, since only there can a second number begin: on a log
+	// where most lines carry a card or a phone, an unconditional second
+	// round cost 14% of end-to-end throughput.
+	for round := 0; round < 3; round++ {
+		next, carved, touching := st.carveNumbers(logLine)
+		if !carved {
+			break
+		}
+		logLine = next
+		if !touching {
+			break
+		}
+	}
+	st.scanSegmentFrom(logLine, sb, depth, false, 0)
+}
+
+// carveNumbers replaces every card, phone and identity number in logLine by
+// its marker and reports whether it found any, and whether a digit, '+' or
+// '(' stood right next to one of them.
+func (st *configState) carveNumbers(logLine string) (string, bool, bool) {
 	luhnRanges := FindLuhnSequences(logLine)
 
 	// Hybrid Validation: Reduce false positive Luhn matches if confidence threshold is strictly elevated
@@ -1391,55 +1415,51 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 	// the same pass.
 	carves := mergeCarves(luhnRanges, findShapedNumbers(logLine))
 
-	chunkStart := 0
-	inQuote, quoteChar := false, rune(0)
+	if len(carves) == 0 {
+		return logLine, false, false
+	}
 
+	// Each carved value is replaced by its marker and the line is then
+	// tokenized once, as a whole. Scanning the pieces between carves one by
+	// one restarted the tokenizer in the middle of a quoted string: the tail
+	// of the string after a phone or card became one token with the closing
+	// quote in it, so the quote was hidden with it ("+44791112345.Ab12" broke
+	// the JSON line) and a key=value pair later in the same quoted message
+	// was never split (msg="... client_secret=..." passed). With markers in
+	// place the first pass reads the line the way a second pass over its
+	// output does, and the tokenizer already treats a marker as one value.
+	var line strings.Builder
+	line.Grow(len(logLine))
+	prev := 0
+	touching := false
 	for _, cv := range carves {
-		// A value carved out of a quoted string takes its quotes with it and
-		// gets them back around the marker. Left in the segments on either
-		// side, the opening quote of the value closed the string that comes
-		// after the carve and the one after it opened another, so a JSON line
-		// with a card or a phone in one field lost the quotes of the next
-		// ({"phone": "+49 ...", "token": "x"} came back as "token":x).
-		start, end := cv.Start, cv.End
-		quote := byte(0)
-		if start > 0 && end < len(logLine) && (logLine[start-1] == '"' || logLine[start-1] == '\'') && logLine[end] == logLine[start-1] {
-			quote = logLine[start-1]
-			start--
-			end++
+		if (cv.Start > 0 && numberStart(logLine[cv.Start-1])) || (cv.End < len(logLine) && numberStart(logLine[cv.End])) {
+			touching = true
 		}
-		if start > chunkStart {
-			safeSegment := logLine[chunkStart:start]
-			inQuote, quoteChar = st.scanSegmentFrom(safeSegment, sb, depth, inQuote, quoteChar)
-		}
-
+		line.WriteString(logLine[prev:cv.Start])
 		secret := logLine[cv.Start:cv.End]
-		if quote != 0 {
-			sb.WriteByte(quote)
-		}
 		// The operator's own rule names the value before the built-in
 		// detector does, so a us_phone rule keeps its label on a number
 		// the phone shape would also have found.
 		if st.isSafeRegexWhitelisted(secret) {
-			sb.WriteString(secret)
+			line.WriteString(secret)
 		} else if name, ok := st.customRuleName(secret); ok {
-			st.redactWithHMAC(secret, name, "regex", sb)
+			st.redactWithHMAC(secret, name, "regex", &line)
 		} else if cv.label != "" {
-			st.redactWithHMAC(secret, st.entityLabel(cv.label), "signature", sb)
+			st.redactWithHMAC(secret, st.entityLabel(cv.label), "signature", &line)
 		} else {
-			st.redactWithHMAC(secret, st.entityLabel("card"), "luhn", sb)
+			st.redactWithHMAC(secret, st.entityLabel("card"), "luhn", &line)
 		}
-		if quote != 0 {
-			sb.WriteByte(quote)
-		}
-
-		chunkStart = end
+		prev = cv.End
 	}
+	line.WriteString(logLine[prev:])
+	return line.String(), true, touching
+}
 
-	if chunkStart < len(logLine) {
-		safeSegment := logLine[chunkStart:]
-		st.scanSegmentFrom(safeSegment, sb, depth, inQuote, quoteChar)
-	}
+// numberStart reports whether b can begin or end a card or a phone glued to
+// another number.
+func numberStart(b byte) bool {
+	return b >= '0' && b <= '9' || b == '+' || b == '('
 }
 
 // carve is a byte range of a line hidden as one value before tokenizing: a
@@ -1557,17 +1577,28 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 					i += end + 1
 					continue
 				}
+				// A head glued to the marker, api_key=~[HIDDEN:x]~ or
+				// api_key: ~[HIDDEN:x]~ (a phone carved out of the middle of
+				// the value): the head spent the key's force, as a pair or as
+				// the forced token, and the tail after the marker is still
+				// the same value.
+				headForced := false
 				if i > start {
 					token := segment[start:i]
 					if seenInvalid {
 						token = strings.ToValidUTF8(token, "\uFFFD")
 					}
+					if k, _, ok := cutPair(token); ok && st.isSensitiveKey(trimQuotes(k)) {
+						headForced = true
+					}
 					st.processAndAppend(token, sb, &state, depth)
+					headForced = headForced || state.lastForced
 				}
 				sb.WriteString(segment[i : i+end+1])
 				// The marker is the value the preceding key, context word
 				// ("Error") or "Bearer" was waiting for, so it consumes them
 				// exactly as the original token did on the first pass.
+				state.markerForced = state.pendingKeySensitive || headForced
 				state.pendingKeySensitive = false
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
@@ -1634,6 +1665,7 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 				// A separator right after a marker: whatever follows is not
 				// glued to it (see afterMarker in processAndAppend).
 				state.afterMarker = false
+				state.markerForced = false
 				if (r == '(' || r == '[') && state.pendingContextSensitive {
 					state.bracketAfterContext = true
 				}
@@ -1761,12 +1793,45 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 			sb.WriteString(rawToken)
 			return false
 		}
+		// Under a sensitive key the whole value is the secret, so the text
+		// around and between its markers ([HIDDEN:x]~[HIDDEN:y], two phones
+		// carved out of one value) is hidden with the key's force and the
+		// markers are written as they are. Not when a quote sits in that
+		// text: the first pass ended the value at a quote there
+		// ([HIDDEN:x]}\"} after \"password\": \"...\"), and the second
+		// pass must end it at the same place.
+		if forcedSensitive && !strings.ContainsAny(trimQuotes(rawToken), `"'`) &&
+			st.processAroundMarkers(rawToken, forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, true, sb, depth) {
+			return false
+		}
 		if !strings.ContainsAny(rawToken, `"'`) {
 			st.scanLine(rawToken, sb, depth+1)
 			return false
 		}
+		// With quotes in the token the usual parse handles a marker inside a
+		// well-formed quoted value (msg="[HIDDEN:x] user=bob"), but after a
+		// quote that never closed ("[HIDDEN:x]( , pAss:"[HIDDEN:x]") the
+		// tokenizer reads the marker as part of a quoted span and the pair
+		// splitters cut it at its colon, nesting it. Parse as usual into a
+		// buffer and keep that unless it broke a marker; then write each
+		// marker as it is and score only the text around it.
+		var parsed strings.Builder
+		isKey = st.processTokenRest(rawToken, forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, &parsed, depth)
+		if markersKept(rawToken, parsed.String()) {
+			sb.WriteString(parsed.String())
+			return isKey
+		}
+		if st.processAroundMarkers(rawToken, forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, false, sb, depth) {
+			return false
+		}
+		sb.WriteString(parsed.String())
+		return isKey
 	}
+	return st.processTokenRest(rawToken, forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, sb, depth)
+}
 
+// processTokenRest is processTokenLogic past its marker guard.
+func (st *configState) processTokenRest(rawToken string, forcedSensitive bool, contextSensitive bool, isValuePos bool, autoQuote bool, overrideSensitivity bool, sb *strings.Builder, depth int) (isKey bool) {
 	// A JSON string that carries escaped JSON or quoted text inside it
 	// ("{\"password\": \"x\"}"). The pair splitters below look for the
 	// closing quote without honouring backslash escapes, so they cut such a
@@ -2225,8 +2290,99 @@ func startsWithProductToken(s string) bool {
 	return i > 0 && i+1 < len(s) && s[i] == '/' && (s[i+1] >= '0' && s[i+1] <= '9' || s[i+1] == 'v')
 }
 
+// processAroundMarkers writes every complete [HIDDEN…] marker in tok as it
+// is and sends the text between markers back through processTokenLogic: the
+// text before the first marker with the token's own flags, the text after a
+// marker with none, since the marker already was the value a key or context
+// word was waiting for. tailForced is the exception: inside the quotes of a
+// value under a sensitive key the text after the marker is still part of
+// that value ("token": "[HIDDEN:x].A0a0", a phone carved out of its middle).
+// It reports false, writing nothing, when tok has no complete marker.
+func (st *configState) processAroundMarkers(tok string, forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, tailForced bool, sb *strings.Builder, depth int) bool {
+	i := strings.Index(tok, "[HIDDEN")
+	if i < 0 || strings.IndexByte(tok[i:], ']') < 0 {
+		return false
+	}
+	// A value in a pair of quotes ("[HIDDEN:x].A0a0", the tail of a value
+	// after a carved phone) keeps both quotes; only what is between them is
+	// split.
+	if n := len(tok); n >= 2 && quoteOpener(tok) != 0 && tok[n-1] == tok[0] {
+		sb.WriteByte(tok[0])
+		st.processAroundMarkers(tok[1:n-1], forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, forcedSensitive, sb, depth)
+		sb.WriteByte(tok[n-1])
+		return true
+	}
+	first := true
+	for tok != "" {
+		i := strings.Index(tok, "[HIDDEN")
+		end := -1
+		if i >= 0 {
+			end = strings.IndexByte(tok[i:], ']')
+		}
+		if end < 0 {
+			i = len(tok)
+		}
+		if i > 0 {
+			if first {
+				st.processTokenLogic(tok[:i], forcedSensitive, contextSensitive, isValuePos, autoQuote, overrideSensitivity, sb, depth+1)
+			} else {
+				st.processTokenLogic(tok[:i], tailForced, false, false, false, false, sb, depth+1)
+			}
+		}
+		if end < 0 {
+			break
+		}
+		sb.WriteString(tok[i : i+end+1])
+		tok = tok[i+end+1:]
+		first = false
+	}
+	return true
+}
+
+// markersKept reports whether every complete [HIDDEN…] marker of in appears
+// in out, whole and in the same order, with none nested in another.
+func markersKept(in, out string) bool {
+	if strings.Contains(out, "[HIDDEN:[HIDDEN") {
+		return false
+	}
+	for {
+		i := strings.Index(in, "[HIDDEN")
+		if i < 0 {
+			return true
+		}
+		end := strings.IndexByte(in[i:], ']')
+		if end < 0 {
+			return true
+		}
+		m := in[i : i+end+1]
+		j := strings.Index(out, m)
+		if j < 0 {
+			return false
+		}
+		in, out = in[i+end+1:], out[j+len(m):]
+	}
+}
+
+// cutPair splits a key=value or key:value token at its first separator.
+func cutPair(tok string) (key, value string, ok bool) {
+	if i := strings.IndexAny(tok, "=:"); i > 0 {
+		return tok[:i], tok[i+1:], true
+	}
+	return "", "", false
+}
+
+// quoteOpener returns the quote s starts with, or 0.
+func quoteOpener(s string) byte {
+	if s != "" && (s[0] == '"' || s[0] == '\'') {
+		return s[0]
+	}
+	return 0
+}
+
 func isRedacted(content string) bool {
-	return strings.HasPrefix(content, "[HIDDEN") && strings.HasSuffix(content, "]")
+	// One marker, not two glued together ([HIDDEN:x]~[HIDDEN:y]): the
+	// first ']' is the last byte.
+	return strings.HasPrefix(content, "[HIDDEN") && strings.IndexByte(content, ']') == len(content)-1
 }
 
 // customRuleName reports whether one of the operator's custom rules matches
@@ -2257,6 +2413,17 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 	// password=[HIDDEN:x] then saw password= plus a marker and added another.
 	if content == "" || isRedacted(content) {
 		sb.WriteString(original)
+		return
+	}
+
+	// An opening quote with no closing one ("h, 'x, a lone ") is written as
+	// it is and only the rest is scored. Wrapping the marker in a pair of
+	// quotes added a closing quote that was never there, and a second scan
+	// read that quote as a new empty value and hid it again.
+	if q := quoteOpener(original); q != 0 && content == original &&
+		(len(original) < 2 || original[len(original)-1] != q) {
+		sb.WriteByte(q)
+		st.processSingleToken(content[1:], original[1:], forcedSensitive, contextSensitive, autoQuote, sb)
 		return
 	}
 
@@ -4146,6 +4313,11 @@ type segmentState struct {
 
 	// True right after an existing [HIDDEN…] marker (see scanSegment).
 	afterMarker bool
+	// True when that marker took a sensitive key's forced slot: text glued
+	// to the marker is the rest of the same value (see processAndAppend).
+	markerForced bool
+	// True when the previous token was hidden under a key's force.
+	lastForced bool
 
 	// True when a '(' or '[' opened right after a context word and no token
 	// has followed yet: "WARNING (SyncWorker_3) [pkg.module] ...", "ERROR
@@ -4295,6 +4467,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.pendingHashKey = false
 			state.bracketAfterContext = false
 			state.afterMarker = false
+			state.markerForced = false
 			state.isInValuePos = false
 			state.pendingBearer = strings.EqualFold(v, "bearer")
 			state.pendingBasic = strings.EqualFold(v, "basic")
@@ -4316,6 +4489,20 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// keeps its next word (the B1 lesson: a bare keyword must not redact
 	// ordinary text after it).
 	forced := state.pendingKeySensitive
+	// Text glued to a marker that took a sensitive key's forced slot is the
+	// rest of the same value: token=+4917412345678.Ab12 has its phone carved
+	// out before tokenizing, and the tail .Ab12 arrived as a token of its own
+	// with the key's force already spent, so it stayed readable while the
+	// quoted form "+4917412345678.Ab12" hid it.
+	// Such a tail is never prose, so the rules below that free a short or
+	// word-like token in prose do not apply to it. A lone punctuation mark
+	// (token=+4917412345678.) is the end of the sentence, not of the value,
+	// and stays outside the marker as it does after a whole value.
+	gluedToMarker := state.afterMarker && state.markerForced &&
+		(len(trimmed) != 1 || !strings.Contains(".,;:!?", trimmed))
+	if gluedToMarker {
+		forced = true
+	}
 	// Whether this token sits in the forced slot after a key, before the
 	// rules below give the slot up: an auth scheme word is recognised there.
 	afterSensitiveKey := forced
@@ -4348,7 +4535,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// "keywords": None, "ClientAuth-Enforced": "PASS"), which is what it
 	// protects on real code and logs.
 	// A literal (true, null, None) is never a secret, whatever the key.
-	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) &&
+	if forced && !gluedToMarker && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) &&
 		(!state.isInValuePos || !state.keyNamesSecret || isValueLiteral(lowerClean)) {
 		forced = false
 	}
@@ -4356,7 +4543,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// 0 in self.auth[0] or "the password 0 is" is an index or a count, not a
 	// secret. Three characters stay forced, so "cvv 123" is still hidden, and
 	// the value after "password:" keeps its force whatever its length.
-	if forced && !state.isInValuePos && utf8.RuneCountInString(cleanToken) < 3 {
+	if forced && !gluedToMarker && !state.isInValuePos && utf8.RuneCountInString(cleanToken) < 3 {
 		forced = false
 	}
 	// A bare sensitive word in prose is followed by an ordinary word far more
@@ -4367,7 +4554,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// after a separator ("password: swordfish", "password=swordfish"), which
 	// is not prose. The cost is a dictionary-word password written bare
 	// after the word "password", which KNOWN_LIMITATIONS already gives up.
-	if forced && !state.isInValuePos && isAllLetters(cleanToken) && (st.calculateBigramAdjustment(lowerClean) < 0 || !hasASCII(cleanToken)) {
+	if forced && !gluedToMarker && !state.isInValuePos && isAllLetters(cleanToken) && (st.calculateBigramAdjustment(lowerClean) < 0 || !hasASCII(cleanToken)) {
 		// A word with no ASCII in it at all (密码错误 请重试, "wrong
 		// password, retry") cannot be judged by the English table and is a
 		// word; a secret has ASCII in it.
@@ -4439,6 +4626,8 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// did; a tail that carries '=' still goes through key=value scoring.
 	afterMarker := state.afterMarker
 	state.afterMarker = false
+	state.markerForced = false
+	state.lastForced = forced
 	var isKey bool
 	if afterMarker && strings.HasPrefix(trimmed, "&") && !strings.Contains(trimmed, "=") {
 		sb.WriteString(token)
