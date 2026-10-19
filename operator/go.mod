@@ -5,7 +5,7 @@ go 1.26.9
 toolchain go1.27.2
 
 require (
-	github.com/onsi/ginkgo/v2 v2.33.0
+	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	github.com/stretchr/testify v1.12.1
 	k8s.io/api v0.37.1
