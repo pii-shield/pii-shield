@@ -1572,6 +1572,7 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
 				state.pendingBasic = false
+				state.pendingScheme = false
 				state.isInValuePos = false
 				state.afterMarker = true
 				i += end + 1
@@ -1934,6 +1935,25 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if _, _, ok := splitCompactPair(rawToken); ok {
 		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
 			return isKey
+		}
+	}
+
+	// A value forced by its key is one value, whatever punctuation it holds.
+	// "password: abc:def", "secret: k1:v1" and a Qiniu credential after its
+	// key ("accessToken: QBox <ak>:<signature>=", 9 of 90 random runs hidden
+	// on 2.2.8) went to the colon splitter below, which read the value as a
+	// key:value pair of its own and wrote the "key" half out unscored; the
+	// same value in quotes ({"password": "abc:def"}) was already hidden
+	// whole. An unquoted forced token with a ':' inside it is hidden whole
+	// too. A ':' at the end is a separator, not part of the value ("key
+	// <secret>: rejected", "DEBUG:app.auth:token: x" keep their colon), a URL
+	// has gone to the URL handling above, and a token with only an '=' is a
+	// pair of its own ("password= user=bob") and goes to processEqualPair,
+	// which carries the force onto its value.
+	if forcedSensitive && len(rawToken) > 1 && rawToken[0] != '"' && rawToken[0] != '\'' {
+		if colon := strings.IndexByte(rawToken, ':'); colon > 0 && colon < len(rawToken)-1 {
+			st.processSingleToken(rawToken, rawToken, true, contextSensitive, isValuePos, sb)
+			return false
 		}
 	}
 
@@ -4131,6 +4151,7 @@ type segmentState struct {
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
+	pendingScheme bool // True if the previous token was an auth scheme word (QBox, AWS, Hawk) in the forced slot after a sensitive key
 	// True if the previous token was a lone "=" or ":" right after a
 	// sensitive key: the auth scheme may still follow ("Authorization = Basic").
 	sepAfterSensitiveKey bool
@@ -4166,6 +4187,38 @@ func looksLikeSecretWord(s string) bool {
 		}
 	}
 	return false
+}
+
+// isAuthSchemeWord reports whether s has the shape of an HTTP auth scheme
+// name as a client writes it in front of a credential: a capital letter, then
+// 2 to 23 ASCII letters, digits or dashes (Basic, Bearer, QBox, Qiniu, AWS,
+// AWS4-HMAC-SHA256, Hawk, SSWS, Negotiate). The caller checks that it stands
+// in the value slot of a sensitive key; the shape alone is any capitalised
+// word.
+func isAuthSchemeWord(s string) bool {
+	if len(s) < 3 || len(s) > 24 || s[0] < 'A' || s[0] > 'Z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !isASCIILetter(c) && !isASCIIDigit(c) && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// isSchemeParameter reports whether s is a name=value parameter of an auth
+// scheme rather than its credential: an '=' with no ':' in front of it
+// (realm="restricted", Credential=AKIA.../20130524/..., id="dh37fgj492je").
+// A credential of the <key>:<signature>= shape has its ':' first.
+func isSchemeParameter(s string) bool {
+	eq := strings.IndexByte(s, '=')
+	if eq < 0 {
+		return false
+	}
+	colon := strings.IndexByte(s, ':')
+	return colon < 0 || eq < colon
 }
 
 // strongSecretWords are the sensitive words that, in prose, name a secret
@@ -4298,6 +4351,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.isInValuePos = false
 			state.pendingBearer = strings.EqualFold(v, "bearer")
 			state.pendingBasic = strings.EqualFold(v, "basic")
+			state.pendingScheme = false
 			state.sepAfterSensitiveKey = false
 			state.prevClean = ""
 			return
@@ -4384,6 +4438,22 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// A word that reads as English is not one ("auth = basic support").
 	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
 		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0) {
+		forced = true
+	}
+	// Any other auth scheme written as "<Scheme> <credential>" after a
+	// sensitive key the same way: "accessToken: QBox <ak>:<sig>=" and
+	// "Authorization: QBox ..." (Qiniu, leak-radar repo-risks 2026-10-13 #2),
+	// "Authorization: AWS <key>:<sig>", Hawk, SSWS, HMAC-SHA256. The scheme
+	// word spends the key's forced slot and the credential after it went by
+	// score, where its ':' read as a key/value split. The rule is general -
+	// a capitalised word of letters, digits and dashes in the scheme slot
+	// keeps the force on the next token - and the next token has to look like
+	// a credential: 16 characters or more, with a digit or a symbol, not a
+	// timestamp and not a name=value parameter of the scheme (realm="x" after
+	// WWW-Authenticate: Basic, Credential=... after AWS4-HMAC-SHA256, id="..."
+	// after Hawk), so "Authorization: Missing header", "password: Invalid
+	// value" and "token: Expired 2026-10-23T14:15:31Z" keep their words.
+	if state.pendingScheme && len(cleanToken) >= minBearerCredentialLength && looksLikeSecretWord(cleanToken) && !isISO8601Timestamp(cleanToken) && !isSchemeParameter(cleanToken) {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -4530,6 +4600,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// "Proxy-Authorization: Basic"), so prose such as "basic
 	// internationalization support" keeps its next word.
 	state.pendingBasic = lowerClean == "basic" && schemeSlot
+	state.pendingScheme = schemeSlot && isAuthSchemeWord(cleanToken)
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
