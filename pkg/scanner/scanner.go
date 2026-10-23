@@ -2842,6 +2842,23 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 			return keySensitive, true
 		}
 
+		// <e-mail>:<password> is how a credential pair is written in a log
+		// line or a leaked dump ("login lena@example.com:hunter2 failed",
+		// creds=lena@example.com:Winter7413#), and it came back unchanged,
+		// address and password both: the e-mail shape never sees a key half,
+		// and #264 left the pair alone because git@github.com:org/repo.git
+		// has the same shape. The value tells the two apart: a path (a '/',
+		// a leading '~', a .git suffix, a file name) or a port (digits only)
+		// makes it an scp target, which stays; anything else after a bare
+		// address is a password, and both halves are hidden. A quoted
+		// address is a JSON object keyed by e-mail and is not touched here.
+		if keyRaw == key && strings.IndexByte(key, '@') > 0 && isEmailAddress(key) && !isSCPTarget(val) {
+			st.processSingleToken(key, keyRaw, false, false, false, sb)
+			sb.WriteByte(':')
+			st.processSingleToken(val, val, true, false, false, sb)
+			return false, true
+		}
+
 		sb.WriteString(keyRaw) // Write original key (with quotes)
 		sb.WriteRune(':')
 		// Route through processTokenLogic's isValuePos handling instead of
@@ -4561,4 +4578,20 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		state.isInValuePos = false
 	}
 	state.lastTokenQuoted = trimmed != "" && (trimmed[0] == '"' || trimmed[0] == '\'')
+}
+
+// isSCPTarget reports whether val, the part after the colon in
+// user@host:val, is what scp, git and ssh put there rather than a password:
+// a path (/var/log/app.log, ~/notes.txt, org/repo.git, notes.txt) or a port
+// (8080).
+func isSCPTarget(val string) bool {
+	if val == "" || val[0] == '/' || val[0] == '~' || strings.IndexByte(val, '/') >= 0 || strings.HasSuffix(val, ".git") || isFileName(val) {
+		return true
+	}
+	for i := 0; i < len(val); i++ {
+		if !isASCIIDigit(val[i]) {
+			return false
+		}
+	}
+	return true
 }
