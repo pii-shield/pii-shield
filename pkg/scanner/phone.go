@@ -38,8 +38,9 @@ func FindPhoneSequences(line string) []Range {
 
 // shapedNumber is a digit run hidden by its shape or its key, with the label
 // its marker carries: a telephone number ("phone"), an identity document
-// number ("id-number", see idnumber.go) or a session id under a cookie or
-// session key ("key", see session.go).
+// number ("id-number", see idnumber.go), a session id under a cookie or
+// session key or a one-time code under an otp key ("key", see session.go and
+// otp.go).
 type shapedNumber struct {
 	Range
 	label string
@@ -359,7 +360,8 @@ func digitGroup(line string, j, k int) bool {
 }
 
 // matchKeyedNumber matches the digits at line[i:] as the value of a key that
-// names a phone, an identity document or a session: <key><sep><value> where
+// names a phone, an identity document, a session or a one-time code:
+// <key><sep><value> where
 // <sep> is ':' or '=' with optional spaces and quotes around it. It returns
 // the end index, or 0, and the label of the marker.
 func matchKeyedNumber(line string, i int) (end int, label string) {
@@ -378,6 +380,8 @@ func matchKeyedNumber(line string, i int) (end int, label string) {
 		return matchKeyedIDNumber(line, i), "id-number"
 	case isSessionKeyWords(words[:n]):
 		return matchSessionNumber(line, i), "key"
+	case isOTPKeyWords(words[:n]):
+		return matchKeyedOTP(line, i), "key"
 	}
 	return 0, ""
 }
