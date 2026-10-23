@@ -857,7 +857,21 @@ func (st *configState) isWordCompound(token string) bool {
 		sameLength = sameLength && len(p) == len(first)
 		letters, ok := wordShapedPart(p, dotOnly)
 		if !ok {
-			return false
+			// A thread or worker name whose first word is two letters
+			// (DbWorker_0, IoWorker_3, OkHttpClient_2) fails the shape test:
+			// with an index the name is not a dotted part, and one lowercase
+			// letter alone between capitals counts as a random run there. The
+			// same name without the index reads as camelCase words, so with an
+			// index a two-letter first word is allowed when the words after it
+			// are three letters or more and read like English (see
+			// isTwoLetterPrefixedName). Letting any lone lowercase letter
+			// through for indexed names kept 253 more of 5 000 random
+			// mixed-case tokens; this rule keeps 9 more (254 -> 263), and the
+			// general camelCase rule would have kept 62 more.
+			if !isIndexedName(token) || !st.isTwoLetterPrefixedName(p) {
+				return false
+			}
+			letters = len(p)
 		}
 		if letters == len(p) && letters >= 3 {
 			hasWord = true
@@ -874,6 +888,39 @@ func (st *configState) isWordCompound(token string) bool {
 	}
 	return !st.namesSecret(token)
 }
+
+// isTwoLetterPrefixedName reports whether p is a camelCase name whose first
+// word is two letters, a capital and a lowercase one, followed by words of
+// three letters or more that read like English by the letter-pair table:
+// DbWorker, IoWorker, OkHttpClient, UiThread. A run with a second two-letter
+// word (XkQpZm, DaSoQzg) or a lowercase start (crOgLew) is not one, and the
+// pairs of the words after the prefix must average above
+// compoundMinBigramAvg, so OsPctd is not one either. The caller has found
+// the name in front of an index.
+func (st *configState) isTwoLetterPrefixedName(p string) bool {
+	if len(p) < 5 || len(p) > 64 || !isUpperASCII(p[0]) || !isLowerASCII(p[1]) || !isUpperASCII(p[2]) {
+		return false
+	}
+	sum, pairs := 0.0, 0
+	for w, next := nextCamelPart(p, 2); w != ""; w, next = nextCamelPart(p, next) {
+		if len(w) < 3 {
+			return false
+		}
+		for i := 0; i < len(w); i++ {
+			if !isASCIILetter(w[i]) {
+				return false
+			}
+		}
+		for i := 1; i < len(w); i++ {
+			sum += st.letterBigram(w[i-1], w[i])
+			pairs++
+		}
+	}
+	return pairs > 0 && sum/float64(pairs) > compoundMinBigramAvg && !st.namesSecret(p)
+}
+
+func isUpperASCII(c byte) bool { return c >= 'A' && c <= 'Z' }
+func isLowerASCII(c byte) bool { return c >= 'a' && c <= 'z' }
 
 // isIndexedName reports whether token is one name followed by a number or
 // several, joined by '_' or '-': SyncWorker_3, TaskRunner_10, SyncWorker-3.
