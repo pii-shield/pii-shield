@@ -85,6 +85,15 @@ func isIDKeyWords(parts []string) bool {
 // when the value is quoted ("1234 5678 9012"). The caller has checked that
 // the run is the value of an identity key. It returns the end index or 0.
 func matchKeyedIDNumber(line string, i int) int {
+	return matchGroupedDigits(line, i, minIDDigits, maxIDDigits)
+}
+
+// matchGroupedDigits matches minDigits to maxDigits digits at line[i:],
+// compact or in groups separated by one '-' or '.', and by one space when the
+// value is quoted. It returns the end index, or 0 when the run is shorter or
+// longer than asked. It is shared by the keyed detectors whose value is
+// digits only (an identity number, a one-time code).
+func matchGroupedDigits(line string, i, minDigits, maxDigits int) int {
 	quoted := i > 0 && (line[i-1] == '"' || line[i-1] == '\'')
 	n := len(line)
 	j := i
@@ -96,14 +105,14 @@ func matchKeyedIDNumber(line string, i int) int {
 			digits++
 		case (c == '-' || c == '.' || (c == ' ' && quoted)) && j+1 < n && isASCIIDigit(line[j+1]) && isASCIIDigit(line[j-1]):
 		default:
-			if digits < minIDDigits || digits > maxIDDigits {
+			if digits < minDigits || digits > maxDigits {
 				return 0
 			}
 			return j
 		}
 		j++
 	}
-	if digits < minIDDigits || digits > maxIDDigits {
+	if digits < minDigits || digits > maxDigits {
 		return 0
 	}
 	return j
