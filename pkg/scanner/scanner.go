@@ -1995,7 +1995,11 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 			sb.WriteByte(first)
 			// Recursive scan of the inner content
 			// This handles "Error: 1.2.3.4 failed" by splitting it into tokens
-			st.scanSegment(trimmed, sb, depth+1)
+			if startsWithProductToken(trimmed) {
+				st.scanUserAgent(trimmed, sb, depth+1)
+			} else {
+				st.scanSegment(trimmed, sb, depth+1)
+			}
 			// Write closing quote
 			sb.WriteByte(last)
 			return false
@@ -2223,6 +2227,84 @@ func startsWithProductToken(s string) bool {
 		i++
 	}
 	return i > 0 && i+1 < len(s) && s[i] == '/' && (s[i+1] >= '0' && s[i+1] <= '9' || s[i+1] == 'v')
+}
+
+// scanUserAgent scans a quoted User-Agent (a phrase that opens with a
+// product/version token, see startsWithProductToken). Every product token in
+// it (AhrefsBot/6.1, MJ12bot/v1.4.8, Mobile/11A465, CFNetwork/976,
+// AppleWebKit/605.1.15) and an e-mail address inside its parenthesised
+// comment (a bot's published contact, crawler@parsijoo.ir) is written as it
+// is; the rest is scanned as any quoted phrase, so a secret in a User-Agent
+// is still scored. Scanned as plain words, the product tokens scored as
+// secrets: on 300 000 access-log lines 53 588 User-Agents carried a marker,
+// most of them over a bot name, an iOS build or a WebKit version.
+func (st *configState) scanUserAgent(ua string, sb *strings.Builder, depth int) {
+	runStart, paren := 0, 0
+	for i := 0; i < len(ua); {
+		if ua[i] == ' ' || ua[i] == '\t' {
+			i++
+			continue
+		}
+		wordStart := i
+		for i < len(ua) && ua[i] != ' ' && ua[i] != '\t' {
+			i++
+		}
+		coreStart, coreEnd := wordStart, i
+		for coreStart < coreEnd && ua[coreStart] == '(' {
+			coreStart++
+		}
+		for coreEnd > coreStart && (ua[coreEnd-1] == ';' || ua[coreEnd-1] == ')' || ua[coreEnd-1] == ',') {
+			coreEnd--
+		}
+		depthAtCore := paren + strings.Count(ua[wordStart:coreStart], "(")
+		core := ua[coreStart:coreEnd]
+		if isUserAgentProduct(core) || (depthAtCore > 0 && strings.IndexByte(core, '@') > 0 && isEmailAddress(core)) {
+			if coreStart > runStart {
+				st.scanSegment(ua[runStart:coreStart], sb, depth)
+			}
+			sb.WriteString(core)
+			runStart = coreEnd
+		}
+		paren += strings.Count(ua[wordStart:i], "(") - strings.Count(ua[wordStart:i], ")")
+		if paren < 0 {
+			paren = 0
+		}
+	}
+	if runStart < len(ua) {
+		st.scanSegment(ua[runStart:], sb, depth)
+	}
+}
+
+// isUserAgentProduct reports whether s is a User-Agent product token,
+// name/version: a name of letters, digits, '.', '_' and '-' that starts with
+// a letter (at most 40 bytes), a '/', and a version that starts with a digit
+// or with v and a digit, made of letters, digits and . _ ~ + - (at most 24
+// bytes): Mozilla/5.0, AhrefsBot/6.1, MJ12bot/v1.4.8, Mobile/11A465,
+// SemrushBot/7~bl, AppleWebKit/605.1.15+. A version that starts with a
+// letter (Build/R16NW) is not one.
+func isUserAgentProduct(s string) bool {
+	slash := strings.IndexByte(s, '/')
+	if slash < 1 || slash > 40 || !isASCIILetter(s[0]) {
+		return false
+	}
+	for i := 1; i < slash; i++ {
+		if c := s[i]; !isAlnumByte(c) && c != '.' && c != '_' && c != '-' {
+			return false
+		}
+	}
+	v := s[slash+1:]
+	if len(v) > 0 && (v[0] == 'v' || v[0] == 'V') {
+		v = v[1:]
+	}
+	if len(v) == 0 || len(v) > 24 || !isASCIIDigit(v[0]) {
+		return false
+	}
+	for i := 1; i < len(v); i++ {
+		if c := v[i]; !isAlnumByte(c) && c != '.' && c != '_' && c != '~' && c != '+' && c != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func isRedacted(content string) bool {
@@ -2542,7 +2624,11 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 			// '=' already is; each pair in it is then split on its own.
 			if strings.IndexFunc(key, isSepRune) != -1 {
 				sb.WriteString(quote)
-				st.scanSegment(trimmed, sb, depth+1)
+				if startsWithProductToken(trimmed) {
+					st.scanUserAgent(trimmed, sb, depth+1)
+				} else {
+					st.scanSegment(trimmed, sb, depth+1)
+				}
 				sb.WriteString(quote)
 				return false, true
 			}
