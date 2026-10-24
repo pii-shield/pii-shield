@@ -53,7 +53,7 @@ jobs:
         only-new-issues: true
         # v2.14.0 is the first release whose x/tools can read Go 1.27 export data.
         # Released binaries are built with Go 1.26 and refuse a go.mod targeting
-        # 1.27.2, so build the linter with the repo's own toolchain.
+        # 1.27.3, so build the linter with the repo's own toolchain.
         install-mode: goinstall
 
     - name: Run Fuzz Checks (Sanity)
