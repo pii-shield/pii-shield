@@ -1855,7 +1855,14 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
-	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
+	// A token with no scheme is a URL when it has a query: a '?' with a
+	// name=value pair after it (/login?user=bob&password=x). A '?' with no
+	// '=' after it is punctuation at the end of a value: password=Kaffee1977?
+	// (godror's dpiConn_create debug line, leak-radar repo-risks 2026-10-05)
+	// and password="Kaffee1977?" went to the URL handling, which found no
+	// parameter and wrote them out whole, while password=Kaffee1977 was
+	// hidden.
+	if strings.Contains(rawToken, "://") || hasQueryShape(rawToken) {
 		// A quoted phrase with a URL in it ("curl -H 'Authorization: Bearer
 		// <key>' https://api/x" as a JSON value, msg="fetched https://... with
 		// <key>") is text, not a URL: a URL has no spaces. It went to the URL
@@ -1921,6 +1928,26 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if !forcedSensitive && isISO8601Timestamp(trimQuotes(rawToken)) {
 		sb.WriteString(rawToken)
 		return false
+	}
+
+	// Python's default log format (logging.basicConfig) writes
+	// LEVEL:logger:message with no space, so the first word of the message
+	// arrives glued to the prefix: "INFO:auth:User logged in". The colon
+	// splitter read "auth" as the key of "User", and a logger named auth,
+	// security, passport or app.token forced the first word of every message
+	// it wrote ("INFO:auth:[HIDDEN:...] logged in", "DEBUG:app.auth:[HIDDEN]
+	// session"). A logger name is a name, not a key: the prefix is written as
+	// it is and the message is read as it would be on its own, so a key the
+	// message starts with ("INFO:auth:Password: x", "DEBUG:root:password
+	// hunter2") still forces its value and a plain word does not.
+	if !forcedSensitive {
+		if end := pythonLogPrefixEnd(rawToken); end > 0 {
+			sb.WriteString(rawToken[:end])
+			if end == len(rawToken) {
+				return false
+			}
+			return st.processTokenLogic(rawToken[end:], false, contextSensitive, false, false, overrideSensitivity, sb, depth+1)
+		}
 	}
 
 	// A compact JSON pair with a quoted value, "key":"value" with no space
@@ -2210,6 +2237,14 @@ func isQuotedPhrase(s string) bool {
 	}
 	inner := s[1 : len(s)-1]
 	return strings.ContainsAny(inner, " \t") && strings.IndexByte(inner, s[0]) < 0 && !startsWithProductToken(inner)
+}
+
+// hasQueryShape reports whether token has a '?' with an '=' somewhere after
+// it, the shape of a URL query without a scheme (/a?b=c, a=1?b=2). A '?' at
+// the end of a value (password=x?) or before text with no '=' is not one.
+func hasQueryShape(token string) bool {
+	q := strings.IndexByte(token, '?')
+	return q >= 0 && strings.IndexByte(token[q+1:], '=') >= 0
 }
 
 // startsWithProductToken reports whether s opens with a product/version token
@@ -2606,6 +2641,41 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	return false, false
 }
 
+// pythonLogLevels are the level names Python's logging module prints first
+// in its default format, LEVEL:logger:message.
+var pythonLogLevels = map[string]bool{
+	"DEBUG": true, "INFO": true, "WARNING": true, "WARN": true, "ERROR": true,
+	"CRITICAL": true, "FATAL": true, "TRACE": true, "NOTICE": true,
+}
+
+// pythonLogPrefixEnd reports where the message starts in a token of the
+// shape LEVEL:logger:message: a level name in capitals, a colon, a logger
+// name (a dotted identifier such as root, app.auth, huawei_lte_api.Connection,
+// uvicorn-access) and a second colon. It returns the index after that colon,
+// or 0 when the token has not got this shape. The level is checked first, as
+// this runs on every token with a colon in it.
+func pythonLogPrefixEnd(tok string) int {
+	colon := strings.IndexByte(tok, ':')
+	if colon < 4 || colon > 8 || !pythonLogLevels[tok[:colon]] {
+		return 0
+	}
+	i := colon + 1
+	if i >= len(tok) || (!isASCIILetter(tok[i]) && tok[i] != '_') {
+		return 0
+	}
+	for i < len(tok) {
+		c := tok[i]
+		if c == ':' {
+			return i + 1
+		}
+		if !isASCIILetter(c) && !isASCIIDigit(c) && c != '_' && c != '.' && c != '-' {
+			return 0
+		}
+		i++
+	}
+	return 0
+}
+
 // isSensitivePairKey reports whether the key half of a key=value pair is
 // sensitive. A key glued to a log prefix with colons (INFO:root:password=...,
 // Python's default log format) is also judged by the name after its last
@@ -2842,6 +2912,23 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 			return keySensitive, true
 		}
 
+		// <e-mail>:<password> is how a credential pair is written in a log
+		// line or a leaked dump ("login lena@example.com:hunter2 failed",
+		// creds=lena@example.com:Winter7413#), and it came back unchanged,
+		// address and password both: the e-mail shape never sees a key half,
+		// and #264 left the pair alone because git@github.com:org/repo.git
+		// has the same shape. The value tells the two apart: a path (a '/',
+		// a leading '~', a .git suffix, a file name) or a port (digits only)
+		// makes it an scp target, which stays; anything else after a bare
+		// address is a password, and both halves are hidden. A quoted
+		// address is a JSON object keyed by e-mail and is not touched here.
+		if keyRaw == key && strings.IndexByte(key, '@') > 0 && isEmailAddress(key) && !isSCPTarget(val) {
+			st.processSingleToken(key, keyRaw, false, false, false, sb)
+			sb.WriteByte(':')
+			st.processSingleToken(val, val, true, false, false, sb)
+			return false, true
+		}
+
 		sb.WriteString(keyRaw) // Write original key (with quotes)
 		sb.WriteRune(':')
 		// Route through processTokenLogic's isValuePos handling instead of
@@ -2938,13 +3025,26 @@ func isValueLiteral(s string) bool {
 // containing a sensitive word inside another word. It does when the whole key
 // is a sensitive-key entry other than a lone weak word (password, cvv; not
 // key, auth, sign, pass), when a run of two or more of its words is one
-// (x-api-key contains api_key), or when one of its words is a strong secret
-// word (db_password, csrf-token). Words are split on
+// (x-api-key contains api_key), when one of its words is a strong secret
+// word (db_password, csrf-token), when it matches one of the user's
+// PII_SENSITIVE_KEY_PATTERNS, or when it has a pw/pwd component (db_pwd).
+// Words are split on
 // '_', '-', '.', spaces and camelCase boundaries. "author", "keywords" and
 // ClientAuth-Enforced (a single weak word, auth, inside a longer name) do
 // not qualify.
 func (st *configState) keyNamesSecret(key string) bool {
 	lk := strings.ToLower(key)
+	// A key the user named in PII_SENSITIVE_KEY_PATTERNS names a secret by
+	// the user's own word, and so does a pw/pwd component (db_pwd, smtpPw):
+	// both make a key sensitive outside the list, so neither was known here,
+	// and {"first_name": "Lena"} under the pattern (^|_)name$ and {"db_pwd":
+	// "Lena"} kept a value of 2 to 5 letters that {"password": "Lena"} hid.
+	if st.sensitiveRegex != nil && st.sensitiveRegex.MatchString(key) {
+		return true
+	}
+	if strings.Contains(lk, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+		return true
+	}
 	var words []string
 	var cur strings.Builder
 	prevLower := false
@@ -4574,4 +4674,20 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		state.isInValuePos = false
 	}
 	state.lastTokenQuoted = trimmed != "" && (trimmed[0] == '"' || trimmed[0] == '\'')
+}
+
+// isSCPTarget reports whether val, the part after the colon in
+// user@host:val, is what scp, git and ssh put there rather than a password:
+// a path (/var/log/app.log, ~/notes.txt, org/repo.git, notes.txt) or a port
+// (8080).
+func isSCPTarget(val string) bool {
+	if val == "" || val[0] == '/' || val[0] == '~' || strings.IndexByte(val, '/') >= 0 || strings.HasSuffix(val, ".git") || isFileName(val) {
+		return true
+	}
+	for i := 0; i < len(val); i++ {
+		if !isASCIIDigit(val[i]) {
+			return false
+		}
+	}
+	return true
 }
