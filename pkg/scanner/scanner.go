@@ -4702,6 +4702,21 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		// word; a secret has ASCII in it.
 		forced = false
 	}
+	// "key" in prose is how a database names an index or a constraint:
+	// MySQL's "Duplicate entry 'x' for key 'users.email'", Postgres'
+	// "duplicate key value violates unique constraint", "ADD KEY
+	// idx_order_id (order_id)" in a schema dump. The bare word forced the
+	// token after it, so the index name was hidden on every duplicate-key
+	// error. A token that reads as a database identifier made of words
+	// (users.email, order_items.PRIMARY, idx_user_email; see
+	// isIdentifierName, which also refuses a name that holds a sensitive word
+	// such as api_key) is scored on its own instead. A random token, a
+	// signature and any value after "key:" or "key=" keep the force.
+	// The name may come in backticks or between escaped quotes (`idx_x`,
+	// \'users.email\' in a mysqldump string); the framing is not part of it.
+	if forced && !state.isInValuePos && strings.EqualFold(prevClean, "key") && st.isIdentifierName(strings.Trim(cleanToken, "`\\'\"")) {
+		forced = false
+	}
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
 		forced = true
 	}
