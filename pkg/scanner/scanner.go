@@ -3266,6 +3266,19 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 					sb.WriteString(key)
 					sb.WriteByte('=')
 					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
+				} else if isOTPValue(val) && isOTPKey(key) {
+					// ?otp=928283: a one-time code is a credential for the
+					// minutes it is valid, and six digits never reach the
+					// threshold.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
+				} else if isDOBValue(val) && isDOBKey(key) {
+					// ?dob=1986-12-01: a date is known as a date of birth by
+					// its key alone, like the id number above.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("dob"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
