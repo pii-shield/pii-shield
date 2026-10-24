@@ -67,6 +67,9 @@ type configState struct {
 	// entries, the list an ASCII key is matched against; it aliases
 	// config.SensitiveKeys when every entry is ASCII.
 	asciiSensitiveKeys []string
+	// keyMatcher finds an ASCII entry inside an ASCII key in one pass; see
+	// keymatcher.go.
+	keyMatcher *keyMatcher
 }
 
 // activeConfig holds the currently published *configState.
@@ -602,6 +605,7 @@ func buildConfigState(cfg Config) *configState {
 		sensitiveRegex:     re,
 		hmacPool:           pool,
 		asciiSensitiveKeys: asciiKeys,
+		keyMatcher:         newKeyMatcher(asciiKeys),
 	}
 }
 
@@ -3139,39 +3143,47 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 }
 
 func (st *configState) isSensitiveKey(key string) bool {
-	// 1. Check substring matching (fast path for standard keys)
-	// We still need ToLower for the fixed list unless we change that too,
-	// but let's keep it for backward compatibility and as a "fast filter"
-	// before the regex if possible? No, user said ToLower is slow.
-	// But currentConfig.SensitiveKeys are lowercase.
-	// Optimization: If we trust the regex is case-insensitive, we can skip ToLower
-	// for the specific regex check. For the list check, we still need it.
-	// However, if we move ALL keys to regex, that would be fastest.
-	// For now, let's keep the hybrid approach but optimize the Regex part.
-
-	k := strings.ToLower(key)
-
-	// Check substring matching (backward compatible). A non-ASCII entry
-	// (密码, パスワード) cannot be inside an ASCII key, so an ASCII key is
-	// checked against the ASCII entries only (see asciiSensitiveKeys).
-	keys := st.config.SensitiveKeys
-	if !hasNonASCII(k) {
-		keys = st.asciiSensitiveKeys
-	}
-	for _, sk := range keys {
-		if strings.Contains(k, sk) {
-			// Fast reject for 'public_key' or 'pubkey' or 'pub_key'
-			if strings.Contains(k, "pub") && strings.Contains(k, "key") {
-				return false
-			}
-
-			// Safety check: High entropy strings (likely secrets) should not be treated as keys
-			// even if they contain the word "secret" or "key".
-			if len(key) > 15 && st.calculateComplexity(key) > st.config.EntropyThreshold && !st.isWordsSecretName(k) {
-				return false
-			}
-			return true
+	// 1. Substring match against the sensitive-key list, ignoring case. An
+	// ASCII key, nearly every key in a log, goes through keyMatcher in one
+	// pass and is lowercased only when the match needs the lowered form.
+	// A non-ASCII key keeps the strings.ToLower path: Unicode lowering can
+	// turn a non-ASCII rune into ASCII (the Kelvin sign into k), so it is
+	// checked against the whole list, which gives the same answer for the
+	// ASCII entries (a non-ASCII entry such as 密码 cannot be inside an ASCII
+	// key, see asciiSensitiveKeys).
+	ascii := !hasNonASCII(key)
+	var k string
+	var matched bool
+	if ascii {
+		matched = st.keyMatcher.containsAny(key)
+	} else {
+		k = strings.ToLower(key)
+		keys := st.config.SensitiveKeys
+		if !hasNonASCII(k) {
+			keys = st.asciiSensitiveKeys
 		}
+		for _, sk := range keys {
+			if strings.Contains(k, sk) {
+				matched = true
+				break
+			}
+		}
+	}
+	if matched {
+		if ascii {
+			k = strings.ToLower(key)
+		}
+		// Fast reject for 'public_key' or 'pubkey' or 'pub_key'
+		if strings.Contains(k, "pub") && strings.Contains(k, "key") {
+			return false
+		}
+
+		// Safety check: High entropy strings (likely secrets) should not be treated as keys
+		// even if they contain the word "secret" or "key".
+		if len(key) > 15 && st.calculateComplexity(key) > st.config.EntropyThreshold && !st.isWordsSecretName(k) {
+			return false
+		}
+		return true
 	}
 
 	// The short forms of "password": PW:maple248, db_pw=..., dbPwd: ...,
@@ -3180,7 +3192,13 @@ func (st *configState) isSensitiveKey(key string) bool {
 	// components of the key. A bare pwd/PWD alone is the shell's working
 	// directory (PWD=/home/lena in every environment dump) and stays a
 	// plain key.
-	if strings.Contains(k, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+	hasPW := false
+	if ascii {
+		hasPW = containsFoldPW(key)
+	} else {
+		hasPW = strings.Contains(k, "pw")
+	}
+	if hasPW && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
 		return true
 	}
 
