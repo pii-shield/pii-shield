@@ -857,7 +857,21 @@ func (st *configState) isWordCompound(token string) bool {
 		sameLength = sameLength && len(p) == len(first)
 		letters, ok := wordShapedPart(p, dotOnly)
 		if !ok {
-			return false
+			// A thread or worker name whose first word is two letters
+			// (DbWorker_0, IoWorker_3, OkHttpClient_2) fails the shape test:
+			// with an index the name is not a dotted part, and one lowercase
+			// letter alone between capitals counts as a random run there. The
+			// same name without the index reads as camelCase words, so with an
+			// index a two-letter first word is allowed when the words after it
+			// are three letters or more and read like English (see
+			// isTwoLetterPrefixedName). Letting any lone lowercase letter
+			// through for indexed names kept 253 more of 5 000 random
+			// mixed-case tokens; this rule keeps 9 more (254 -> 263), and the
+			// general camelCase rule would have kept 62 more.
+			if !isIndexedName(token) || !st.isTwoLetterPrefixedName(p) {
+				return false
+			}
+			letters = len(p)
 		}
 		if letters == len(p) && letters >= 3 {
 			hasWord = true
@@ -874,6 +888,39 @@ func (st *configState) isWordCompound(token string) bool {
 	}
 	return !st.namesSecret(token)
 }
+
+// isTwoLetterPrefixedName reports whether p is a camelCase name whose first
+// word is two letters, a capital and a lowercase one, followed by words of
+// three letters or more that read like English by the letter-pair table:
+// DbWorker, IoWorker, OkHttpClient, UiThread. A run with a second two-letter
+// word (XkQpZm, DaSoQzg) or a lowercase start (crOgLew) is not one, and the
+// pairs of the words after the prefix must average above
+// compoundMinBigramAvg, so OsPctd is not one either. The caller has found
+// the name in front of an index.
+func (st *configState) isTwoLetterPrefixedName(p string) bool {
+	if len(p) < 5 || len(p) > 64 || !isUpperASCII(p[0]) || !isLowerASCII(p[1]) || !isUpperASCII(p[2]) {
+		return false
+	}
+	sum, pairs := 0.0, 0
+	for w, next := nextCamelPart(p, 2); w != ""; w, next = nextCamelPart(p, next) {
+		if len(w) < 3 {
+			return false
+		}
+		for i := 0; i < len(w); i++ {
+			if !isASCIILetter(w[i]) {
+				return false
+			}
+		}
+		for i := 1; i < len(w); i++ {
+			sum += st.letterBigram(w[i-1], w[i])
+			pairs++
+		}
+	}
+	return pairs > 0 && sum/float64(pairs) > compoundMinBigramAvg && !st.namesSecret(p)
+}
+
+func isUpperASCII(c byte) bool { return c >= 'A' && c <= 'Z' }
+func isLowerASCII(c byte) bool { return c >= 'a' && c <= 'z' }
 
 // isIndexedName reports whether token is one name followed by a number or
 // several, joined by '_' or '-': SyncWorker_3, TaskRunner_10, SyncWorker-3.
@@ -1536,6 +1583,21 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 			continue
 		}
 
+		// A single-quoted SQL literal that holds a JSON document ('{"error":
+		// "Duplicate entry 'x@y' for key 'users.email'"}' in an INSERT of a
+		// database dump) can carry single quotes of its own inside the JSON
+		// strings. Read as plain quotes, the first inner one closed the
+		// literal: the address after it passed, and the tail with the
+		// closing "} was hidden as one value, which broke the JSON. The
+		// literal ends at the quote right after the bracket that closes the
+		// document, so it is one token, and the JSON inside is scanned as
+		// JSON is anywhere else.
+		if r == '\'' && i+1 < n && (segment[i+1] == '{' || segment[i+1] == '[') {
+			if end := jsonDocumentEnd(segment, i+1); end > 0 && end < n && segment[end] == '\'' {
+				i = end + 1
+				continue
+			}
+		}
 		if r == '"' || (r == '\'' && apostropheOpens(segment, i+width)) {
 			inQuote = true
 			quoteChar = r
@@ -1572,6 +1634,7 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 				state.pendingContextSensitive = false
 				state.pendingBearer = false
 				state.pendingBasic = false
+				state.pendingScheme = false
 				state.isInValuePos = false
 				state.afterMarker = true
 				i += end + 1
@@ -1744,6 +1807,20 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
+	// A value between backslash-escaped quotes (\'lena@example.com\', how a
+	// MySQL dump and a PHP or JSON-in-SQL string escape the quotes inside a
+	// literal) is the value; the escapes are framing. Scored with them, an
+	// address passed (its shape test saw \'lena@example.com\') and a forced
+	// value was hidden with its quotes and backslashes. A value in backticks
+	// (`us_rate_limits`, a MySQL identifier) is the same: the table name was
+	// scored with its backticks and hidden whole.
+	if pre, post, ok := escapedOrBacktickWrap(rawToken); ok {
+		sb.WriteString(rawToken[:pre])
+		inner := st.processTokenLogic(rawToken[pre:len(rawToken)-post], forcedSensitive, contextSensitive, isValuePos, false, overrideSensitivity, sb, depth+1)
+		sb.WriteString(rawToken[len(rawToken)-post:])
+		return inner
+	}
+
 	// A marker from an earlier pass is one opaque value; parsing it would read
 	// [HIDDEN:abc123] as a key:value pair (see the same guard in scanSegment).
 	// A value that reached here with a marker glued to more text, such as
@@ -1855,7 +1932,14 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
-	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
+	// A token with no scheme is a URL when it has a query: a '?' with a
+	// name=value pair after it (/login?user=bob&password=x). A '?' with no
+	// '=' after it is punctuation at the end of a value: password=Kaffee1977?
+	// (godror's dpiConn_create debug line, leak-radar repo-risks 2026-10-05)
+	// and password="Kaffee1977?" went to the URL handling, which found no
+	// parameter and wrote them out whole, while password=Kaffee1977 was
+	// hidden.
+	if strings.Contains(rawToken, "://") || hasQueryShape(rawToken) {
 		// A quoted phrase with a URL in it ("curl -H 'Authorization: Bearer
 		// <key>' https://api/x" as a JSON value, msg="fetched https://... with
 		// <key>") is text, not a URL: a URL has no spaces. It went to the URL
@@ -1923,6 +2007,26 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
+	// Python's default log format (logging.basicConfig) writes
+	// LEVEL:logger:message with no space, so the first word of the message
+	// arrives glued to the prefix: "INFO:auth:User logged in". The colon
+	// splitter read "auth" as the key of "User", and a logger named auth,
+	// security, passport or app.token forced the first word of every message
+	// it wrote ("INFO:auth:[HIDDEN:...] logged in", "DEBUG:app.auth:[HIDDEN]
+	// session"). A logger name is a name, not a key: the prefix is written as
+	// it is and the message is read as it would be on its own, so a key the
+	// message starts with ("INFO:auth:Password: x", "DEBUG:root:password
+	// hunter2") still forces its value and a plain word does not.
+	if !forcedSensitive {
+		if end := pythonLogPrefixEnd(rawToken); end > 0 {
+			sb.WriteString(rawToken[:end])
+			if end == len(rawToken) {
+				return false
+			}
+			return st.processTokenLogic(rawToken[end:], false, contextSensitive, false, false, overrideSensitivity, sb, depth+1)
+		}
+	}
+
 	// A compact JSON pair with a quoted value, "key":"value" with no space
 	// after the colon, is one token. When the value held an '=' it went to
 	// the key=value splitter first, which took everything up to that '=' as
@@ -1934,6 +2038,25 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if _, _, ok := splitCompactPair(rawToken); ok {
 		if isKey, handled := st.processColonPair(rawToken, overrideSensitivity, sb, depth); handled {
 			return isKey
+		}
+	}
+
+	// A value forced by its key is one value, whatever punctuation it holds.
+	// "password: abc:def", "secret: k1:v1" and a Qiniu credential after its
+	// key ("accessToken: QBox <ak>:<signature>=", 9 of 90 random runs hidden
+	// on 2.2.8) went to the colon splitter below, which read the value as a
+	// key:value pair of its own and wrote the "key" half out unscored; the
+	// same value in quotes ({"password": "abc:def"}) was already hidden
+	// whole. An unquoted forced token with a ':' inside it is hidden whole
+	// too. A ':' at the end is a separator, not part of the value ("key
+	// <secret>: rejected", "DEBUG:app.auth:token: x" keep their colon), a URL
+	// has gone to the URL handling above, and a token with only an '=' is a
+	// pair of its own ("password= user=bob") and goes to processEqualPair,
+	// which carries the force onto its value.
+	if forcedSensitive && len(rawToken) > 1 && rawToken[0] != '"' && rawToken[0] != '\'' {
+		if colon := strings.IndexByte(rawToken, ':'); colon > 0 && colon < len(rawToken)-1 {
+			st.processSingleToken(rawToken, rawToken, true, contextSensitive, isValuePos, sb)
+			return false
 		}
 	}
 
@@ -1995,7 +2118,11 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 			sb.WriteByte(first)
 			// Recursive scan of the inner content
 			// This handles "Error: 1.2.3.4 failed" by splitting it into tokens
-			st.scanSegment(trimmed, sb, depth+1)
+			if startsWithProductToken(trimmed) {
+				st.scanUserAgent(trimmed, sb, depth+1)
+			} else {
+				st.scanSegment(trimmed, sb, depth+1)
+			}
 			// Write closing quote
 			sb.WriteByte(last)
 			return false
@@ -2212,6 +2339,14 @@ func isQuotedPhrase(s string) bool {
 	return strings.ContainsAny(inner, " \t") && strings.IndexByte(inner, s[0]) < 0 && !startsWithProductToken(inner)
 }
 
+// hasQueryShape reports whether token has a '?' with an '=' somewhere after
+// it, the shape of a URL query without a scheme (/a?b=c, a=1?b=2). A '?' at
+// the end of a value (password=x?) or before text with no '=' is not one.
+func hasQueryShape(token string) bool {
+	q := strings.IndexByte(token, '?')
+	return q >= 0 && strings.IndexByte(token[q+1:], '=') >= 0
+}
+
 // startsWithProductToken reports whether s opens with a product/version token
 // (Mozilla/5.0, AhrefsBot/6.1, curl/8.4.0), the shape of a User-Agent. A
 // quoted User-Agent with a bot's URL in it stays with the URL handling, which
@@ -2223,6 +2358,84 @@ func startsWithProductToken(s string) bool {
 		i++
 	}
 	return i > 0 && i+1 < len(s) && s[i] == '/' && (s[i+1] >= '0' && s[i+1] <= '9' || s[i+1] == 'v')
+}
+
+// scanUserAgent scans a quoted User-Agent (a phrase that opens with a
+// product/version token, see startsWithProductToken). Every product token in
+// it (AhrefsBot/6.1, MJ12bot/v1.4.8, Mobile/11A465, CFNetwork/976,
+// AppleWebKit/605.1.15) and an e-mail address inside its parenthesised
+// comment (a bot's published contact, crawler@parsijoo.ir) is written as it
+// is; the rest is scanned as any quoted phrase, so a secret in a User-Agent
+// is still scored. Scanned as plain words, the product tokens scored as
+// secrets: on 300 000 access-log lines 53 588 User-Agents carried a marker,
+// most of them over a bot name, an iOS build or a WebKit version.
+func (st *configState) scanUserAgent(ua string, sb *strings.Builder, depth int) {
+	runStart, paren := 0, 0
+	for i := 0; i < len(ua); {
+		if ua[i] == ' ' || ua[i] == '\t' {
+			i++
+			continue
+		}
+		wordStart := i
+		for i < len(ua) && ua[i] != ' ' && ua[i] != '\t' {
+			i++
+		}
+		coreStart, coreEnd := wordStart, i
+		for coreStart < coreEnd && ua[coreStart] == '(' {
+			coreStart++
+		}
+		for coreEnd > coreStart && (ua[coreEnd-1] == ';' || ua[coreEnd-1] == ')' || ua[coreEnd-1] == ',') {
+			coreEnd--
+		}
+		depthAtCore := paren + strings.Count(ua[wordStart:coreStart], "(")
+		core := ua[coreStart:coreEnd]
+		if isUserAgentProduct(core) || (depthAtCore > 0 && strings.IndexByte(core, '@') > 0 && isEmailAddress(core)) {
+			if coreStart > runStart {
+				st.scanSegment(ua[runStart:coreStart], sb, depth)
+			}
+			sb.WriteString(core)
+			runStart = coreEnd
+		}
+		paren += strings.Count(ua[wordStart:i], "(") - strings.Count(ua[wordStart:i], ")")
+		if paren < 0 {
+			paren = 0
+		}
+	}
+	if runStart < len(ua) {
+		st.scanSegment(ua[runStart:], sb, depth)
+	}
+}
+
+// isUserAgentProduct reports whether s is a User-Agent product token,
+// name/version: a name of letters, digits, '.', '_' and '-' that starts with
+// a letter (at most 40 bytes), a '/', and a version that starts with a digit
+// or with v and a digit, made of letters, digits and . _ ~ + - (at most 24
+// bytes): Mozilla/5.0, AhrefsBot/6.1, MJ12bot/v1.4.8, Mobile/11A465,
+// SemrushBot/7~bl, AppleWebKit/605.1.15+. A version that starts with a
+// letter (Build/R16NW) is not one.
+func isUserAgentProduct(s string) bool {
+	slash := strings.IndexByte(s, '/')
+	if slash < 1 || slash > 40 || !isASCIILetter(s[0]) {
+		return false
+	}
+	for i := 1; i < slash; i++ {
+		if c := s[i]; !isAlnumByte(c) && c != '.' && c != '_' && c != '-' {
+			return false
+		}
+	}
+	v := s[slash+1:]
+	if len(v) > 0 && (v[0] == 'v' || v[0] == 'V') {
+		v = v[1:]
+	}
+	if len(v) == 0 || len(v) > 24 || !isASCIIDigit(v[0]) {
+		return false
+	}
+	for i := 1; i < len(v); i++ {
+		if c := v[i]; !isAlnumByte(c) && c != '.' && c != '_' && c != '~' && c != '+' && c != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func isRedacted(content string) bool {
@@ -2542,7 +2755,11 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 			// '=' already is; each pair in it is then split on its own.
 			if strings.IndexFunc(key, isSepRune) != -1 {
 				sb.WriteString(quote)
-				st.scanSegment(trimmed, sb, depth+1)
+				if startsWithProductToken(trimmed) {
+					st.scanUserAgent(trimmed, sb, depth+1)
+				} else {
+					st.scanSegment(trimmed, sb, depth+1)
+				}
 				sb.WriteString(quote)
 				return false, true
 			}
@@ -2604,6 +2821,41 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		return keySensitive && val == "", true
 	}
 	return false, false
+}
+
+// pythonLogLevels are the level names Python's logging module prints first
+// in its default format, LEVEL:logger:message.
+var pythonLogLevels = map[string]bool{
+	"DEBUG": true, "INFO": true, "WARNING": true, "WARN": true, "ERROR": true,
+	"CRITICAL": true, "FATAL": true, "TRACE": true, "NOTICE": true,
+}
+
+// pythonLogPrefixEnd reports where the message starts in a token of the
+// shape LEVEL:logger:message: a level name in capitals, a colon, a logger
+// name (a dotted identifier such as root, app.auth, huawei_lte_api.Connection,
+// uvicorn-access) and a second colon. It returns the index after that colon,
+// or 0 when the token has not got this shape. The level is checked first, as
+// this runs on every token with a colon in it.
+func pythonLogPrefixEnd(tok string) int {
+	colon := strings.IndexByte(tok, ':')
+	if colon < 4 || colon > 8 || !pythonLogLevels[tok[:colon]] {
+		return 0
+	}
+	i := colon + 1
+	if i >= len(tok) || (!isASCIILetter(tok[i]) && tok[i] != '_') {
+		return 0
+	}
+	for i < len(tok) {
+		c := tok[i]
+		if c == ':' {
+			return i + 1
+		}
+		if !isASCIILetter(c) && !isASCIIDigit(c) && c != '_' && c != '.' && c != '-' {
+			return 0
+		}
+		i++
+	}
+	return 0
 }
 
 // isSensitivePairKey reports whether the key half of a key=value pair is
@@ -2842,6 +3094,23 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 			return keySensitive, true
 		}
 
+		// <e-mail>:<password> is how a credential pair is written in a log
+		// line or a leaked dump ("login lena@example.com:hunter2 failed",
+		// creds=lena@example.com:Winter7413#), and it came back unchanged,
+		// address and password both: the e-mail shape never sees a key half,
+		// and #264 left the pair alone because git@github.com:org/repo.git
+		// has the same shape. The value tells the two apart: a path (a '/',
+		// a leading '~', a .git suffix, a file name) or a port (digits only)
+		// makes it an scp target, which stays; anything else after a bare
+		// address is a password, and both halves are hidden. A quoted
+		// address is a JSON object keyed by e-mail and is not touched here.
+		if keyRaw == key && strings.IndexByte(key, '@') > 0 && isEmailAddress(key) && !isSCPTarget(val) {
+			st.processSingleToken(key, keyRaw, false, false, false, sb)
+			sb.WriteByte(':')
+			st.processSingleToken(val, val, true, false, false, sb)
+			return false, true
+		}
+
 		sb.WriteString(keyRaw) // Write original key (with quotes)
 		sb.WriteRune(':')
 		// Route through processTokenLogic's isValuePos handling instead of
@@ -2938,13 +3207,26 @@ func isValueLiteral(s string) bool {
 // containing a sensitive word inside another word. It does when the whole key
 // is a sensitive-key entry other than a lone weak word (password, cvv; not
 // key, auth, sign, pass), when a run of two or more of its words is one
-// (x-api-key contains api_key), or when one of its words is a strong secret
-// word (db_password, csrf-token). Words are split on
+// (x-api-key contains api_key), when one of its words is a strong secret
+// word (db_password, csrf-token), when it matches one of the user's
+// PII_SENSITIVE_KEY_PATTERNS, or when it has a pw/pwd component (db_pwd).
+// Words are split on
 // '_', '-', '.', spaces and camelCase boundaries. "author", "keywords" and
 // ClientAuth-Enforced (a single weak word, auth, inside a longer name) do
 // not qualify.
 func (st *configState) keyNamesSecret(key string) bool {
 	lk := strings.ToLower(key)
+	// A key the user named in PII_SENSITIVE_KEY_PATTERNS names a secret by
+	// the user's own word, and so does a pw/pwd component (db_pwd, smtpPw):
+	// both make a key sensitive outside the list, so neither was known here,
+	// and {"first_name": "Lena"} under the pattern (^|_)name$ and {"db_pwd":
+	// "Lena"} kept a value of 2 to 5 letters that {"password": "Lena"} hid.
+	if st.sensitiveRegex != nil && st.sensitiveRegex.MatchString(key) {
+		return true
+	}
+	if strings.Contains(lk, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+		return true
+	}
 	var words []string
 	var cur strings.Builder
 	prevLower := false
@@ -3166,6 +3448,19 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 					sb.WriteString(key)
 					sb.WriteByte('=')
 					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
+				} else if isOTPValue(val) && isOTPKey(key) {
+					// ?otp=928283: a one-time code is a credential for the
+					// minutes it is valid, and six digits never reach the
+					// threshold.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
+				} else if isDOBValue(val) && isDOBKey(key) {
+					// ?dob=1986-12-01: a date is known as a date of birth by
+					// its key alone, like the id number above.
+					sb.WriteString(key)
+					sb.WriteByte('=')
+					st.redactWithHMAC(val, st.entityLabel("dob"), "signature", sb)
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
@@ -4131,6 +4426,7 @@ type segmentState struct {
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
 	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
+	pendingScheme bool // True if the previous token was an auth scheme word (QBox, AWS, Hawk) in the forced slot after a sensitive key
 	// True if the previous token was a lone "=" or ":" right after a
 	// sensitive key: the auth scheme may still follow ("Authorization = Basic").
 	sepAfterSensitiveKey bool
@@ -4166,6 +4462,38 @@ func looksLikeSecretWord(s string) bool {
 		}
 	}
 	return false
+}
+
+// isAuthSchemeWord reports whether s has the shape of an HTTP auth scheme
+// name as a client writes it in front of a credential: a capital letter, then
+// 2 to 23 ASCII letters, digits or dashes (Basic, Bearer, QBox, Qiniu, AWS,
+// AWS4-HMAC-SHA256, Hawk, SSWS, Negotiate). The caller checks that it stands
+// in the value slot of a sensitive key; the shape alone is any capitalised
+// word.
+func isAuthSchemeWord(s string) bool {
+	if len(s) < 3 || len(s) > 24 || s[0] < 'A' || s[0] > 'Z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !isASCIILetter(c) && !isASCIIDigit(c) && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// isSchemeParameter reports whether s is a name=value parameter of an auth
+// scheme rather than its credential: an '=' with no ':' in front of it
+// (realm="restricted", Credential=AKIA.../20130524/..., id="dh37fgj492je").
+// A credential of the <key>:<signature>= shape has its ':' first.
+func isSchemeParameter(s string) bool {
+	eq := strings.IndexByte(s, '=')
+	if eq < 0 {
+		return false
+	}
+	colon := strings.IndexByte(s, ':')
+	return colon < 0 || eq < colon
 }
 
 // strongSecretWords are the sensitive words that, in prose, name a secret
@@ -4298,6 +4626,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.isInValuePos = false
 			state.pendingBearer = strings.EqualFold(v, "bearer")
 			state.pendingBasic = strings.EqualFold(v, "basic")
+			state.pendingScheme = false
 			state.sepAfterSensitiveKey = false
 			state.prevClean = ""
 			return
@@ -4399,6 +4728,22 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// A word that reads as English is not one ("auth = basic support").
 	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
 		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0) {
+		forced = true
+	}
+	// Any other auth scheme written as "<Scheme> <credential>" after a
+	// sensitive key the same way: "accessToken: QBox <ak>:<sig>=" and
+	// "Authorization: QBox ..." (Qiniu, leak-radar repo-risks 2026-10-13 #2),
+	// "Authorization: AWS <key>:<sig>", Hawk, SSWS, HMAC-SHA256. The scheme
+	// word spends the key's forced slot and the credential after it went by
+	// score, where its ':' read as a key/value split. The rule is general -
+	// a capitalised word of letters, digits and dashes in the scheme slot
+	// keeps the force on the next token - and the next token has to look like
+	// a credential: 16 characters or more, with a digit or a symbol, not a
+	// timestamp and not a name=value parameter of the scheme (realm="x" after
+	// WWW-Authenticate: Basic, Credential=... after AWS4-HMAC-SHA256, id="..."
+	// after Hawk), so "Authorization: Missing header", "password: Invalid
+	// value" and "token: Expired 2026-10-23T14:15:31Z" keep their words.
+	if state.pendingScheme && len(cleanToken) >= minBearerCredentialLength && looksLikeSecretWord(cleanToken) && !isISO8601Timestamp(cleanToken) && !isSchemeParameter(cleanToken) {
 		forced = true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
@@ -4545,6 +4890,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// "Proxy-Authorization: Basic"), so prose such as "basic
 	// internationalization support" keeps its next word.
 	state.pendingBasic = lowerClean == "basic" && schemeSlot
+	state.pendingScheme = schemeSlot && isAuthSchemeWord(cleanToken)
 	state.pendingAfterCopula = afterCopula
 	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
 
@@ -4576,4 +4922,20 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		state.isInValuePos = false
 	}
 	state.lastTokenQuoted = trimmed != "" && (trimmed[0] == '"' || trimmed[0] == '\'')
+}
+
+// isSCPTarget reports whether val, the part after the colon in
+// user@host:val, is what scp, git and ssh put there rather than a password:
+// a path (/var/log/app.log, ~/notes.txt, org/repo.git, notes.txt) or a port
+// (8080).
+func isSCPTarget(val string) bool {
+	if val == "" || val[0] == '/' || val[0] == '~' || strings.IndexByte(val, '/') >= 0 || strings.HasSuffix(val, ".git") || isFileName(val) {
+		return true
+	}
+	for i := 0; i < len(val); i++ {
+		if !isASCIIDigit(val[i]) {
+			return false
+		}
+	}
+	return true
 }

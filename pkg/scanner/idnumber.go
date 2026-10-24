@@ -27,6 +27,11 @@ var idDocumentWords = map[string]bool{
 	"aadhaar": true, "zehut": true, "teudatzehut": true,
 	"idnumber": true, "nationalid": true, "taxid": true, "socialsecurity": true,
 	"passportnumber": true, "identitynumber": true,
+	// a patient's medical record number (mrn, patient_mrn,
+	// medical_record_number): the identifier a hospital system keys a person
+	// by, printed at INFO on every lookup in leak-radar repo-risks 2026-10-19
+	// (HealthRex/CDSS, `Searching by MRN: 1136893801`)
+	"mrn": true, "medicalrecordnumber": true,
 }
 
 // idOwnerWords are the words that make "id" an identity document rather than
@@ -48,9 +53,10 @@ var idRecordWords = map[string]bool{
 // split into words like a phone key and judged by its last words: a document
 // word (ssn, passport_number, cpf), "id" after a word that says whose id it is
 // (national_id, taxId), "id number" (idNumber, id_no, childIdNumber), identity
-// number, social security (number). A record id - id, user_id, order_id,
-// order_id_number - is not one, and neither is a key that only starts with
-// such words (ssn_verified, passport_country, id_number_type).
+// number, social security (number), medical record (number), mrn. A record
+// id - id, user_id, order_id, order_id_number - is not one, and neither is a
+// key that only starts with such words (ssn_verified, passport_country,
+// id_number_type, mrn_count).
 func isIDKey(key string) bool {
 	var words [maxKeyWords]string
 	n := splitKeyWords(key, &words)
@@ -76,6 +82,8 @@ func isIDKeyWords(parts []string) bool {
 		return stripped
 	case "security":
 		return prev == "social"
+	case "record":
+		return stripped && prev == "medical"
 	}
 	return idDocumentWords[last]
 }
@@ -85,6 +93,15 @@ func isIDKeyWords(parts []string) bool {
 // when the value is quoted ("1234 5678 9012"). The caller has checked that
 // the run is the value of an identity key. It returns the end index or 0.
 func matchKeyedIDNumber(line string, i int) int {
+	return matchGroupedDigits(line, i, minIDDigits, maxIDDigits)
+}
+
+// matchGroupedDigits matches minDigits to maxDigits digits at line[i:],
+// compact or in groups separated by one '-' or '.', and by one space when the
+// value is quoted. It returns the end index, or 0 when the run is shorter or
+// longer than asked. It is shared by the keyed detectors whose value is
+// digits only (an identity number, a one-time code).
+func matchGroupedDigits(line string, i, minDigits, maxDigits int) int {
 	quoted := i > 0 && (line[i-1] == '"' || line[i-1] == '\'')
 	n := len(line)
 	j := i
@@ -96,14 +113,14 @@ func matchKeyedIDNumber(line string, i int) int {
 			digits++
 		case (c == '-' || c == '.' || (c == ' ' && quoted)) && j+1 < n && isASCIIDigit(line[j+1]) && isASCIIDigit(line[j-1]):
 		default:
-			if digits < minIDDigits || digits > maxIDDigits {
+			if digits < minDigits || digits > maxDigits {
 				return 0
 			}
 			return j
 		}
 		j++
 	}
-	if digits < minIDDigits || digits > maxIDDigits {
+	if digits < minDigits || digits > maxDigits {
 		return 0
 	}
 	return j
