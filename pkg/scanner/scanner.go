@@ -2993,13 +2993,26 @@ func isValueLiteral(s string) bool {
 // containing a sensitive word inside another word. It does when the whole key
 // is a sensitive-key entry other than a lone weak word (password, cvv; not
 // key, auth, sign, pass), when a run of two or more of its words is one
-// (x-api-key contains api_key), or when one of its words is a strong secret
-// word (db_password, csrf-token). Words are split on
+// (x-api-key contains api_key), when one of its words is a strong secret
+// word (db_password, csrf-token), when it matches one of the user's
+// PII_SENSITIVE_KEY_PATTERNS, or when it has a pw/pwd component (db_pwd).
+// Words are split on
 // '_', '-', '.', spaces and camelCase boundaries. "author", "keywords" and
 // ClientAuth-Enforced (a single weak word, auth, inside a longer name) do
 // not qualify.
 func (st *configState) keyNamesSecret(key string) bool {
 	lk := strings.ToLower(key)
+	// A key the user named in PII_SENSITIVE_KEY_PATTERNS names a secret by
+	// the user's own word, and so does a pw/pwd component (db_pwd, smtpPw):
+	// both make a key sensitive outside the list, so neither was known here,
+	// and {"first_name": "Lena"} under the pattern (^|_)name$ and {"db_pwd":
+	// "Lena"} kept a value of 2 to 5 letters that {"password": "Lena"} hid.
+	if st.sensitiveRegex != nil && st.sensitiveRegex.MatchString(key) {
+		return true
+	}
+	if strings.Contains(lk, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+		return true
+	}
 	var words []string
 	var cur strings.Builder
 	prevLower := false
