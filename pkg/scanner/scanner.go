@@ -1923,6 +1923,26 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		return false
 	}
 
+	// Python's default log format (logging.basicConfig) writes
+	// LEVEL:logger:message with no space, so the first word of the message
+	// arrives glued to the prefix: "INFO:auth:User logged in". The colon
+	// splitter read "auth" as the key of "User", and a logger named auth,
+	// security, passport or app.token forced the first word of every message
+	// it wrote ("INFO:auth:[HIDDEN:...] logged in", "DEBUG:app.auth:[HIDDEN]
+	// session"). A logger name is a name, not a key: the prefix is written as
+	// it is and the message is read as it would be on its own, so a key the
+	// message starts with ("INFO:auth:Password: x", "DEBUG:root:password
+	// hunter2") still forces its value and a plain word does not.
+	if !forcedSensitive {
+		if end := pythonLogPrefixEnd(rawToken); end > 0 {
+			sb.WriteString(rawToken[:end])
+			if end == len(rawToken) {
+				return false
+			}
+			return st.processTokenLogic(rawToken[end:], false, contextSensitive, false, false, overrideSensitivity, sb, depth+1)
+		}
+	}
+
 	// A compact JSON pair with a quoted value, "key":"value" with no space
 	// after the colon, is one token. When the value held an '=' it went to
 	// the key=value splitter first, which took everything up to that '=' as
@@ -2604,6 +2624,41 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		return keySensitive && val == "", true
 	}
 	return false, false
+}
+
+// pythonLogLevels are the level names Python's logging module prints first
+// in its default format, LEVEL:logger:message.
+var pythonLogLevels = map[string]bool{
+	"DEBUG": true, "INFO": true, "WARNING": true, "WARN": true, "ERROR": true,
+	"CRITICAL": true, "FATAL": true, "TRACE": true, "NOTICE": true,
+}
+
+// pythonLogPrefixEnd reports where the message starts in a token of the
+// shape LEVEL:logger:message: a level name in capitals, a colon, a logger
+// name (a dotted identifier such as root, app.auth, huawei_lte_api.Connection,
+// uvicorn-access) and a second colon. It returns the index after that colon,
+// or 0 when the token has not got this shape. The level is checked first, as
+// this runs on every token with a colon in it.
+func pythonLogPrefixEnd(tok string) int {
+	colon := strings.IndexByte(tok, ':')
+	if colon < 4 || colon > 8 || !pythonLogLevels[tok[:colon]] {
+		return 0
+	}
+	i := colon + 1
+	if i >= len(tok) || (!isASCIILetter(tok[i]) && tok[i] != '_') {
+		return 0
+	}
+	for i < len(tok) {
+		c := tok[i]
+		if c == ':' {
+			return i + 1
+		}
+		if !isASCIILetter(c) && !isASCIIDigit(c) && c != '_' && c != '.' && c != '-' {
+			return 0
+		}
+		i++
+	}
+	return 0
 }
 
 // isSensitivePairKey reports whether the key half of a key=value pair is
