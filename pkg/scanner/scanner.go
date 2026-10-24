@@ -1536,6 +1536,21 @@ func (st *configState) scanSegmentFrom(segment string, sb *strings.Builder, dept
 			continue
 		}
 
+		// A single-quoted SQL literal that holds a JSON document ('{"error":
+		// "Duplicate entry 'x@y' for key 'users.email'"}' in an INSERT of a
+		// database dump) can carry single quotes of its own inside the JSON
+		// strings. Read as plain quotes, the first inner one closed the
+		// literal: the address after it passed, and the tail with the
+		// closing "} was hidden as one value, which broke the JSON. The
+		// literal ends at the quote right after the bracket that closes the
+		// document, so it is one token, and the JSON inside is scanned as
+		// JSON is anywhere else.
+		if r == '\'' && i+1 < n && (segment[i+1] == '{' || segment[i+1] == '[') {
+			if end := jsonDocumentEnd(segment, i+1); end > 0 && end < n && segment[end] == '\'' {
+				i = end + 1
+				continue
+			}
+		}
 		if r == '"' || (r == '\'' && apostropheOpens(segment, i+width)) {
 			inQuote = true
 			quoteChar = r
@@ -1742,6 +1757,20 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 	if depth > maxTokenRecursionDepth {
 		st.processSingleToken(trimQuotes(rawToken), rawToken, forcedSensitive, contextSensitive, true, sb)
 		return false
+	}
+
+	// A value between backslash-escaped quotes (\'lena@example.com\', how a
+	// MySQL dump and a PHP or JSON-in-SQL string escape the quotes inside a
+	// literal) is the value; the escapes are framing. Scored with them, an
+	// address passed (its shape test saw \'lena@example.com\') and a forced
+	// value was hidden with its quotes and backslashes. A value in backticks
+	// (`us_rate_limits`, a MySQL identifier) is the same: the table name was
+	// scored with its backticks and hidden whole.
+	if pre, post, ok := escapedOrBacktickWrap(rawToken); ok {
+		sb.WriteString(rawToken[:pre])
+		inner := st.processTokenLogic(rawToken[pre:len(rawToken)-post], forcedSensitive, contextSensitive, isValuePos, false, overrideSensitivity, sb, depth+1)
+		sb.WriteString(rawToken[len(rawToken)-post:])
+		return inner
 	}
 
 	// A marker from an earlier pass is one opaque value; parsing it would read
