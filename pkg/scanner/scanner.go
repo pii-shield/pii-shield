@@ -1855,7 +1855,14 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 		}
 	}
 
-	if strings.Contains(rawToken, "://") || (strings.Contains(rawToken, "?") && strings.Contains(rawToken, "=")) {
+	// A token with no scheme is a URL when it has a query: a '?' with a
+	// name=value pair after it (/login?user=bob&password=x). A '?' with no
+	// '=' after it is punctuation at the end of a value: password=Kaffee1977?
+	// (godror's dpiConn_create debug line, leak-radar repo-risks 2026-10-05)
+	// and password="Kaffee1977?" went to the URL handling, which found no
+	// parameter and wrote them out whole, while password=Kaffee1977 was
+	// hidden.
+	if strings.Contains(rawToken, "://") || hasQueryShape(rawToken) {
 		// A quoted phrase with a URL in it ("curl -H 'Authorization: Bearer
 		// <key>' https://api/x" as a JSON value, msg="fetched https://... with
 		// <key>") is text, not a URL: a URL has no spaces. It went to the URL
@@ -2210,6 +2217,14 @@ func isQuotedPhrase(s string) bool {
 	}
 	inner := s[1 : len(s)-1]
 	return strings.ContainsAny(inner, " \t") && strings.IndexByte(inner, s[0]) < 0 && !startsWithProductToken(inner)
+}
+
+// hasQueryShape reports whether token has a '?' with an '=' somewhere after
+// it, the shape of a URL query without a scheme (/a?b=c, a=1?b=2). A '?' at
+// the end of a value (password=x?) or before text with no '=' is not one.
+func hasQueryShape(token string) bool {
+	q := strings.IndexByte(token, '?')
+	return q >= 0 && strings.IndexByte(token[q+1:], '=') >= 0
 }
 
 // startsWithProductToken reports whether s opens with a product/version token
