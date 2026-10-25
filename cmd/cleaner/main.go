@@ -66,9 +66,18 @@ func main() {
 	}
 	stopMetrics := func() { shutdownMetricsServer(metricsSrv, metricsShutdownGrace) }
 
-	// finalize runs on every shutdown path: emit a last stats summary (if enabled)
-	// and drain the metrics server.
+	// The sanitized stream is buffered and flushed on a timer (see output.go);
+	// PII_OUTPUT_FLUSH_INTERVAL=0 writes every line through as before.
+	flushInterval, ok := parseFlushInterval(os.Getenv("PII_OUTPUT_FLUSH_INTERVAL"))
+	if !ok {
+		log.Printf("Invalid PII_OUTPUT_FLUSH_INTERVAL %q, using %s", os.Getenv("PII_OUTPUT_FLUSH_INTERVAL"), defaultFlushInterval)
+	}
+	out := newOutputWriter(os.Stdout, flushInterval)
+
+	// finalize runs on every shutdown path: write out the buffered lines, emit
+	// a last stats summary (if enabled) and drain the metrics server.
 	finalize := func() {
+		_ = out.Close()
 		if stats != nil {
 			log.Print(stats.summary())
 		}
@@ -126,7 +135,7 @@ func main() {
 				finalize()
 				os.Exit(0)
 			}()
-			readFIFO(watchFile, metricsEnabled, failPolicy, os.Stdout, nil)
+			readFIFO(watchFile, metricsEnabled, failPolicy, out, nil)
 			return
 		}
 
@@ -151,7 +160,7 @@ func main() {
 			if line.Err != nil {
 				continue
 			}
-			processLine(line.Text, metricsEnabled, failPolicy, os.Stdout)
+			processLine(line.Text, metricsEnabled, failPolicy, out)
 		}
 		finalize()
 	} else {
@@ -167,7 +176,7 @@ func main() {
 		}()
 
 		for reader.Scan() {
-			processLine(reader.Text(), metricsEnabled, failPolicy, os.Stdout)
+			processLine(reader.Text(), metricsEnabled, failPolicy, out)
 		}
 
 		if err := reader.Err(); err != nil {
@@ -176,9 +185,9 @@ func main() {
 			}
 			if err == bufio.ErrTooLong {
 				if failPolicy == "closed" {
-					fmt.Println("[PII_SHIELD_DROP: BUFFER_OVERFLOW]")
+					writeMarker(out, "[PII_SHIELD_DROP: BUFFER_OVERFLOW]")
 				} else {
-					fmt.Println("[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]")
+					writeMarker(out, "[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]")
 				}
 			}
 			fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
@@ -299,9 +308,9 @@ func streamPipeOnce(path string, metricsEnabled bool, failPolicy string, out io.
 		}
 		if err == bufio.ErrTooLong {
 			if failPolicy == "closed" {
-				_, _ = fmt.Fprintln(out, "[PII_SHIELD_DROP: BUFFER_OVERFLOW]")
+				writeMarker(out, "[PII_SHIELD_DROP: BUFFER_OVERFLOW]")
 			} else {
-				_, _ = fmt.Fprintln(out, "[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]")
+				writeMarker(out, "[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]")
 			}
 		}
 		fmt.Fprintln(os.Stderr, "Error reading pipe:", err)
@@ -320,7 +329,7 @@ func processLine(text string, metricsEnabled bool, failPolicy string, out io.Wri
 				}
 				// Apply Blast Radius Control Policy
 				if failPolicy == "closed" {
-					_, _ = fmt.Fprintln(out, "[PII_SHIELD_DROP: FATAL_ERROR]")
+					writeMarker(out, "[PII_SHIELD_DROP: FATAL_ERROR]")
 				} else {
 					// Fail-Open: keep the flow alive
 					_, _ = fmt.Fprintln(out, text)
