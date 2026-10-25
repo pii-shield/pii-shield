@@ -5,35 +5,33 @@ import (
 	"testing"
 )
 
-// TestLowEqLowInMatchToLower checks the stack-lowered path against
-// strings.ToLower on ASCII tokens, and that the heap path is what
-// processAndAppend falls back to for a token the stack path cannot take (a
-// non-ASCII token whose lowering is ASCII, the Kelvin sign).
-func TestLowEqLowInMatchToLower(t *testing.T) {
-	words := map[string]bool{"key": true, "bearer": true, "error": true, "none": true}
-	for _, tok := range []string{"", "key", "KEY", "Key", "Bearer", "BEARER", "Error", "None", "nope", "keys", "Setting"} {
-		var buf [64]byte
-		low := appendLowerASCII(buf[:0], tok)
+// TestLoweredTokenMatchesToLower checks is, in and forBigrams against
+// strings.ToLower on ASCII tokens, on a token over the stack buffer and on
+// a non-ASCII token whose lowering is ASCII (the Kelvin sign), which takes
+// the heap path.
+func TestLoweredTokenMatchesToLower(t *testing.T) {
+	words := map[string]bool{"key": true, "bearer": true, "error": true, "none": true, "setting": true}
+	long := strings.Repeat("Ab", 40) + "key"
+	for _, tok := range []string{"", "key", "KEY", "Key", "Bearer", "BEARER", "Error", "None", "nope", "keys", "Setting", long, "Key", "Straße", "密码"} {
+		lt := newLoweredToken(tok)
 		want := strings.ToLower(tok)
-		if string(low) != want {
-			t.Errorf("appendLowerASCII(%q) = %q, want %q", tok, low, want)
-		}
 		for lit := range words {
-			if got := lowEq(low, "", lit); got != (want == lit) {
-				t.Errorf("lowEq(%q, %q) = %v, want %v", tok, lit, got, want == lit)
+			if got := lt.is(lit); got != (want == lit) {
+				t.Errorf("newLoweredToken(%q).is(%q) = %v, want %v", tok, lit, got, want == lit)
 			}
 		}
-		if got := lowIn(words, low, ""); got != words[want] {
-			t.Errorf("lowIn(%q) = %v, want %v", tok, got, words[want])
+		if got := lt.in(words); got != words[want] {
+			t.Errorf("newLoweredToken(%q).in = %v, want %v", tok, got, words[want])
+		}
+		if got := lt.forBigrams(); strings.ToLower(got) != want {
+			t.Errorf("newLoweredToken(%q).forBigrams() = %q, lowers to %q, want %q", tok, got, strings.ToLower(got), want)
+		}
+		if ascii := !hasNonASCII(tok) && len(tok) <= 64; lt.ascii != ascii {
+			t.Errorf("newLoweredToken(%q).ascii = %v, want %v", tok, lt.ascii, ascii)
 		}
 	}
-	kelvin := "Key" // lowers to "key"
-	if !hasNonASCII(kelvin) {
-		t.Fatal("test token must be non-ASCII")
-	}
-	lowered := strings.ToLower(kelvin)
-	if !lowEq(nil, lowered, "key") || !lowIn(words, nil, lowered) {
-		t.Errorf("heap path lost the Kelvin-sign key: %q", lowered)
+	if lt := newLoweredToken("Key"); !lt.is("key") || !lt.in(words) {
+		t.Errorf("heap path lost the Kelvin-sign key: %q", lt.heap)
 	}
 }
 
