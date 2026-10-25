@@ -66,6 +66,9 @@ type configState struct {
 	// keyMatcher finds a config.SensitiveKeys entry inside a key in one
 	// pass; see keymatcher.go.
 	keyMatcher *keyMatcher
+	// bigrams is EnglishBigramFreqs as a table with this config's default
+	// score filled in; see bigrams.go.
+	bigrams *bigramTable
 }
 
 // activeConfig holds the currently published *configState.
@@ -587,6 +590,7 @@ func buildConfigState(cfg Config) *configState {
 		sensitiveRegex: re,
 		hmacPool:       pool,
 		keyMatcher:     newKeyMatcher(cfg.SensitiveKeys),
+		bigrams:        newBigramTable(cfg.BigramDefaultScore),
 	}
 }
 
