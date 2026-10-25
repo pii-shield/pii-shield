@@ -25,9 +25,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       serviceAccountName: {{ include "pii-shield-operator.serviceAccountName" . }}
       terminationGracePeriodSeconds: 10
       containers:

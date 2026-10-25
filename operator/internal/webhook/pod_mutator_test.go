@@ -78,6 +78,8 @@ func TestInjectFileMode(t *testing.T) {
 	assert.True(t, *sidecar.SecurityContext.RunAsNonRoot)
 	assert.True(t, *sidecar.SecurityContext.ReadOnlyRootFilesystem)
 	assert.False(t, *sidecar.SecurityContext.AllowPrivilegeEscalation)
+	assert.Equal(t, []corev1.Capability{"ALL"}, sidecar.SecurityContext.Capabilities.Drop)
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, sidecar.SecurityContext.SeccompProfile.Type)
 
 	// Verify Resources
 	cpuLimit, ok := sidecar.Resources.Limits[corev1.ResourceCPU]

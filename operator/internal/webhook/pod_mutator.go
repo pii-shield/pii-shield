@@ -233,7 +233,7 @@ func (m *PodMutator) injectPipeMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 	// Init container to mkfifo in emptyDir (survives main restart)
 	podCopy.Spec.InitContainers = append(podCopy.Spec.InitContainers, corev1.Container{
 		Name:    "pii-mkfifo",
-		Image:   "alpine",
+		Image:   "alpine:3.20",
 		Command: []string{"/bin/sh", "-c"},
 		Args:    []string{"mkfifo /shared/log.pipe && chmod 666 /shared/log.pipe"},
 		VolumeMounts: []corev1.VolumeMount{
@@ -318,6 +318,8 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 			RunAsNonRoot:             ptr.To(true),
 			ReadOnlyRootFilesystem:   ptr.To(true),
 			AllowPrivilegeEscalation: ptr.To(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 		Resources: policy.Spec.Resources,
 		Env:       scannerEnv(policy),

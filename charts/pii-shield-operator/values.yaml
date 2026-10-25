@@ -23,8 +23,15 @@ serviceAccount:
 
 podAnnotations: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+# Hardened pod-level defaults, matching the "restricted" Pod Security
+# Standard. The operator image is a distroless static binary that already
+# runs as UID 65532, so these only state what the image does anyway.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   allowPrivilegeEscalation: false
