@@ -80,13 +80,36 @@ func (st *configState) bigramProb(b string) float64 {
 	return st.config.BigramDefaultScore
 }
 
-// bigramProbBytes is bigramProb for a two-byte bigram without building an
-// intermediate string: the string(bg[:]) conversion sits directly in the map
-// index expression, which the compiler compiles to an allocation-free lookup.
+// bigramTable is EnglishBigramFreqs laid out for the hot path: the score of
+// every pair of ASCII bytes, with the config's BigramDefaultScore already in
+// the cells the map does not have. bigramProbBytes used to look each pair
+// up in the map, hashing a two-byte string per pair of every token, which
+// was 12% of scan time on text logs and 10% on JSON (profile of 2026-10-25).
+// A table is built per config snapshot (buildConfigState), so it carries
+// that snapshot's default score and reflects the map as it was then.
+type bigramTable [128][128]float64
+
+func newBigramTable(defaultScore float64) *bigramTable {
+	t := &bigramTable{}
+	for i := range t {
+		for j := range t[i] {
+			t[i][j] = defaultScore
+		}
+	}
+	for bg, v := range EnglishBigramFreqs {
+		if len(bg) == 2 && bg[0] < 0x80 && bg[1] < 0x80 {
+			t[bg[0]][bg[1]] = v
+		}
+	}
+	return t
+}
+
+// bigramProbBytes is bigramProb for a two-byte bigram: one table read for a
+// pair of ASCII bytes; a pair with a byte outside ASCII is never in the map
+// and scores the default.
 func (st *configState) bigramProbBytes(b0, b1 byte) float64 {
-	bg := [2]byte{b0, b1}
-	if v, ok := EnglishBigramFreqs[string(bg[:])]; ok {
-		return v
+	if b0|b1 < 0x80 {
+		return st.bigrams[b0][b1]
 	}
 	return st.config.BigramDefaultScore
 }
