@@ -59,6 +59,12 @@ Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail ins
 
 See `docs/sidecar-failure-modes.md` for production failure-mode guidance.
 
+## Output
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PII_OUTPUT_FLUSH_INTERVAL` | Sanitized lines are collected in a 64 KiB buffer and written out when it fills, every this Go duration (e.g. `50ms`, `1s`), right after a `[PII_SHIELD_DROP: …]` or `[PII_SHIELD_WARN: …]` marker, and on shutdown. Set to `0` to write every line as soon as it is sanitized (one `write` per line, 15–25% slower on a busy stream). Invalid values fall back to the default. | `50ms` |
+
 ## Observability
 
 | Variable | Description | Default |
