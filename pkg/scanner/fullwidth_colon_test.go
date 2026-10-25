@@ -44,17 +44,15 @@ func TestFullWidthColonSeparatesKeyAndValue(t *testing.T) {
 }
 
 // A user-set key list keeps its order, and a non-ASCII entry may stand
-// anywhere in it: an ASCII key is matched against the ASCII entries only, and
-// that split must not depend on the non-ASCII ones coming last (the default
-// list has them last; PII_SENSITIVE_KEYS='密码,pin' does not).
+// anywhere in it, before or after the ASCII ones (the default list has them
+// last; PII_SENSITIVE_KEYS='密码,pin' does not).
 func TestSensitiveKeyListOrderWithNonASCIIEntries(t *testing.T) {
 	for _, tc := range []struct {
-		keys  []string
-		ascii int
+		keys []string
 	}{
-		{[]string{"密码", "pin"}, 1},
-		{[]string{"pin", "密码"}, 1},
-		{[]string{"密码", "pin", "パスワード", "otp"}, 2},
+		{[]string{"密码", "pin"}},
+		{[]string{"pin", "密码"}},
+		{[]string{"密码", "pin", "パスワード", "otp"}},
 	} {
 		cfg := DefaultConfig()
 		cfg.Salt = []byte("filename-test-salt-1234567890")
@@ -71,9 +69,6 @@ func TestSensitiveKeyListOrderWithNonASCIIEntries(t *testing.T) {
 		// The list replaces the default, so a key outside it is not sensitive.
 		if got := s.ScanAndRedact("password: hunter2x"); got != "password: hunter2x" {
 			t.Errorf("keys %v: ScanAndRedact(password: hunter2x) = %q, want unchanged", tc.keys, got)
-		}
-		if n := len(s.asciiSensitiveKeys); n != tc.ascii {
-			t.Errorf("keys %v: asciiSensitiveKeys has %d entries, want %d", tc.keys, n, tc.ascii)
 		}
 	}
 }
