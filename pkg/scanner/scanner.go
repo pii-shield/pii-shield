@@ -1231,6 +1231,34 @@ func isASCIIString(s string) bool {
 
 // lowerASCIIByte lowercases A-Z; all other bytes pass through unchanged,
 // which is exactly what strings.ToLower does to a pure-ASCII string.
+// appendLowerASCII appends s to dst with A-Z folded; s must be ASCII.
+func appendLowerASCII(dst []byte, s string) []byte {
+	for i := 0; i < len(s); i++ {
+		dst = append(dst, lowerASCIIByte(s[i]))
+	}
+	return dst
+}
+
+// lowEq reports whether a token's lowered form is lit. low is the token
+// lowered on the stack (an ASCII token, see processAndAppend) and lowered is
+// the heap copy made for any other token; exactly one of them is set. The
+// string(low) in the comparison does not allocate.
+func lowEq(low []byte, lowered, lit string) bool {
+	if low != nil {
+		return string(low) == lit
+	}
+	return lowered == lit
+}
+
+// lowIn is lowEq for a word set: the string(low) in the index expression
+// does not allocate.
+func lowIn(m map[string]bool, low []byte, lowered string) bool {
+	if low != nil {
+		return m[string(low)]
+	}
+	return m[lowered]
+}
+
 func lowerASCIIByte(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b + ('a' - 'A')
@@ -4579,7 +4607,24 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		cleanToken = cleanToken[:len(cleanToken)-1]
 	}
 	cleanToken = trimQuotes(cleanToken)
-	lowerClean := strings.ToLower(cleanToken)
+	// The case-insensitive checks below used to read a strings.ToLower copy
+	// of every token, one allocation per token with an upper-case letter
+	// and 5-8% of scan time. An ASCII token of up to 64 bytes is lowered
+	// into a stack buffer instead and compared through lowEq/lowIn; a
+	// longer or non-ASCII token keeps the heap copy, since Unicode lowering
+	// can change byte lengths (the Kelvin sign becomes k).
+	var lowBuf [64]byte
+	var low []byte
+	var lowerClean string
+	// bigramToken is what calculateBigramAdjustment scores: it folds ASCII
+	// case itself, so an ASCII token goes in as it is.
+	bigramToken := cleanToken
+	if len(cleanToken) <= len(lowBuf) && !hasNonASCII(cleanToken) {
+		low = appendLowerASCII(lowBuf[:0], cleanToken)
+	} else {
+		lowerClean = strings.ToLower(cleanToken)
+		bigramToken = lowerClean
+	}
 
 	// "Authorization=Basic <base64>" in one token (a Java Map printed with
 	// toString, logfmt): the pair's value is the scheme, and the forced
@@ -4609,7 +4654,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	}
 
 	// Check if this token is a "Generic Key" identifier (e.g. "key", "name")
-	isGenericKeyName := lowerClean == "key" || lowerClean == "name" || lowerClean == "setting"
+	isGenericKeyName := lowEq(low, lowerClean, "key") || lowEq(low, lowerClean, "name") || lowEq(low, lowerClean, "setting")
 
 	// 1. Process Token
 	//
@@ -4653,7 +4698,8 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// protects on real code and logs.
 	// A literal (true, null, None) is never a secret, whatever the key.
 	if forced && len(cleanToken) < st.config.MinSecretLength && isAllLetters(cleanToken) &&
-		(!state.isInValuePos || !state.keyNamesSecret || isValueLiteral(lowerClean)) {
+		(!state.isInValuePos || !state.keyNamesSecret ||
+			lowEq(low, lowerClean, "true") || lowEq(low, lowerClean, "false") || lowEq(low, lowerClean, "null") || lowEq(low, lowerClean, "none")) {
 		forced = false
 	}
 	// In prose, the same for a one- or two-character token of any kind: the
@@ -4671,7 +4717,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// after a separator ("password: swordfish", "password=swordfish"), which
 	// is not prose. The cost is a dictionary-word password written bare
 	// after the word "password", which KNOWN_LIMITATIONS already gives up.
-	if forced && !state.isInValuePos && isAllLetters(cleanToken) && (st.calculateBigramAdjustment(lowerClean) < 0 || !hasASCII(cleanToken)) {
+	if forced && !state.isInValuePos && isAllLetters(cleanToken) && (st.calculateBigramAdjustment(bigramToken) < 0 || !hasASCII(cleanToken)) {
 		// A word with no ASCII in it at all (密码错误 请重试, "wrong
 		// password, retry") cannot be judged by the English table and is a
 		// word; a secret has ASCII in it.
@@ -4702,7 +4748,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// realm="..." after WWW-Authenticate: Basic has not.
 	// A word that reads as English is not one ("auth = basic support").
 	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
-		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lowerClean) < 0) {
+		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(bigramToken) < 0) {
 		forced = true
 	}
 	// Any other auth scheme written as "<Scheme> <credential>" after a
@@ -4746,7 +4792,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// reported as a key.
 	// The key check runs only on a lone separator: on every token it cost
 	// 30% of throughput and four allocations.
-	afterCopula := state.prevStrongSecretWord && (copulaWords[lowerClean] || trimmed == "=") ||
+	afterCopula := state.prevStrongSecretWord && (lowIn(copulaWords, low, lowerClean) || trimmed == "=") ||
 		(trimmed == "=" || trimmed == ":") && prevClean != "" && st.isSensitiveKey(prevClean)
 	// {"name": "password", "value": …} makes the value sensitive, but only the
 	// pair that carries it: a "value" or "data" key, or a name that ends in
@@ -4859,15 +4905,15 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	}
 
 	// Remember the auth scheme for exactly one token (see the forcing above).
-	state.pendingBearer = lowerClean == "bearer"
+	state.pendingBearer = lowEq(low, lowerClean, "bearer")
 	// "basic" is an ordinary English word; it is an auth scheme only in the
 	// value slot of an authorization key ("Authorization: Basic",
 	// "Proxy-Authorization: Basic"), so prose such as "basic
 	// internationalization support" keeps its next word.
-	state.pendingBasic = lowerClean == "basic" && schemeSlot
+	state.pendingBasic = lowEq(low, lowerClean, "basic") && schemeSlot
 	state.pendingScheme = schemeSlot && isAuthSchemeWord(cleanToken)
 	state.pendingAfterCopula = afterCopula
-	state.prevStrongSecretWord = isKey && strongSecretWords[lowerClean]
+	state.prevStrongSecretWord = isKey && lowIn(strongSecretWords, low, lowerClean)
 
 	if k, isPair := pairKey(trimmed); isPair && (strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")) {
 		state.pendingHashKey = isHashKeyName(k) && !st.isSensitiveKey(k)
@@ -4876,7 +4922,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	}
 
 	// Check if this token is a Context Keyword (e.g. "Error", "Failed")
-	if ContextKeywords[lowerClean] {
+	if lowIn(ContextKeywords, low, lowerClean) {
 		state.pendingContextSensitive = true
 	} else {
 		state.pendingContextSensitive = false
