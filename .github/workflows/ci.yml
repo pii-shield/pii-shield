@@ -109,9 +109,19 @@ jobs:
   # by more than 10% and benchstat calls the difference significant. Shared
   # runners are noisy, so the threshold catches regressions a reviewer would
   # care about, not a few percent; for precise numbers use
-  # benchmark/run_benchmarks.sh on a quiet machine. On a push there is no
-  # base to compare with, so the benchmarks only run. The job name is kept
-  # because the "Protect main" ruleset lists it as a required check.
+  # benchmark/run_benchmarks.sh on a quiet machine. A slowdown above 5% that
+  # stays within 10% only warns (an annotation and a table in the job
+  # summary).
+  #
+  # The second comparison is against the accepted baseline, the ref in
+  # benchmark/baseline-ref: it warns above 8% and fails above 15%, so small
+  # slowdowns cannot add up unnoticed (v2.2.0 -> v2.2.8 lost 13-24% of CLI
+  # throughput, every PR within the 10% above). To accept a slowdown on
+  # purpose, move benchmark/baseline-ref in the same PR.
+  #
+  # On a push there is no base to compare with, so the benchmarks only run.
+  # The job name is kept because the "Protect main" ruleset lists it as a
+  # required check.
   benchmark:
     name: Performance Check
     runs-on: ubuntu-latest
@@ -127,7 +137,15 @@ jobs:
       if: github.event_name == 'pull_request'
       env:
         BASE_REF: ${{ github.event.pull_request.base.sha }}
+        LABEL: PR base
       run: scripts/bench-gate.sh
+    - name: Compare benchmarks with the accepted baseline
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      env:
+        THRESHOLD_PCT: '15'
+        WARN_PCT: '8'
+        LABEL: accepted baseline
+      run: BASE_REF="$(tr -d '[:space:]' < benchmark/baseline-ref)" scripts/bench-gate.sh
     - name: Run benchmarks (push, no base to compare)
       if: github.event_name != 'pull_request'
       run: go test -run '^$' -bench=. -benchmem ./pkg/scanner

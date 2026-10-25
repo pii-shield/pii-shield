@@ -63,12 +63,25 @@ For scanner-only microbenchmarks, run:
 go test -bench=. -benchmem ./pkg/scanner
 ```
 
-On a pull request, the "Performance Check" job runs `scripts/bench-gate.sh`:
-it builds the scanner benchmarks at the PR base and at your branch, runs them
-interleaved, and fails when one is more than 10% slower and benchstat calls
-the difference significant. Run it locally the same way:
+On a pull request, the "Performance Check" job runs `scripts/bench-gate.sh`
+twice. Each run builds the scanner benchmarks (one JSON line, a short line
+for throughput, and 512 lines shaped like an nginx access log) at a base ref
+and at your branch, runs them interleaved, and compares them with benchstat.
+Only differences benchstat calls significant count.
+
+- Against the PR base: more than 5% slower warns, more than 10% fails.
+- Against the accepted baseline, the ref in `benchmark/baseline-ref`: more
+  than 8% slower warns, more than 15% fails. This catches small slowdowns
+  that add up across PRs.
+
+A warning does not fail the job; it shows as an annotation on the run with
+the benchstat table in the job summary. If a slowdown is worth it (a new
+detector that costs time, say), accept it by moving `benchmark/baseline-ref`
+to the new ref in the same PR and say why in the PR description. Run the
+gate locally the same way:
 ```bash
 BASE_REF=origin/main scripts/bench-gate.sh
+BASE_REF=$(cat benchmark/baseline-ref) THRESHOLD_PCT=15 WARN_PCT=8 scripts/bench-gate.sh
 ```
 The CI runners are shared and noisy, so the gate only catches large
 regressions; the end-to-end A/B above is the evidence for a performance claim.
