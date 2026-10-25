@@ -6,31 +6,14 @@ import (
 	"testing"
 )
 
-// referenceIsSensitiveKey is isSensitiveKey as it was before O1 (ToLower,
-// then strings.Contains once per entry), the oracle for the equivalence
-// test below.
-func (st *configState) referenceIsSensitiveKey(key string) bool {
+// referenceContains is the substring step of isSensitiveKey as it was before
+// O1 (ToLower, then strings.Contains once per entry), the oracle for the
+// matcher. The pub/key and entropy tail after the match is unchanged code
+// and is tested through isSensitiveKey itself.
+func referenceContains(keys []string, key string) bool {
 	k := strings.ToLower(key)
-	keys := st.config.SensitiveKeys
-	if !hasNonASCII(k) {
-		keys = st.asciiSensitiveKeys
-	}
 	for _, sk := range keys {
 		if strings.Contains(k, sk) {
-			if strings.Contains(k, "pub") && strings.Contains(k, "key") {
-				return false
-			}
-			if len(key) > 15 && st.calculateComplexity(key) > st.config.EntropyThreshold && !st.isWordsSecretName(k) {
-				return false
-			}
-			return true
-		}
-	}
-	if strings.Contains(k, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
-		return true
-	}
-	if st.sensitiveRegex != nil {
-		if st.sensitiveRegex.MatchString(key) {
 			return true
 		}
 	}
@@ -100,20 +83,22 @@ func keyMatcherCorpus(rng *rand.Rand) []string {
 	return keys
 }
 
-// TestIsSensitiveKeyMatchesReference proves the single-pass match gives the
-// same answer as the old ToLower + strings.Contains loop for every key in
-// the corpus under every config.
-func TestIsSensitiveKeyMatchesReference(t *testing.T) {
+// TestKeyMatcherMatchesReference proves the single-pass match gives the same
+// answer as the old ToLower + strings.Contains loop for every key in the
+// corpus under every config, and that the lowered key it hands back is the
+// one isSensitiveKey would have made.
+func TestKeyMatcherMatchesReference(t *testing.T) {
 	keys := keyMatcherCorpus(rand.New(rand.NewSource(1)))
 	for name, cfg := range keyMatcherConfigs() {
 		st := buildConfigState(cfg)
 		mismatches := 0
 		for _, k := range keys {
-			got, want := st.isSensitiveKey(k), st.referenceIsSensitiveKey(k)
-			if got != want {
+			got, lowered := st.keyMatcher.find(k)
+			want := referenceContains(cfg.SensitiveKeys, k)
+			if got != want || (lowered != "" && lowered != strings.ToLower(k)) {
 				mismatches++
 				if mismatches <= 10 {
-					t.Errorf("%s: isSensitiveKey(%q) = %v, reference %v", name, k, got, want)
+					t.Errorf("%s: find(%q) = %v, %q; reference %v", name, k, got, lowered, want)
 				}
 			}
 		}
@@ -123,8 +108,43 @@ func TestIsSensitiveKeyMatchesReference(t *testing.T) {
 	}
 }
 
+// TestIsSensitiveKeyTail pins the answers of the whole function on the keys
+// that reach the code after the match (pub/key reject, entropy reject,
+// pw/pwd components) and on non-ASCII keys, under the default list.
+func TestIsSensitiveKeyTail(t *testing.T) {
+	st := buildConfigState(DefaultConfig())
+	for _, tc := range []struct {
+		key  string
+		want bool
+	}{
+		{"password", true},
+		{"Password", true},
+		{"public_key", false},
+		{"PubKey", false},
+		{"x-api-key", true},
+		{"author", true}, // contains auth, as before O1
+		{"aGVsbG9fc2VjcmV0X2tleV9mb3JfdGVzdA", false},
+		{"my_secret_token_value_long_name", true},
+		{"db_pw", true},
+		{"dbPwd", true},
+		{"PWD", false},
+		{"shipway", false},
+		{"密码", true},
+		{"用户密码", true},
+		{"パスワード", true},
+		{"Kelvin\u212a", false},
+		{"\u212aey", true}, // the Kelvin sign lowers to k: key
+		{"İsecret", true},
+		{"", false},
+	} {
+		if got := st.isSensitiveKey(tc.key); got != tc.want {
+			t.Errorf("isSensitiveKey(%q) = %v, want %v", tc.key, got, tc.want)
+		}
+	}
+}
+
 // TestKeyMatcherContainsAny checks the automaton alone against
-// strings.Contains on lowercased ASCII keys, including entries that end
+// strings.Contains on lowercased keys, including entries that end
 // inside other entries (he in she, his in hers), where a missed suffix link
 // would lose a match.
 func TestKeyMatcherContainsAny(t *testing.T) {
@@ -140,13 +160,16 @@ func TestKeyMatcherContainsAny(t *testing.T) {
 		{[]string{"abcd", "cdx"}, "abcdx", true},
 		{[]string{"aab"}, "aaab", true},
 		{[]string{"Token"}, "token", false},
+		{[]string{"密码"}, "用户密码", true},
+		{[]string{"key"}, "\u212aey", true},
+		{[]string{"kelvin"}, "\u212aelvin", true},
 		{[]string{""}, "anything", true},
 		{nil, "password", false},
 		{[]string{"key"}, "", false},
 	}
 	for _, tc := range cases {
 		m := newKeyMatcher(tc.entries)
-		if got := m.containsAny(tc.key); got != tc.want {
+		if got, _ := m.find(tc.key); got != tc.want {
 			t.Errorf("entries %q, key %q: got %v, want %v", tc.entries, tc.key, got, tc.want)
 		}
 	}

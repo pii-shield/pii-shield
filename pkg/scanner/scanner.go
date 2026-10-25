@@ -63,12 +63,8 @@ type configState struct {
 	config         Config
 	sensitiveRegex *regexp.Regexp // compiled sensitive-key patterns, may be nil
 	hmacPool       *sync.Pool     // HMAC hashers keyed by config.Salt
-	// asciiSensitiveKeys is config.SensitiveKeys without its non-ASCII
-	// entries, the list an ASCII key is matched against; it aliases
-	// config.SensitiveKeys when every entry is ASCII.
-	asciiSensitiveKeys []string
-	// keyMatcher finds an ASCII entry inside an ASCII key in one pass; see
-	// keymatcher.go.
+	// keyMatcher finds a config.SensitiveKeys entry inside a key in one
+	// pass; see keymatcher.go.
 	keyMatcher *keyMatcher
 }
 
@@ -586,26 +582,11 @@ func buildConfigState(cfg Config) *configState {
 		},
 	}
 
-	asciiKeys := cfg.SensitiveKeys
-	for i, sk := range cfg.SensitiveKeys {
-		if hasNonASCII(sk) {
-			asciiKeys = make([]string, 0, len(cfg.SensitiveKeys)-1)
-			asciiKeys = append(asciiKeys, cfg.SensitiveKeys[:i]...)
-			for _, k := range cfg.SensitiveKeys[i+1:] {
-				if !hasNonASCII(k) {
-					asciiKeys = append(asciiKeys, k)
-				}
-			}
-			break
-		}
-	}
-
 	return &configState{
-		config:             cfg,
-		sensitiveRegex:     re,
-		hmacPool:           pool,
-		asciiSensitiveKeys: asciiKeys,
-		keyMatcher:         newKeyMatcher(asciiKeys),
+		config:         cfg,
+		sensitiveRegex: re,
+		hmacPool:       pool,
+		keyMatcher:     newKeyMatcher(cfg.SensitiveKeys),
 	}
 }
 
@@ -3143,34 +3124,13 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 }
 
 func (st *configState) isSensitiveKey(key string) bool {
-	// 1. Substring match against the sensitive-key list, ignoring case. An
-	// ASCII key, nearly every key in a log, goes through keyMatcher in one
-	// pass and is lowercased only when the match needs the lowered form.
-	// A non-ASCII key keeps the strings.ToLower path: Unicode lowering can
-	// turn a non-ASCII rune into ASCII (the Kelvin sign into k), so it is
-	// checked against the whole list, which gives the same answer for the
-	// ASCII entries (a non-ASCII entry such as 密码 cannot be inside an ASCII
-	// key, see asciiSensitiveKeys).
-	ascii := !hasNonASCII(key)
-	var k string
-	var matched bool
-	if ascii {
-		matched = st.keyMatcher.containsAny(key)
-	} else {
-		k = strings.ToLower(key)
-		keys := st.config.SensitiveKeys
-		if !hasNonASCII(k) {
-			keys = st.asciiSensitiveKeys
-		}
-		for _, sk := range keys {
-			if strings.Contains(k, sk) {
-				matched = true
-				break
-			}
-		}
-	}
-	if matched {
-		if ascii {
+	// 1. Substring match against the sensitive-key list, ignoring case, in
+	// one pass over the key (keymatcher.go). k is the lowercased key, which
+	// the matcher makes only for a key with a non-ASCII byte and the rest of
+	// this function only when a match needs it.
+	found, k := st.keyMatcher.find(key)
+	if found {
+		if k == "" {
 			k = strings.ToLower(key)
 		}
 		// Fast reject for 'public_key' or 'pubkey' or 'pub_key'
@@ -3192,13 +3152,10 @@ func (st *configState) isSensitiveKey(key string) bool {
 	// components of the key. A bare pwd/PWD alone is the shell's working
 	// directory (PWD=/home/lena in every environment dump) and stays a
 	// plain key.
-	hasPW := false
-	if ascii {
-		hasPW = containsFoldPW(key)
-	} else {
-		hasPW = strings.Contains(k, "pw")
+	if k == "" {
+		k = key // ASCII: containsFoldPW folds the case itself
 	}
-	if hasPW && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
+	if containsFoldPW(k) && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
 		return true
 	}
 
