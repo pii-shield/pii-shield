@@ -4185,20 +4185,32 @@ func FindLuhnSequences(line string) []Range {
 		return ranges
 	}
 
+	// runEnd is one past the last digit connected to digitIndices[i] (each
+	// pair at most one space or dash apart). A window can only be as long as
+	// its run, so the lengths are capped by it instead of walking the same
+	// prefix again for every window length and every start: with seven
+	// lengths per start that walk was 6-9% of scan time (campaign item O9).
+	// Connectivity is a property of neighbouring digits, so runEnd never
+	// moves back as i advances and the whole scan is one pass.
+	runEnd := 0
 	for i := 0; i <= numDigits-13; i++ {
+		if runEnd < i+1 {
+			runEnd = i + 1
+		}
+		for runEnd < numDigits && digitsConnected(line, digitIndices[runEnd-1], digitIndices[runEnd]) {
+			runEnd++
+		}
 		maxLen := 19
 		if i+maxLen > numDigits {
 			maxLen = numDigits - i
+		}
+		if runEnd-i < maxLen {
+			maxLen = runEnd - i
 		}
 
 		for L := 13; L <= maxLen; L++ {
 			startIdx := digitIndices[i]
 			endIdx := digitIndices[i+L-1] + 1
-
-			// Connectivity Check
-			if !areDigitsConnected(line, digitIndices[i:i+L]) {
-				continue
-			}
 
 			// Boundary Check
 			if !isValidBoundary(line, startIdx, endIdx) {
@@ -4287,18 +4299,24 @@ func mergeRanges(ranges []Range) []Range {
 
 func areDigitsConnected(line string, indices []int) bool {
 	for k := 1; k < len(indices); k++ {
-		currIdx := indices[k]
-		prevIdx := indices[k-1]
-		diff := currIdx - prevIdx
-
-		if diff > 2 {
+		if !digitsConnected(line, indices[k-1], indices[k]) {
 			return false
 		}
-		if diff == 2 {
-			sep := line[prevIdx+1]
-			if sep != ' ' && sep != '-' {
-				return false
-			}
+	}
+	return true
+}
+
+// digitsConnected reports whether the digits at prevIdx and currIdx are
+// adjacent or one space or dash apart, the step of areDigitsConnected.
+func digitsConnected(line string, prevIdx, currIdx int) bool {
+	diff := currIdx - prevIdx
+	if diff > 2 {
+		return false
+	}
+	if diff == 2 {
+		sep := line[prevIdx+1]
+		if sep != ' ' && sep != '-' {
+			return false
 		}
 	}
 	return true
