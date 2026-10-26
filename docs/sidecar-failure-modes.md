@@ -42,10 +42,35 @@ Expected behavior:
 
 Required production controls:
 
-- Set resource requests and limits intentionally.
+- Set resource requests and limits intentionally (see the sizing table below).
 - Alert on high `piishield_processing_duration_seconds` p95.
 - Benchmark representative logs before rollout.
 - Avoid broad custom regex rules in high-throughput workloads.
+
+### Sizing the CPU limit
+
+The sanitizer is a single thread, so a CPU limit is a throughput ceiling:
+once the application logs faster than the limit allows, the sidecar is
+throttled and the sanitized stream falls behind. Measured on one Apple M1
+core with 200 000-line corpora (CLI writing to a file, 2.2.8 plus the
+October 2026 optimizations), the per-core rate is about 92k lines/s on
+plain text logs, 90k on JSON logs and 53k on an nginx access log with a
+User-Agent on every line. A server core is usually slower than an M1, so
+treat these as upper bounds and measure your own logs with
+`benchmark/run_benchmarks.sh`.
+
+| CPU limit | text / JSON logs | access logs |
+|-----------|------------------|-------------|
+| 50m       | ~4.5k lines/s    | ~2.6k lines/s |
+| 100m      | ~9k lines/s      | ~5k lines/s |
+| 250m (chart default) | ~22k lines/s | ~13k lines/s |
+| 500m      | ~45k lines/s     | ~26k lines/s |
+| 1000m     | ~90k lines/s     | ~53k lines/s |
+
+Above 1000m there is no gain. The chart's request (100m) is what the
+scheduler reserves; the limit (250m) is where throttling starts. The
+operator sets no default: give `PiiPolicy.spec.resources` a limit from this
+table.
 
 ## Large Or Truncated Lines
 
