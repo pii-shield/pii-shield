@@ -50,7 +50,10 @@ jobs:
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
       with:
         version: v2.14.0
-        only-new-issues: true
+        # The whole module, not only the lines a PR touches: the release
+        # workflow lints everything, and v2.3.0's GoReleaser job failed on a
+        # function #312 had left unused that the per-PR lint did not see.
+        only-new-issues: false
         # v2.14.0 is the first release whose x/tools can read Go 1.27 export data.
         # Released binaries are built with Go 1.26 and refuse a go.mod targeting
         # 1.27.3, so build the linter with the repo's own toolchain.
