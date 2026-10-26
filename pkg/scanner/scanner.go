@@ -1291,7 +1291,8 @@ func (t *loweredToken) forBigrams() string {
 	return t.heap
 }
 
-// valueLiterals are the JSON and Python literals isValueLiteral knows.
+// valueLiterals are the JSON and Python literals (true, false, null, none)
+// that processAndAppend never takes for a secret.
 var valueLiterals = map[string]bool{"true": true, "false": true, "null": true, "none": true}
 
 func lowerASCIIByte(b byte) byte {
@@ -3244,12 +3245,6 @@ func (st *configState) isSensitiveKey(key string) bool {
 	}
 
 	return false
-}
-
-// isValueLiteral reports whether a lowercased token is a JSON or Python
-// literal: true, false, null, none.
-func isValueLiteral(s string) bool {
-	return s == "true" || s == "false" || s == "null" || s == "none"
 }
 
 // keyNamesSecret reports whether a key names a secret outright rather than
