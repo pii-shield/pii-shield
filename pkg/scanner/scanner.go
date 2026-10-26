@@ -3401,7 +3401,15 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 	// access-log lines). Whatever that verbatim path costs in recall, it is
 	// not B17's to change.
 	if !strings.Contains(url, "?") {
-		st.writeURLPath(url, sb)
+		// The closing quote of the enclosing quoted token (and the
+		// punctuation after it) is structure, not path: left on the last
+		// segment, "<token>\"" failed isSecretPathSegment's character test
+		// and a secret that is the last path segment of a quoted URL with no
+		// query passed (a password-reset link in a JSON log, a /hooks/<token>
+		// URL), while the same URL unquoted or with a query hid it.
+		tail := urlClosingTail(url)
+		st.writeURLPath(url[:tail], sb)
+		sb.WriteString(url[tail:])
 		return
 	}
 
