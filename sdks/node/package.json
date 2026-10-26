@@ -1,6 +1,6 @@
 {
   "name": "@aragossa/pii-shield-wasi",
-  "version": "2.2.8",
+  "version": "2.3.0",
   "description": "High-performance PII redaction scanner using Go WASM (WASI)",
   "main": "index.js",
   "types": "index.d.ts",
