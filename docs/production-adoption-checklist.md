@@ -60,7 +60,7 @@ Required configuration:
 - [ ] Set a persistent `PII_SALT`.
 - [ ] Set `PII_REQUIRE_STRONG_SALT=true` for compliance-sensitive environments.
 - [ ] Configure file paths and volume mounts consistently across app and sidecar containers.
-- [ ] Configure resource requests and limits for the sidecar.
+- [ ] Configure resource requests and limits for the sidecar: the CPU limit is a throughput ceiling (the chart default of 250m sustains about 22k lines/s on text or JSON logs, 13k on access logs; see the sizing table in `docs/sidecar-failure-modes.md`).
 - [ ] Keep adaptive thresholding disabled until validated with real traffic.
 
 Validation before production:
