@@ -59,12 +59,20 @@ securityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# The sanitizer is a single thread, so its throughput is the CPU limit times
+# the per-core rate: about 90k lines/s per core on text or JSON logs and 53k
+# on an nginx access log (one Apple M1 core, 2.2.8+). At the old 50m default
+# that was a ceiling of roughly 4.5k lines/s (2.6k on access logs), and a
+# busier application left the sanitized stream lagging behind. 250m gives
+# about 22k lines/s (13k on access logs); above 1000m there is no gain. The
+# request is what the scheduler reserves; the limit is where throttling
+# starts. See the sizing table in docs/sidecar-failure-modes.md.
 resources:
   limits:
-    cpu: 50m
+    cpu: 250m
     memory: 30Mi
   requests:
-    cpu: 50m
+    cpu: 100m
     memory: 30Mi
 
 # PII-Shield Configuration

@@ -2820,10 +2820,21 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 			if keySensitive {
 				st.processSingleToken(val, val, true, false, false, sb)
 			} else {
-				// Optimization Phase 3 Fix: "data=key=val"
-				// If the value itself looks like a KV pair, recurse!
-				// Only do this if it contains separators.
-				if strings.Contains(val, "=") || strings.Contains(val, ":") {
+				// A value that holds another pair after a separator (a Cookie
+				// header's "session=<v>; theme=dark", a phrase "a=1 b=2"):
+				// handed to processTokenLogic as one token, it was split on
+				// its own '=' and "<v>; theme" became a key half that read as
+				// a field name, so the secret in front of the separator was
+				// written out while the same list unquoted, or with the
+				// secret last, hid it. Scan such a value word by word, the
+				// way a key half with a separator is above; each pair in it
+				// is then split on its own.
+				if (strings.Contains(val, "=") || strings.Contains(val, ":")) && strings.IndexFunc(val, isSepRune) != -1 {
+					st.scanLine(val, sb, depth+1)
+				} else if strings.Contains(val, "=") || strings.Contains(val, ":") {
+					// Optimization Phase 3 Fix: "data=key=val"
+					// If the value itself looks like a KV pair, recurse!
+					// Only do this if it contains separators.
 					// We need to call processTokenLogic again on the value.
 					// Pass false for forcedSensitive since the parent key wasn't sensitive.
 					// Pass overrideSensitivity (likely false here).
@@ -3401,7 +3412,15 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 	// access-log lines). Whatever that verbatim path costs in recall, it is
 	// not B17's to change.
 	if !strings.Contains(url, "?") {
-		st.writeURLPath(url, sb)
+		// The closing quote of the enclosing quoted token (and the
+		// punctuation after it) is structure, not path: left on the last
+		// segment, "<token>\"" failed isSecretPathSegment's character test
+		// and a secret that is the last path segment of a quoted URL with no
+		// query passed (a password-reset link in a JSON log, a /hooks/<token>
+		// URL), while the same URL unquoted or with a query hid it.
+		tail := urlClosingTail(url)
+		st.writeURLPath(url[:tail], sb)
+		sb.WriteString(url[tail:])
 		return
 	}
 

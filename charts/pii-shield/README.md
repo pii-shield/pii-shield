@@ -10,12 +10,14 @@ This chart provisions a **Sidecar Logging Pipeline**. The PII-Shield container w
 
 By default, the chart renders the production-safe PII-Shield container only. Demo traffic generation is disabled so production installs do not start a synthetic log generator.
 
-## Ultra-Lightweight Footprint
+## Footprint And Sizing
 
-PII-Shield is built for extreme performance. This chart explicitly defines the following resource limits to showcase its minimal footprint, making it perfect for SRE teams:
+The sidecar is a single thread with a small heap. The chart sets:
 
-*   **Memory Limit**: 30Mi
-*   **CPU Limit**: 50m (0.05 Cores)
+*   **Memory**: 30Mi request and limit
+*   **CPU**: 100m request, 250m limit
+
+Throughput is the CPU limit times the per-core rate (about 90k lines/s per core on text or JSON logs, 53k on an nginx access log, measured on one Apple M1 core), so 250m sustains roughly 22k lines/s, or 13k on access logs; the former 50m default capped the sidecar near 4.5k and 2.6k. Raise `resources.limits.cpu` for a busier application; above 1000m there is no gain. The sizing table is in `docs/sidecar-failure-modes.md`.
 
 ## Installation
 
