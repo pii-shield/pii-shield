@@ -66,10 +66,13 @@ PII-Shield's in-process WASM build ships inside [GuardSpine Code](https://github
 
 ## Performance Considerations
 
-While PII-Shield is highly optimized, deep inspection of complex logs requires careful attention to configuration.
-- **Text Logs:** Extremely fast (>100k lines/s).
-- **JSON Logs:** Zero-allocation parsing (no `encoding/json` overhead). The scanner manually parses JSON structures to ensure high throughput (~7MB/s) without memory spikes.
-- **Recommendation:** Usage is safe for high throughput. We use recursion safeguards to prevent stack overflows on deeply nested JSON.
+Measured on 2026-10-25 with the CLI reading stdin and writing a file, one Apple M1 core (`GOMAXPROCS=1`), Go 1.27.3, 200 000-line corpora, median of 5 runs, `main` after the 2.2.8 release:
+
+- **Text logs** (application and syslog-style lines, 122 bytes on average): about 92 000 lines/s, 10.7 MiB/s.
+- **JSON logs** (structured lines with nested objects, 161 bytes on average): about 90 000 lines/s, 13.8 MiB/s. JSON lines go through the quote-aware tokenizer, not `encoding/json`, and the hot path makes about seven allocations per line.
+- **nginx access logs** (312 bytes on average, a User-Agent on every line): about 53 000 lines/s, 15.7 MiB/s. This shape is the slowest the scanner sees, so size for it when your logs look like it.
+
+The sanitizer is a single thread, so a CPU limit is a throughput ceiling (the sizing table is in [docs/sidecar-failure-modes.md](docs/sidecar-failure-modes.md)). A server core is usually slower than an M1; measure your own logs with `./benchmark/run_benchmarks.sh` (see Performance Benchmarks below). Deeply nested JSON is bounded by a recursion limit, so a hostile line cannot exhaust the stack.
 
 ## Installation
 
