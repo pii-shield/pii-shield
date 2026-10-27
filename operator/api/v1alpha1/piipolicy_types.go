@@ -125,6 +125,18 @@ type PiiPolicyStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// RenderedPolicyConfigMap is the name of the ConfigMap in this namespace
+	// that holds the rendered rules file (policy.json) mounted into every
+	// sidecar injected for this policy. The sidecar reloads the file when it
+	// changes, so a spec edit reaches running pods without a restart.
+	// +optional
+	RenderedPolicyConfigMap string `json:"renderedPolicyConfigMap,omitempty"`
+
+	// RenderedPolicyHash is a content hash of the rendered rules file; it
+	// changes only when the rules do.
+	// +optional
+	RenderedPolicyHash string `json:"renderedPolicyHash,omitempty"`
 }
 
 // +kubebuilder:object:root=true

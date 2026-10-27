@@ -308,6 +308,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              renderedPolicyConfigMap:
+                description: |-
+                  RenderedPolicyConfigMap is the name of the ConfigMap in this namespace
+                  that holds the rendered rules file (policy.json) mounted into every
+                  sidecar injected for this policy. The sidecar reloads the file when it
+                  changes, so a spec edit reaches running pods without a restart.
+                type: string
+              renderedPolicyHash:
+                description: |-
+                  RenderedPolicyHash is a content hash of the rendered rules file; it
+                  changes only when the rules do.
+                type: string
             type: object
         required:
         - spec

@@ -60,6 +60,18 @@ metadata:
     {{- include "pii-shield-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - core.pii-shield.io
   resources:
   - piipolicies

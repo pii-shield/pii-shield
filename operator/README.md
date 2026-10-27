@@ -68,6 +68,40 @@ variable, so the scanner's built-in defaults apply.
 | `customRegexList` | `PII_CUSTOM_REGEX_LIST` | list of `{name, pattern}` → JSON |
 | `safeRegexList` | `PII_SAFE_REGEX_LIST` | list of `{name, pattern}` → JSON |
 
+### Rules without a restart
+
+The controller also renders the rule fields of every `PiiPolicy` —
+`entropyThreshold`, `confidenceThreshold`, `minSecretLength`,
+`sensitiveKeys`, `sensitiveKeyPatterns`, `customRegexList`, `safeRegexList`
+— into a ConfigMap named `pii-shield-policy-<policy name>` in the policy's
+namespace (key `policy.json`, the same JSON the SDKs pass to `init_config`,
+plus a `revision` equal to the policy's generation). The webhook mounts that
+ConfigMap read-only at `/etc/pii-shield` in every injected sidecar and sets
+`PII_CONFIG_FILE=/etc/pii-shield/policy.json`. The sidecar reads the file
+before its first line and re-reads it when it changes (see
+`PII_CONFIG_FILE` in [CONFIGURATION.md](../CONFIGURATION.md)), so an edit to
+the policy reaches running pods about a minute later — the kubelet's
+ConfigMap refresh — without a restart.
+
+What stays as it was:
+
+- The env vars in the table above are still set on the sidecar and win over
+  the file. A pod admitted before the ConfigMap exists (the volume is
+  mounted `optional`), or running an agent image older than the file
+  support, behaves exactly as before.
+- The salt never goes through the ConfigMap: it comes from `salt` or
+  `saltSecretKeyRef` as a Secret reference, and the sidecar keeps the salt it
+  started with across reloads. `failPolicy`, `injectionMode`, `logPath` and
+  `resources` are pod settings and still need a rollout to change.
+- The ConfigMap is owned by the policy and deleted with it; it is left
+  untouched when a reconcile renders the same rules, so no reload happens
+  for nothing.
+
+The status of the policy names the ConfigMap and a content hash of the file
+(`status.renderedPolicyConfigMap`, `status.renderedPolicyHash`) and carries a
+`Rendered` condition; `RenderFailed` means the file could not be written
+(the policy still works through the env vars at injection time).
+
 ### Effective configuration precedence
 
 From most to least specific:

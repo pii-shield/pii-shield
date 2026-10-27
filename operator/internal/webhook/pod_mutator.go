@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	piishieldv1alpha1 "github.com/pii-shield/pii-shield/operator/api/v1alpha1"
+	"github.com/pii-shield/pii-shield/operator/internal/policyfile"
 )
 
 // PodMutator mutates Pods
@@ -164,6 +165,7 @@ func (m *PodMutator) injectFileMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 		Name:         "pii-tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	})
+	podCopy.Spec.Volumes = append(podCopy.Spec.Volumes, policyVolume(policy))
 
 	// Mount volume to main container
 	logPath := policy.Spec.LogPath
@@ -229,6 +231,7 @@ func (m *PodMutator) injectPipeMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 		Name:         "pii-tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	})
+	podCopy.Spec.Volumes = append(podCopy.Spec.Volumes, policyVolume(policy))
 
 	// Init container to mkfifo in emptyDir (survives main restart)
 	podCopy.Spec.InitContainers = append(podCopy.Spec.InitContainers, corev1.Container{
@@ -325,13 +328,40 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 		Env:       scannerEnv(policy),
 	}
 
-	if mode == "file" {
+	switch mode {
+	case "file":
 		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "pii-shared", MountPath: "/shared"}, corev1.VolumeMount{Name: "pii-tmp", MountPath: "/tmp"})
-	} else if mode == "pipe" {
+	case "pipe":
 		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "pii-pipe-dir", MountPath: "/shared"}, corev1.VolumeMount{Name: "pii-tmp", MountPath: "/tmp"})
 	}
 
+	// The rules file rendered by the controller (policyfile): the sidecar
+	// reads it at start and reloads it when the ConfigMap changes, so a
+	// policy edit reaches this pod without a restart. The env vars above are
+	// still set and win over the file, so a pod injected before the
+	// ConfigMap exists, or by an older agent image, behaves as before.
+	sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{
+		Name:      policyfile.VolumeName,
+		MountPath: policyfile.MountPath,
+		ReadOnly:  true,
+	})
+	sidecar.Env = append(sidecar.Env, corev1.EnvVar{Name: "PII_CONFIG_FILE", Value: policyfile.FilePath})
+
 	return sidecar
+}
+
+// policyVolume is the ConfigMap volume with the policy's rendered rules
+// file. It is optional: the controller may not have rendered the ConfigMap
+// yet when the pod is admitted, and the sidecar runs on its env vars until
+// the file appears.
+func policyVolume(policy *piishieldv1alpha1.PiiPolicy) corev1.Volume {
+	return corev1.Volume{
+		Name: policyfile.VolumeName,
+		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: policyfile.ConfigMapName(policy.Name)},
+			Optional:             ptr.To(true),
+		}},
+	}
 }
 
 // scannerEnv translates PiiPolicy scanner settings into the PII_* environment
