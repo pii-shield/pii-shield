@@ -94,6 +94,10 @@ func main() {
 		}()
 	}
 
+	// Rules from a file (PII_CONFIG_FILE), reloaded on change without a
+	// restart; the environment stays on top of the file. Nil when unset.
+	startPolicyReloader(metricsEnabled)
+
 	failPolicy := os.Getenv("PII_FAIL_POLICY")
 	if failPolicy == "" {
 		failPolicy = "open" // Start with fail-open by default

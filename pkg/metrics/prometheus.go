@@ -30,6 +30,27 @@ var (
 		Name: "piishield_errors_total",
 		Help: "Total number of errors encountered during processing",
 	})
+
+	// ConfigReloadsTotal counts policy files (PII_CONFIG_FILE) loaded and
+	// applied, the first load included.
+	ConfigReloadsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "piishield_config_reloads_total",
+		Help: "Total number of policy file loads that were applied",
+	})
+
+	// ConfigReloadErrorsTotal counts policy files rejected (unreadable,
+	// invalid JSON, invalid pattern); the previous config stays in force.
+	ConfigReloadErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "piishield_config_reload_errors_total",
+		Help: "Total number of policy file loads that were rejected",
+	})
+
+	// ConfigLastReloadTimestamp is the Unix time of the last applied policy
+	// file load; 0 until the first one.
+	ConfigLastReloadTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "piishield_config_last_reload_timestamp_seconds",
+		Help: "Unix time of the last applied policy file load",
+	})
 )
 
 // IncrementRedaction provides a safe interface to increment redactions

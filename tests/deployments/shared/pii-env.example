@@ -19,6 +19,10 @@ PII_FAIL_POLICY=open
 # PII_CUSTOM_REGEX_LIST=[{"pattern":"^TX-\\d{5}$","name":"TX"}]
 # PII_SAFE_REGEX_LIST=[{"pattern":"^[a-f0-9]{7}$","name":"GitShortSHA"}]
 
+# Optional rules file, re-read when it changes (CLI/container paths only).
+# PII_CONFIG_FILE=/etc/pii-shield/policy.json
+# PII_CONFIG_RELOAD_SECONDS=10
+
 # Metrics are used by CLI/container and standalone Helm chart paths.
 PII_METRICS_ENABLED=false
 PII_METRICS_PORT=9090

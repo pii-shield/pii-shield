@@ -427,8 +427,20 @@ func randomSalt() []byte {
 }
 
 func loadConfig() Config {
-	cfg := DefaultConfig()
+	return ApplyEnvOverrides(DefaultConfig())
+}
 
+// ApplyEnvOverrides lays the PII_* environment variables over cfg and returns
+// the result. Package init calls it on DefaultConfig; the sidecar calls it on
+// a policy file (LoadPolicyFile) so that an explicitly set variable always
+// wins over the file — an operator can pin the salt or a threshold in the pod
+// spec and no file can move it. A variable that is unset leaves the field as
+// cfg has it. Invalid values warn and keep the field, as before.
+//
+// The salt is the one exception to "unset leaves the field": with no PII_SALT
+// an empty cfg.Salt becomes a fresh random salt, but a salt already in cfg is
+// kept, so a reload does not change the tags of a running process.
+func ApplyEnvOverrides(cfg Config) Config {
 	// Load Salt - CRITICAL SECURITY: Try secure, fallback to error log (don't panic library)
 	if envSalt := os.Getenv("PII_SALT"); envSalt != "" {
 		if len(envSalt) < 16 {
@@ -438,7 +450,7 @@ func loadConfig() Config {
 			fmt.Fprintf(os.Stderr, "WARNING: PII_SALT is too short (<16 bytes). Weak security.\n")
 		}
 		cfg.Salt = []byte(envSalt)
-	} else {
+	} else if len(cfg.Salt) == 0 {
 		cfg.Salt = randomSalt()
 	}
 
