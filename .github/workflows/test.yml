@@ -27,6 +27,10 @@ jobs:
       working-directory: operator
       run: go test -v -race -coverprofile=cover.out ./...
 
+    - name: Run Rule Server Tests
+      working-directory: rules
+      run: go test -v -race ./...
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
       with:
