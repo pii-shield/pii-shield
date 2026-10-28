@@ -7,11 +7,11 @@ restart. Nothing about a cluster is sent here; the server only answers
 `GET`. One binary serves the hosted service and a self-hosted copy inside
 your own perimeter.
 
-Status: first slice (#95, milestone 3.0). The model, the SQLite store, the
-public `policy.json` with ETag and tokens, and a management API behind an
-admin token. The panel, the preview on the real scanner and the magic-link
-login come in later changes; until then the management API is driven with
-`curl`.
+Status: slices 1 and 2 of #95 (milestone 3.0). The model, the SQLite
+store, the public `policy.json` with ETag and tokens, a management API
+behind an admin token, and a validate and a preview call that run a draft
+on the real scanner. The panel and the magic-link login come in later
+changes; until then the management API is driven with `curl`.
 
 ## Run
 
@@ -63,6 +63,31 @@ Other calls: `GET /api/orgs`, `GET /api/orgs/{org}/sets`,
 `GET /api/orgs/{org}/sets/{set}` (set, versions, tokens, the policy path),
 `GET .../versions`, `GET .../versions/{rev}`, `GET .../publications`
 (publish history), `GET .../tokens`, `DELETE .../tokens/{id}` (revoke).
+
+## Try a draft before publishing
+
+```bash
+curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/validate \
+  -d '{"content": {"sensitive_keys": ["geheim"]}}'
+curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/preview \
+  -d '{"content": {"sensitive_keys": ["geheim"]},
+       "text": "login ok geheim=abcabcabc user=anna\nGET /health 200\n"}'
+```
+
+`validate` runs the checks of a version create without storing anything:
+the same `422` with the scanner's reason, or `200` with the effective
+settings after defaults (`entropyThreshold`, `minSecretLength`, the counts
+of keys and rules), so the author sees what a cluster will run, not only
+what the draft spells out.
+
+`preview` scans up to 200 log lines (`lines`, an array, or `text`, split on
+newlines) with the draft and answers each line as `in`, `out` and
+`changed`, plus the count of changed lines. Without `content` it runs the
+published version and names its `revision`. Every preview runs on a
+scanner built for that request alone (`scanner.NewScanner`), so two
+previews never see each other's rules. The hashes are computed with a
+fixed preview salt and match no cluster; the response says so in `note`.
+`adaptive_threshold` is off in a preview: it learns from a running stream.
 
 ## Connect a cluster
 
