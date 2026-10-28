@@ -187,7 +187,7 @@ func TestPublishFlowAndPolicyPull(t *testing.T) {
 	if code != 200 || body["policyPath"] != "/v1/acme/payments/policy.json" || len(body["versions"].([]any)) != 2 {
 		t.Errorf("get set: %d %v", code, body)
 	}
-	if code, _, body, _ = do(t, ts, call{method: "GET", path: "/api/orgs/acme/sets/payments/versions/2", token: admin}); code != 200 || body["author"] != "bob" {
+	if code, _, body, _ = do(t, ts, call{method: "GET", path: "/api/orgs/acme/sets/payments/versions/2", token: admin}); code != 200 || body["version"].(map[string]any)["author"] != "bob" || body["content"].(map[string]any)["revision"] != "2" {
 		t.Errorf("get version: %d %v", code, body)
 	}
 

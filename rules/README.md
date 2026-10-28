@@ -7,11 +7,11 @@ restart. Nothing about a cluster is sent here; the server only answers
 `GET`. One binary serves the hosted service and a self-hosted copy inside
 your own perimeter.
 
-Status: slices 1 and 2 of #95 (milestone 3.0). The model, the SQLite
-store, the public `policy.json` with ETag and tokens, a management API
-behind an admin token, and a validate and a preview call that run a draft
-on the real scanner. The panel and the magic-link login come in later
-changes; until then the management API is driven with `curl`.
+Status: slices 1 to 3 of #95 (milestone 3.0). The model, the SQLite
+store, the public `policy.json` with ETag and tokens, a management API, a
+validate and a preview call that run a draft on the real scanner, and a
+panel with a magic-link sign-in. The image and the docs come in the last
+slice.
 
 ## Run
 
@@ -25,13 +25,58 @@ Flags and env: `--listen` (`RULES_LISTEN`, default `:8080`), `--db`
 (`RULES_DB`, default `rules.db`, one SQLite file in WAL mode: back it up by
 copying the file or with Litestream), `--policy-rate` (pulls per token per
 second, default 1, burst 10), `--single-tenant` (`RULES_SINGLE_TENANT=true`:
-one organization named `default`, no admin token, for a server that sits
-behind a port-forward or your own access control). Without
-`--single-tenant`, `RULES_ADMIN_TOKEN` is required and every `/api/` request
-carries it as `Authorization: Bearer <token>`.
+one organization named `default`, no sign-in, for a server that sits
+behind a port-forward or your own access control), `--base-url`
+(`RULES_BASE_URL`, the public address for the links in mail), `--signup`
+(`RULES_SIGNUP=open|invite`, default open: a new address creates its own
+organization by signing in; `invite` lets only invited addresses in),
+`--trust-proxy` (`RULES_TRUST_PROXY=true`, read the client address and
+scheme from `X-Forwarded-For` and `X-Forwarded-Proto` behind a reverse
+proxy), `--insecure-cookies` (`RULES_INSECURE_COOKIES=true`, session cookie
+without `Secure`, for plain http on localhost). Mail: `RULES_SMTP_ADDR`
+(host:port; 465 is TLS at once, any other port starts clear and upgrades
+with STARTTLS, required when a password is set), `RULES_SMTP_USER`,
+`RULES_SMTP_PASSWORD`, `RULES_MAIL_FROM`. Without `RULES_SMTP_ADDR` the
+sign-in links are written to the log with a warning: fine on your laptop,
+not for a server other people reach. `RULES_ADMIN_TOKEN` opens every
+organization to `curl` with `Authorization: Bearer <token>`; it is optional
+once people sign in through the panel.
 
 Put TLS in front of it (a reverse proxy or an ingress): the operator refuses
-an `http://` source unless `allowInsecure` is set.
+an `http://` source unless `allowInsecure` is set, and the session cookie
+carries `Secure`.
+
+## Panel and sign-in
+
+Open the server's address in a browser. The panel is one page embedded in
+the binary (`internal/panel`: `index.html`, `app.js`, `style.css`, no build
+step, no package manager) and talks to the same API `curl` does.
+
+There are no passwords. You enter your address, a link arrives by mail,
+and the page it opens has one button that signs you in; the link works
+once and for a quarter of an hour, and a mail scanner that opens it spends
+nothing, because only the button does. The first sign-in of a new address
+creates an organization for it (unless `RULES_SIGNUP=invite`); members are
+added on the Members page by address and get the same kind of link. An
+account belongs to one organization and sees nothing of the others.
+
+The session is a cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, thirty
+days, stored hashed like the tokens). Every call that changes something
+must carry the `X-Requested-With` header and an `Origin` or `Referer` of
+this host, which a cross-site form cannot do; a request without them is
+`403`. Sign-in requests are limited per client address and per e-mail
+address, link attempts per client address (`429` with `Retry-After`).
+
+Screens: the rule sets of the organization; a set's rules (keys, key
+patterns, custom and safe rules with a Validate button, thresholds), the
+preview of a draft or the published version on pasted log lines, versions
+with publish, roll back, a diff of two versions and the publish history,
+tokens, and the `PiiPolicy` snippet that connects a cluster. A draft is
+kept while you switch tabs and until you save it as a version.
+
+On a `--single-tenant` server without `RULES_ADMIN_TOKEN` the panel needs
+no sign-in; with the token set, the panel is closed and the API takes the
+token.
 
 ## Publish a rule set
 

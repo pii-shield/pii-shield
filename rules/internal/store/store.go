@@ -64,7 +64,7 @@ type Version struct {
 	ID        int64     `json:"id"`
 	SetID     int64     `json:"setId"`
 	Revision  int64     `json:"revision"`
-	Content   []byte    `json:"content"`
+	Content   []byte    `json:"-"`
 	ETag      string    `json:"etag"`
 	Author    string    `json:"author,omitempty"`
 	Comment   string    `json:"comment,omitempty"`
@@ -104,7 +104,7 @@ func Open(path string) (*Store, error) {
 	// One connection: SQLite serializes writers anyway, and one connection
 	// means a transaction never waits on the pool for a second one.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + accountsSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
