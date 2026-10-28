@@ -69,6 +69,10 @@ jobs:
       working-directory: operator
       run: go test -v -race -coverprofile=cover.out ./...
 
+    - name: Run Rule Server Tests
+      working-directory: rules
+      run: go test -v -race ./...
+
     # The envtest suite is behind //go:build integration, so the step above
     # skips it: it starts a real kube-apiserver and checks the CRD schema and
     # the status subresource, which the fake client of the unit tests cannot.
