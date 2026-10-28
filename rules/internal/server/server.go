@@ -89,6 +89,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/versions", admin(s.listVersions))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/versions", admin(s.createVersion))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/versions/{rev}", admin(s.getVersion))
+	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/validate", admin(s.validate))
+	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/preview", admin(s.preview))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/publish", admin(s.publish))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publications", admin(s.publications))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/tokens", admin(s.listTokens))
@@ -486,11 +488,15 @@ func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 // ---- helpers ----
 
 func (s *Server) decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	return s.decodeLimit(w, r, v, maxBody)
+}
+
+func (s *Server) decodeLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	if err := dec.Decode(v); err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			s.fail(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body larger than %d bytes", maxBody))
+			s.fail(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body larger than %d bytes", limit))
 			return false
 		}
 		s.fail(w, http.StatusBadRequest, "invalid json body: "+err.Error())

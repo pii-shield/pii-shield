@@ -30,6 +30,7 @@ func TestCanonicalInjectsRevisionAndSortsKeys(t *testing.T) {
 func TestCanonicalRejectsWhatTheSidecarRejects(t *testing.T) {
 	cases := map[string]string{
 		"not an object": `[]`,
+		"null":          `null`,
 		"trailing data": `{} {}`,
 		"bad regex":     `{"custom_regexes": [{"pattern": "("}]}`,
 		"empty pattern": `{"safe_regexes": [{"regex": "x"}]}`,

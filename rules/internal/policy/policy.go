@@ -21,10 +21,12 @@ import (
 // a remote file, so a set the server accepts is a set every cluster accepts.
 const MaxBytes = 256 << 10
 
-// Document is one canonical policy file with its ETag.
+// Document is one canonical policy file with its ETag and the scanner
+// configuration it parses into (no salt: that stays with the pod).
 type Document struct {
 	Content []byte
 	ETag    string
+	Config  scanner.Config
 }
 
 // Canonical validates content, a rule set in the SDK init_config format,
@@ -49,6 +51,9 @@ func Canonical(content []byte, revision int64) (Document, error) {
 	if dec.More() {
 		return Document{}, errors.New("invalid json: trailing data after the object")
 	}
+	if raw == nil {
+		return Document{}, errors.New("invalid json: the rule set must be an object, not null")
+	}
 	for _, k := range []string{"salt", "fail_policy"} {
 		if v, ok := raw[k]; ok && v != nil && v != "" {
 			return Document{}, fmt.Errorf("%s is not a rule and cannot be served; it comes from the pod spec", k)
@@ -61,10 +66,11 @@ func Canonical(content []byte, revision int64) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
-	if _, _, err := scanner.ParsePolicyJSON(out); err != nil {
+	cfg, _, err := scanner.ParsePolicyJSON(out)
+	if err != nil {
 		return Document{}, err
 	}
-	return Document{Content: out, ETag: ETag(out)}, nil
+	return Document{Content: out, ETag: ETag(out), Config: cfg}, nil
 }
 
 // ETag returns the strong entity tag of a file: a quoted hash of its bytes.
