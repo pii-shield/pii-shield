@@ -105,6 +105,87 @@ spec:
                   OriginalCommand is the original app command (for the experimental
                   "pipe" mode); it is executed through "/bin/sh -c"
                 type: string
+              remoteConfig:
+                description: |-
+                  RemoteConfig pulls the rules from a central rule repository and lays
+                  the rule fields set in this policy over them. See RemoteConfig.
+                properties:
+                  allowInsecure:
+                    description: |-
+                      AllowInsecure permits an http:// URL and skips certificate
+                      verification for https://. For tests and air-gapped lab clusters only;
+                      the RemoteSynced condition carries a warning while it is set.
+                    type: boolean
+                  caBundleSecretRef:
+                    description: |-
+                      CABundleSecretRef names a key in a Secret in the policy's namespace
+                      that holds a PEM bundle used to verify the server certificate instead
+                      of the system roots.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  headerSecretRef:
+                    description: |-
+                      HeaderSecretRef names a key in a Secret in the policy's namespace whose
+                      value is sent as the whole Authorization header, for example
+                      "Bearer <token>". The value never appears in the policy or its status.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  intervalSeconds:
+                    description: |-
+                      IntervalSeconds is how often the file is pulled. Default 300,
+                      minimum 30. A failed pull is retried after at most 60 seconds.
+                    format: int32
+                    minimum: 30
+                    type: integer
+                  url:
+                    description: URL of the policy file. Must be https:// unless AllowInsecure
+                      is set.
+                    minLength: 8
+                    pattern: ^https?://
+                    type: string
+                required:
+                - url
+                type: object
               resources:
                 description: Resources allows configuration of compute resources for
                   the injected sidecar
@@ -308,6 +389,31 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              remote:
+                description: |-
+                  Remote describes the last good pull from spec.remoteConfig; unset when
+                  the policy has no remote source or no pull has succeeded yet. The
+                  RemoteSynced condition carries the outcome of the latest pull.
+                properties:
+                  etag:
+                    description: |-
+                      ETag is the entity tag of the last good file, sent back as
+                      If-None-Match on the next pull.
+                    type: string
+                  hash:
+                    description: Hash is a content hash of the last good file.
+                    type: string
+                  lastSyncTime:
+                    description: |-
+                      LastSyncTime is when the source last answered with a valid file or a
+                      304 Not Modified.
+                    format: date-time
+                    type: string
+                  revision:
+                    description: Revision is the revision field of the last good file,
+                      if it has one.
+                    type: string
+                type: object
               renderedPolicyConfigMap:
                 description: |-
                   RenderedPolicyConfigMap is the name of the ConfigMap in this namespace

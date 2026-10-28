@@ -17,6 +17,12 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
   - core.pii-shield.io
   resources:
   - piipolicies

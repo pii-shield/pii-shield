@@ -102,6 +102,80 @@ The status of the policy names the ConfigMap and a content hash of the file
 `Rendered` condition; `RenderFailed` means the file could not be written
 (the policy still works through the env vars at injection time).
 
+### Central rule repository (`remoteConfig`)
+
+A policy can pull its rules from a central source instead of carrying them
+all itself. The source is any HTTPS address that answers a `GET` with the
+policy file in the same JSON format as `policy.json` above: a file on an
+object store, an internal web server, or a rule server. Nothing about the
+cluster is sent; the operator only asks for the file.
+
+```yaml
+apiVersion: core.pii-shield.io/v1alpha1
+kind: PiiPolicy
+metadata:
+  name: default
+  namespace: payments
+spec:
+  injectionMode: file
+  saltSecretKeyRef: { name: pii-shield-salt, key: salt }
+  remoteConfig:
+    url: https://rules.example.internal/pii/payments/policy.json
+    intervalSeconds: 300                 # default 300, minimum 30
+    headerSecretRef: { name: rules-token, key: authorization }   # whole Authorization header value, e.g. "Bearer …"
+    caBundleSecretRef: { name: rules-ca, key: ca.crt }          # PEM bundle instead of the system roots
+    # allowInsecure: true                # http:// or an unverified certificate; labs only, the status warns
+  sensitiveKeys: [password, token, geheim]   # a local field always wins over the source
+```
+
+How a pull works:
+
+- Every `intervalSeconds` the controller sends `GET` with `If-None-Match`
+  set to the ETag of the last good copy (a 10 s timeout, a 256 KiB body
+  limit). A `304` costs nothing; a `200` is validated whole, the way the
+  sidecar validates `PII_CONFIG_FILE`: the first invalid JSON, pattern or
+  value rejects the file.
+- The rule fields set in the local `PiiPolicy` are laid over the remote
+  file field by field (a list replaces the whole list, the same as
+  `PII_SENSITIVE_KEYS` replaces the default list); fields the policy leaves
+  unset keep what the source says. The result is rendered into the
+  policy's ConfigMap as before, with `revision` = `<remote revision>+<policy
+  generation>`, and the sidecars reload it.
+- Only rules are accepted from the source: `entropy_threshold`,
+  `confidence_score`, `min_secret_length`, `sensitive_keys`,
+  `sensitive_key_patterns`, `custom_regexes`, `safe_regexes`,
+  `disable_bigram_check`, `adaptive_threshold`, `entity_type_labels` and
+  `revision`. A `salt` or `fail_policy` in the file is ignored and named in
+  the status; `injectionMode`, `logPath`, `resources` and the salt never
+  come from outside.
+- When the source is down, answers an error, or serves an invalid file, the
+  last good copy stays in use: it is kept in the ConfigMap as `remote.json`
+  together with its ETag, so it survives an operator restart, and a local
+  edit of the policy still applies on top of it. The pull is retried after
+  at most 60 s. Before the first successful pull the local policy alone is
+  rendered, the same as without `remoteConfig`.
+- `status.remote` reports the last good pull (`lastSyncTime`, `etag`,
+  `revision`, `hash`); the `RemoteSynced` condition reports the latest
+  attempt with a reason: `Synced`, `FetchFailed`, `TooLarge`,
+  `InvalidJSON`, `InvalidRegex`, `InvalidValue`, `InsecureURL`,
+  `SecretNotFound`.
+- Rollback: remove `remoteConfig` from the policy; on the next reconcile
+  the ConfigMap is rendered from the local policy alone and `remote.json`
+  is dropped. To pin a value against the source, set it in the policy.
+
+The Secrets named by `headerSecretRef` and `caBundleSecretRef` live in the
+policy's namespace and are read straight from the API server (the manager
+needs `get` on Secrets, not `list`/`watch`, and caches none). If a
+NetworkPolicy restricts the operator's egress, allow the source host and
+port. Operator metrics `piishield_operator_remote_sync_total{result}`,
+`piishield_operator_remote_sync_last_success_timestamp_seconds` and
+`piishield_operator_remote_sync_interval_seconds` are served on the
+manager's metrics endpoint; the chart's `PrometheusRule` alerts when a
+policy's last successful pull is older than three intervals
+(`PIIShieldRemoteRulesStale`) and on any failed pull
+(`PIIShieldRemoteRulesSyncErrors`). The runbook is in
+[docs/operational-runbooks.md](../docs/operational-runbooks.md#central-rule-repository).
+
 ### Effective configuration precedence
 
 From most to least specific:

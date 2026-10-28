@@ -32,6 +32,55 @@ type RegexRule struct {
 	Pattern string `json:"pattern"`
 }
 
+// RemoteConfig points the controller at a central rule repository: a JSON
+// policy file in the SDK init_config format (entropy_threshold,
+// sensitive_keys, custom_regexes, ... plus an informational revision),
+// served over HTTPS by anything that can answer a GET — a static file on an
+// object store, an internal web server, or a rule server. The controller
+// pulls the file every IntervalSeconds with If-None-Match, lays the rule
+// fields set in this PiiPolicy over it and renders the result into the
+// policy's ConfigMap, so the sidecars pick the new rules up without a
+// restart. Nothing is ever sent to the source except the request itself.
+//
+// Only rules are accepted from the source: entropy_threshold,
+// confidence_score, min_secret_length, sensitive_keys,
+// sensitive_key_patterns, custom_regexes, safe_regexes,
+// disable_bigram_check, adaptive_threshold, entity_type_labels and
+// revision. A salt or fail_policy in the file is ignored; injectionMode,
+// logPath and resources are pod settings and cannot come from outside.
+// When the source is unreachable or serves an invalid file, the last good
+// copy stays in use and the RemoteSynced condition says why.
+type RemoteConfig struct {
+	// URL of the policy file. Must be https:// unless AllowInsecure is set.
+	// +kubebuilder:validation:Pattern=`^https?://`
+	// +kubebuilder:validation:MinLength=8
+	URL string `json:"url"`
+
+	// IntervalSeconds is how often the file is pulled. Default 300,
+	// minimum 30. A failed pull is retried after at most 60 seconds.
+	// +kubebuilder:validation:Minimum=30
+	// +optional
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
+
+	// HeaderSecretRef names a key in a Secret in the policy's namespace whose
+	// value is sent as the whole Authorization header, for example
+	// "Bearer <token>". The value never appears in the policy or its status.
+	// +optional
+	HeaderSecretRef *corev1.SecretKeySelector `json:"headerSecretRef,omitempty"`
+
+	// CABundleSecretRef names a key in a Secret in the policy's namespace
+	// that holds a PEM bundle used to verify the server certificate instead
+	// of the system roots.
+	// +optional
+	CABundleSecretRef *corev1.SecretKeySelector `json:"caBundleSecretRef,omitempty"`
+
+	// AllowInsecure permits an http:// URL and skips certificate
+	// verification for https://. For tests and air-gapped lab clusters only;
+	// the RemoteSynced condition carries a warning while it is set.
+	// +optional
+	AllowInsecure bool `json:"allowInsecure,omitempty"`
+}
+
 // PiiPolicySpec defines the desired state of PiiPolicy
 type PiiPolicySpec struct {
 	// FailPolicy determines the sidecar behavior when sanitization fails:
@@ -108,6 +157,32 @@ type PiiPolicySpec struct {
 	// Resources allows configuration of compute resources for the injected sidecar
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// RemoteConfig pulls the rules from a central rule repository and lays
+	// the rule fields set in this policy over them. See RemoteConfig.
+	// +optional
+	RemoteConfig *RemoteConfig `json:"remoteConfig,omitempty"`
+}
+
+// RemoteStatus reports the last good pull from spec.remoteConfig.
+type RemoteStatus struct {
+	// LastSyncTime is when the source last answered with a valid file or a
+	// 304 Not Modified.
+	// +optional
+	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+	// ETag is the entity tag of the last good file, sent back as
+	// If-None-Match on the next pull.
+	// +optional
+	ETag string `json:"etag,omitempty"`
+
+	// Revision is the revision field of the last good file, if it has one.
+	// +optional
+	Revision string `json:"revision,omitempty"`
+
+	// Hash is a content hash of the last good file.
+	// +optional
+	Hash string `json:"hash,omitempty"`
 }
 
 // PiiPolicyStatus defines the observed state of PiiPolicy.
@@ -137,6 +212,12 @@ type PiiPolicyStatus struct {
 	// changes only when the rules do.
 	// +optional
 	RenderedPolicyHash string `json:"renderedPolicyHash,omitempty"`
+
+	// Remote describes the last good pull from spec.remoteConfig; unset when
+	// the policy has no remote source or no pull has succeeded yet. The
+	// RemoteSynced condition carries the outcome of the latest pull.
+	// +optional
+	Remote *RemoteStatus `json:"remote,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -103,3 +103,7 @@ metrics:
     certExpiresSoonSeconds: 604800
     certExpiresSoonFor: 30m
     injectionEventFor: 5m
+    # spec.remoteConfig: the last successful pull is older than three intervals
+    remoteRulesStaleFor: 5m
+    # spec.remoteConfig: any failed pull in the last 15 minutes
+    remoteRulesErrorsFor: 15m

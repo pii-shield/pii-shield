@@ -22,6 +22,7 @@ import (
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,24 +39,35 @@ import (
 type PiiPolicyReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// APIReader reads Secrets named by spec.remoteConfig straight from the
+	// API server, so no Secret is cached. Falls back to Client when nil.
+	APIReader client.Reader
 }
 
 // +kubebuilder:rbac:groups=core.pii-shield.io,resources=piipolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core.pii-shield.io,resources=piipolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core.pii-shield.io,resources=piipolicies/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 
 // Reconcile validates a PiiPolicy enough to expose an auditable status without
 // mutating the user's desired spec, and renders its rules into a ConfigMap
 // (policyfile) that the webhook mounts into every sidecar injected for the
 // policy. The sidecar reloads the file when it changes, so an edit to the
-// policy reaches running pods without a restart.
+// policy reaches running pods without a restart. With spec.remoteConfig the
+// rules are pulled from a central source first (remote.go) and the policy's
+// own rule fields are laid over them; the reconcile is then requeued at the
+// pull interval.
 func (r *PiiPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	policy := &corev1alpha1.PiiPolicy{}
 	if err := r.Get(ctx, req.NamespacedName, policy); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			forgetRemoteMetrics(req.Namespace, req.Name)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
 	effectiveMode := policy.Spec.InjectionMode
@@ -88,7 +100,31 @@ func (r *PiiPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Reason:             "ConfigMapUpToDate",
 		ObservedGeneration: policy.Generation,
 	}
-	name, hash, err := r.renderConfigMap(ctx, policy)
+	var result ctrl.Result
+	var remote remoteOutcome
+	err := policyfile.CheckName(policy.Name)
+	if err == nil && policy.Spec.RemoteConfig != nil {
+		var prev *corev1.ConfigMap
+		if prev, err = r.previousConfigMap(ctx, policy); err == nil {
+			remote = r.syncRemote(ctx, policy, prev)
+			meta.SetStatusCondition(&policy.Status.Conditions, remote.condition)
+			policy.Status.Remote = remote.status
+			result.RequeueAfter = remote.requeue
+			if remote.condition.Status != metav1.ConditionTrue {
+				log.Info("remote rules not synced", "reason", remote.condition.Reason, "message", remote.condition.Message)
+			}
+		}
+	} else if err == nil {
+		if meta.RemoveStatusCondition(&policy.Status.Conditions, conditionRemoteSynced) || policy.Status.Remote != nil {
+			forgetRemoteMetrics(policy.Namespace, policy.Name)
+		}
+		policy.Status.Remote = nil
+	}
+
+	var name, hash string
+	if err == nil {
+		name, hash, err = r.renderConfigMap(ctx, policy, remote)
+	}
 	if err != nil {
 		// The policy is still served through the sidecar env vars at
 		// injection time; only the live reload path is missing, so the
@@ -111,16 +147,22 @@ func (r *PiiPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	return ctrl.Result{}, err
+	return result, err
 }
 
 // renderConfigMap writes the policy's rules file into the ConfigMap named by
 // policyfile.ConfigMapName, owned by the policy so it is garbage-collected
 // with it, and returns the ConfigMap's name and the file's content hash. An
 // unchanged file is left alone, so the kubelet sees no update and the
-// sidecar does not reload.
-func (r *PiiPolicyReconciler) renderConfigMap(ctx context.Context, policy *corev1alpha1.PiiPolicy) (string, string, error) {
-	data, err := policyfile.Render(policy)
+// sidecar does not reload. With a remote document the file is the merge of
+// the two, and the remote file as fetched is kept next to it as the last
+// good copy.
+func (r *PiiPolicyReconciler) renderConfigMap(ctx context.Context, policy *corev1alpha1.PiiPolicy, remote remoteOutcome) (string, string, error) {
+	doc := policyfile.Local(policy)
+	if remote.haveDoc {
+		doc = policyfile.Merge(remote.doc, policy)
+	}
+	data, err := policyfile.Encode(doc)
 	if err != nil {
 		return "", "", err
 	}
@@ -141,6 +183,18 @@ func (r *PiiPolicyReconciler) renderConfigMap(ctx context.Context, policy *corev
 		}
 		cm.Annotations[policyfile.AnnotationHash] = hash
 		cm.Data = map[string]string{policyfile.Key: string(data)}
+		if remote.haveDoc {
+			cm.Data[policyfile.RemoteKey] = string(remote.raw)
+			cm.Annotations[policyfile.AnnotationRemoteHash] = policyfile.Hash(remote.raw)
+			if remote.etag != "" {
+				cm.Annotations[policyfile.AnnotationRemoteETag] = remote.etag
+			} else {
+				delete(cm.Annotations, policyfile.AnnotationRemoteETag)
+			}
+		} else {
+			delete(cm.Annotations, policyfile.AnnotationRemoteHash)
+			delete(cm.Annotations, policyfile.AnnotationRemoteETag)
+		}
 		return controllerutil.SetControllerReference(policy, cm, r.Scheme)
 	})
 	if err != nil {
