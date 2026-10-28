@@ -1,14 +1,13 @@
 // Package server is the rule server's HTTP surface: the public policy.json
-// a cluster pulls with a read-only token, and the management API that
-// creates organizations, rule sets, versions and tokens. The management
-// API sits behind an admin token for now; the panel and its sessions come
-// in a later change, and --single-tenant drops the check for a server that
-// runs behind a port-forward or the operator's own proxy.
+// a cluster pulls with a read-only token, the management API that creates
+// organizations, rule sets, versions and tokens, the panel that drives it
+// and the magic-link sign-in behind the panel. The management API takes
+// the admin token, a panel session, or nothing on a --single-tenant server
+// that runs behind a port-forward or the operator's own proxy (auth.go).
 package server
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +22,8 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/pii-shield/pii-shield/rules/internal/mail"
+	"github.com/pii-shield/pii-shield/rules/internal/panel"
 	"github.com/pii-shield/pii-shield/rules/internal/policy"
 	"github.com/pii-shield/pii-shield/rules/internal/store"
 )
@@ -38,6 +39,25 @@ type Config struct {
 	// is ten. Zero means 1/s, which is sixty clusters polling every minute.
 	PolicyRate float64
 	Logger     *slog.Logger
+
+	// BaseURL is the public address of the server, for the links in mail
+	// and as a second accepted Origin; empty means the request's own host.
+	BaseURL string
+	// Mailer sends the magic links; nil disables the sign-in.
+	Mailer mail.Mailer
+	// Signup lets an address without an account create an organization by
+	// signing in; off, only invited addresses can sign in.
+	Signup bool
+	// TrustProxy reads the client address and scheme from X-Forwarded-For
+	// and X-Forwarded-Proto, for a server behind a reverse proxy.
+	TrustProxy bool
+	// InsecureCookies drops the Secure flag of the session cookie, for a
+	// server reached over plain http on localhost.
+	InsecureCookies bool
+	// SessionTTL and LoginTTL are the lifetimes of a session and of a
+	// magic link; zero means the defaults.
+	SessionTTL time.Duration
+	LoginTTL   time.Duration
 }
 
 // DefaultOrg is the organization of a single-tenant server.
@@ -55,6 +75,10 @@ type Server struct {
 
 	limMu    sync.Mutex
 	limiters map[int64]*rate.Limiter
+
+	loginByIP    *keyedLimiter
+	loginByEmail *keyedLimiter
+	verifyByIP   *keyedLimiter
 }
 
 // New builds a Server over the store. In single-tenant mode the default
@@ -66,12 +90,24 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, error) {
 	if cfg.PolicyRate <= 0 {
 		cfg.PolicyRate = 1
 	}
+	if cfg.SessionTTL <= 0 {
+		cfg.SessionTTL = DefaultSessionTTL
+	}
+	if cfg.LoginTTL <= 0 {
+		cfg.LoginTTL = DefaultLoginTTL
+	}
 	if cfg.SingleTenant {
 		if _, err := st.CreateOrg(ctx, DefaultOrg, "Default"); err != nil && !errors.Is(err, store.ErrExists) {
 			return nil, fmt.Errorf("create the default organization: %w", err)
 		}
 	}
-	s := &Server{cfg: cfg, store: st, mux: http.NewServeMux(), log: cfg.Logger, limiters: map[int64]*rate.Limiter{}}
+	s := &Server{cfg: cfg, store: st, mux: http.NewServeMux(), log: cfg.Logger, limiters: map[int64]*rate.Limiter{},
+		// Five sign-in requests a minute per address, three links per
+		// e-mail address in ten minutes, ten link attempts a minute.
+		loginByIP:    newKeyedLimiter(12*time.Second, 5),
+		loginByEmail: newKeyedLimiter(200*time.Second, 3),
+		verifyByIP:   newKeyedLimiter(6*time.Second, 10),
+	}
 	s.routes()
 	return s, nil
 }
@@ -80,7 +116,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json", s.servePolicy)
 
-	admin := s.requireAdmin
+	s.mux.Handle("GET /{$}", panel.Handler())
+	s.mux.Handle("GET /app.js", panel.Handler())
+	s.mux.Handle("GET /style.css", panel.Handler())
+	s.mux.Handle("GET /auth/verify", panel.Handler())
+	s.mux.HandleFunc("POST /auth/login", s.login)
+	s.mux.HandleFunc("POST /auth/verify", s.verify)
+
+	admin := s.requireAccess
+	s.mux.HandleFunc("POST /auth/logout", admin(s.logout))
+	s.mux.HandleFunc("GET /api/me", admin(s.me))
+	s.mux.HandleFunc("GET /api/orgs/{org}/members", admin(s.listMembers))
+	s.mux.HandleFunc("POST /api/orgs/{org}/members", admin(s.invite))
 	s.mux.HandleFunc("GET /api/orgs", admin(s.listOrgs))
 	s.mux.HandleFunc("POST /api/orgs", admin(s.createOrg))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets", admin(s.listSets))
@@ -200,26 +247,18 @@ func bearer(r *http.Request) (string, bool) {
 
 // ---- management API ----
 
-func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.cfg.SingleTenant || s.cfg.AdminToken != "" {
-			value, ok := bearer(r)
-			if s.cfg.AdminToken == "" || !ok || subtle.ConstantTimeCompare([]byte(value), []byte(s.cfg.AdminToken)) != 1 {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules-admin"`)
-				s.fail(w, http.StatusUnauthorized, "admin token required")
-				return
-			}
-		}
-		next(w, r)
-	}
-}
-
 type orgRequest struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
 }
 
+// listOrgs lists every organization for the admin, and the caller's own
+// for a session.
 func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) {
+	if p := principalOf(r); p.org != nil {
+		s.json(w, http.StatusOK, map[string]any{"orgs": []store.Org{*p.org}})
+		return
+	}
 	orgs, err := s.store.ListOrgs(r.Context())
 	if err != nil {
 		s.internal(w, err)
@@ -229,6 +268,10 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
+	if principalOf(r).user != nil {
+		s.fail(w, http.StatusForbidden, "an account has one organization; the admin token creates others")
+		return
+	}
 	var req orgRequest
 	if !s.decode(w, r, &req) {
 		return
@@ -241,10 +284,16 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusCreated, org)
 }
 
+// org resolves the organization of the path. A session sees its own
+// organization only; any other is not found, so a slug discloses nothing.
 func (s *Server) org(w http.ResponseWriter, r *http.Request) (*store.Org, bool) {
 	org, err := s.store.GetOrg(r.Context(), r.PathValue("org"))
 	if err != nil {
 		s.storeError(w, err)
+		return nil, false
+	}
+	if p := principalOf(r); p.org != nil && p.org.ID != org.ID {
+		s.fail(w, http.StatusNotFound, "not found")
 		return nil, false
 	}
 	return org, true
@@ -348,7 +397,7 @@ func (s *Server) createVersion(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, `"content" is required: the rule set as a JSON object`)
 		return
 	}
-	v, err := s.store.CreateVersion(r.Context(), set.ID, req.Author, req.Comment, func(rev int64) ([]byte, string, error) {
+	v, err := s.store.CreateVersion(r.Context(), set.ID, authorOf(r, req.Author), req.Comment, func(rev int64) ([]byte, string, error) {
 		doc, err := policy.Canonical(req.Content, rev)
 		if err != nil {
 			return nil, "", &validationError{err}
@@ -384,7 +433,9 @@ func (s *Server) getVersion(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
-	s.json(w, http.StatusOK, v)
+	// The file as a cluster receives it, as JSON inside the envelope: a
+	// []byte would be base64 and useless to the panel.
+	s.json(w, http.StatusOK, map[string]any{"version": v, "content": json.RawMessage(v.Content)})
 }
 
 type publishRequest struct {
@@ -405,11 +456,12 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, `"revision" is required`)
 		return
 	}
-	if err := s.store.Publish(r.Context(), set.ID, req.Revision, req.Author); err != nil {
+	author := authorOf(r, req.Author)
+	if err := s.store.Publish(r.Context(), set.ID, req.Revision, author); err != nil {
 		s.storeError(w, err)
 		return
 	}
-	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "author", req.Author)
+	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "author", author)
 	set, _ = s.store.GetSetByID(r.Context(), set.ID)
 	s.json(w, http.StatusOK, set)
 }

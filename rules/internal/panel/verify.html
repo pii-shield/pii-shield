@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · PII-Shield rules</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="centered">
+<main class="card narrow">
+  <h1>PII-Shield rule server</h1>
+  <p>Press the button to finish signing in. The link works once and for a quarter of an hour.</p>
+  <form method="post" action="/auth/verify" id="verify">
+    <input type="hidden" name="token" id="token" value="">
+    <button type="submit" class="primary">Sign in</button>
+  </form>
+  <p class="muted" id="missing" hidden>This link carries no token. Ask for a new one on the <a href="/">sign-in page</a>.</p>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
