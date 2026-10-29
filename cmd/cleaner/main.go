@@ -42,6 +42,9 @@ func main() {
 	auditMode = mode == modeAudit
 	if auditMode {
 		log.Print("PII_MODE=audit: lines are written out unchanged; what would have been redacted is counted, not applied")
+		if metricsEnabled {
+			metrics.StartAudit()
+		}
 	}
 
 	// A single callback fans out to metrics and/or the stats summary. In

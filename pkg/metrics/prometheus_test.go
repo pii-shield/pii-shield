@@ -69,3 +69,21 @@ func TestAuditCounters(t *testing.T) {
 		t.Errorf("clean lines = %v, want 2", n)
 	}
 }
+
+func TestStartAuditCreatesTheSeries(t *testing.T) {
+	AuditLinesTotal.Reset()
+	AuditMode.Set(0)
+	if n := testutil.CollectAndCount(AuditLinesTotal); n != 0 {
+		t.Fatalf("series before StartAudit = %d, want 0", n)
+	}
+	StartAudit()
+	if n := testutil.CollectAndCount(AuditLinesTotal); n != 2 {
+		t.Errorf("series after StartAudit = %d, want 2 (clean, would_redact)", n)
+	}
+	if v := testutil.ToFloat64(AuditMode); v != 1 {
+		t.Errorf("piishield_audit_mode = %v, want 1", v)
+	}
+	if v := testutil.ToFloat64(AuditLinesTotal.WithLabelValues("clean")); v != 0 {
+		t.Errorf("clean series starts at %v, want 0", v)
+	}
+}

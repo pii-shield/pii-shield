@@ -67,7 +67,24 @@ var (
 		Name: "piishield_audit_findings_total",
 		Help: "Redactions audit mode would have made, by detector",
 	}, []string{"type"})
+
+	// AuditMode is 1 while the sidecar runs in audit mode, 0 otherwise, so
+	// a dashboard can tell the pods that watch from the pods that redact.
+	AuditMode = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "piishield_audit_mode",
+		Help: "1 while the sidecar runs in audit mode (PII_MODE=audit), 0 otherwise",
+	})
 )
+
+// StartAudit marks the process as running in audit mode and creates the
+// audit series at zero, so an audit sidecar that never sees a line still
+// exports piishield_audit_lines_total and a rate() of zero can alert on it;
+// a vector series otherwise appears only with its first increment.
+func StartAudit() {
+	AuditMode.Set(1)
+	AuditLinesTotal.WithLabelValues("clean").Add(0)
+	AuditLinesTotal.WithLabelValues("would_redact").Add(0)
+}
 
 // boundStrategy maps a scanner strategy to the fixed label set of the
 // counters, so an unexpected value cannot add a label value.
