@@ -1,0 +1,15 @@
+# Per-Dockerfile ignore for rules/Dockerfile (BuildKit reads it instead of
+# the shared .dockerignore for `docker build -f rules/Dockerfile`). The image
+# builds ./rules/cmd/rules-server, which needs the rules module and
+# pkg/scanner from the root module; everything else in the repository stays
+# out of the context.
+*
+!go.mod
+!go.sum
+!pkg
+!rules
+rules/*.db
+rules/*.db-*
+rules/rules-server
+rules/Dockerfile
+rules/Dockerfile.dockerignore

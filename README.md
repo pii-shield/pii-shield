@@ -34,7 +34,7 @@ PII-Shield is an actively developed open-source security tool in a production-ha
 | Kubernetes operator | Stabilization phase |
 | WASM SDKs | Released beta |
 | Proxy-Wasm gateway integration | Planned R&D |
-| Control Plane UI | Planned R&D |
+| Rule server (central rules, panel) | First version, self-hosted image |
 | eBPF audit agent (observes stdout/stderr, never redacts) | Experimental, see [docs/ebpf-audit.md](docs/ebpf-audit.md) |
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for the current production-hardening boundaries.
@@ -57,7 +57,7 @@ Developers often forget to mask sensitive data. Traditional regex filters in Flu
 
 
 ## Managing PII-Shield across dozens of clusters?
-We are building a hosted Control Plane with centralized rule management, Slack alerting, and redaction analytics. 
+A rule server keeps the rule sets in one place: a security team edits a set in the browser, sees on the real scanner what a draft does to pasted log lines, publishes a version, and every cluster whose `PiiPolicy` names the set pulls it with a read-only token, without a pod restart. Nothing about a cluster is sent to it; the operator only asks for the file. It ships as the image `ghcr.io/pii-shield/pii-shield-rules` for your own perimeter, see [docs/rules-server.md](docs/rules-server.md). A hosted copy opens by waitlist. Redaction analytics and Slack alerting are not part of it: they need a channel from the agent, which will be separate, explicitly enabled and carrying counters only.
 [![Join the Waitlist](https://img.shields.io/badge/Join_the_Waitlist-PII--Shield_Cloud-blue?style=for-the-badge)](https://tally.so/r/PdY7Ze)
 
 ## Integrations

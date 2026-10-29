@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   test:
-    name: Test (Root & Operator)
+    name: Test (Root, Operator & Rules)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -37,6 +37,10 @@ jobs:
 
       - name: Run eBPF Agent Module Tests (Race)
         working-directory: ebpf
+        run: go test -race ./...
+
+      - name: Run Rule Server Module Tests (Race)
+        working-directory: rules
         run: go test -race ./...
 
       - name: Compile WASM FFI
@@ -163,8 +167,12 @@ jobs:
         working-directory: ebpf
         run: go mod verify
 
+      - name: Verify Rule Server Module Dependencies
+        working-directory: rules
+        run: go mod verify
+
   image-smoke-test:
-    name: Image Smoke Tests (CLI, Agent, Operator, eBPF)
+    name: Image Smoke Tests (CLI, Agent, Operator, eBPF, Rules)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -194,6 +202,12 @@ jobs:
 
       - name: Smoke test eBPF agent image (loads the program into the runner's kernel)
         run: scripts/smoke-ebpf-image.sh pii-shield-ebpf:smoke
+
+      - name: Build rule server image
+        run: docker build -t pii-shield-rules:smoke -f rules/Dockerfile .
+
+      - name: Smoke test rule server image
+        run: scripts/smoke-rules-server.sh pii-shield-rules:smoke
 
   goreleaser:
     needs: [test, sdk-node, sdk-python, helm-lint, lint, dependency-verification, image-smoke-test]
@@ -248,6 +262,9 @@ jobs:
             context: .
           - name: pii-shield-ebpf
             dockerfile: ebpf/Dockerfile
+            context: .
+          - name: pii-shield-rules
+            dockerfile: rules/Dockerfile
             context: .
 
     steps:

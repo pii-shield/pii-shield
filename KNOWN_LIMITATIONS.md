@@ -44,4 +44,6 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 
 ## Roadmap Boundaries
 
-Proxy-Wasm gateway integration and a visual Control Plane are planned R&D areas rather than completed stable features. eBPF is an experimental audit agent that observes and never redacts ([docs/ebpf-audit.md](docs/ebpf-audit.md)); eBPF redaction is not planned.
+Proxy-Wasm gateway integration is a planned R&D area rather than a completed stable feature. eBPF is an experimental audit agent that observes and never redacts ([docs/ebpf-audit.md](docs/ebpf-audit.md)); eBPF redaction is not planned.
+
+The rule server ([docs/rules-server.md](docs/rules-server.md)) is a first version: one process with one SQLite file; the served `policy.json` is protected by HTTPS and the token, not by a signature of its content; sign-in by magic link only; rate limits kept in the process's memory; no redaction analytics and no alerting; the hosted copy is not open yet.

@@ -100,6 +100,15 @@ jobs:
     - name: Verify multi-arch agent image build
       run: scripts/verify-agent-multiarch-build.sh
 
+    # The rule server image is built from the repository root (the rules
+    # module takes pkg/scanner from the root module), started single-tenant
+    # and asked for the panel and for a published policy.json with a token.
+    - name: Build and smoke the rule server image
+      run: |
+        docker build -t pii-shield-rules:smoke -f rules/Dockerfile .
+        scripts/smoke-rules-server.sh pii-shield-rules:smoke
+        docker buildx build --platform linux/amd64,linux/arm64 -f rules/Dockerfile .
+
     - name: Check Coverage Threshold
       run: |
         go tool cover -func=coverage.out
