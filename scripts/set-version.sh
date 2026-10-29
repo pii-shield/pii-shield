@@ -37,6 +37,7 @@ FILES=(
   sdks/python/pyproject.toml
   README.md
   docs/application-readiness.md
+  docs/rules-server.md
   tests/deployments/docker-ghcr/README.md
 )
 
@@ -63,6 +64,9 @@ transform() {
       # Docker image tags in usage examples (thelisdeep/pii-shield:X.Y.Z,
       # ghcr.io/pii-shield/pii-shield:X.Y.Z).
       sed -E "s|(pii-shield):[0-9][0-9A-Za-z.-]*|\1:${VERSION}|g" "$file" ;;
+    */docs/rules-server.md)
+      # The rule server image tag in the docker run example.
+      sed -E "s|(pii-shield-rules):[0-9][0-9A-Za-z.-]*|\1:${VERSION}|g" "$file" ;;
     */README.md)
       sed -E \
         -e "s|release-v[0-9][0-9A-Za-z.-]*-blue|release-v${VERSION}-blue|g" \

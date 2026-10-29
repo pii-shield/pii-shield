@@ -42,4 +42,6 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 
 ## Roadmap Boundaries
 
-Proxy-Wasm gateway integration, a visual Control Plane, and production-grade eBPF interception are planned R&D areas rather than completed stable features.
+Proxy-Wasm gateway integration and production-grade eBPF interception are planned R&D areas rather than completed stable features.
+
+The rule server ([docs/rules-server.md](docs/rules-server.md)) is a first version: one process with one SQLite file; the served `policy.json` is protected by HTTPS and the token, not by a signature of its content; sign-in by magic link only; rate limits kept in the process's memory; no redaction analytics and no alerting; the hosted copy is not open yet.

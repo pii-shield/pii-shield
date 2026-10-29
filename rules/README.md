@@ -7,11 +7,12 @@ restart. Nothing about a cluster is sent here; the server only answers
 `GET`. One binary serves the hosted service and a self-hosted copy inside
 your own perimeter.
 
-Status: slices 1 to 3 of #95 (milestone 3.0). The model, the SQLite
-store, the public `policy.json` with ETag and tokens, a management API, a
-validate and a preview call that run a draft on the real scanner, and a
-panel with a magic-link sign-in. The image and the docs come in the last
-slice.
+Status: first version (milestone 3.0, #95). The model, the SQLite store,
+the public `policy.json` with ETag and tokens, a management API, a validate
+and a preview call that run a draft on the real scanner, a panel with a
+magic-link sign-in, and the image `ghcr.io/pii-shield/pii-shield-rules`.
+This file is for developing it; running it is described in
+[docs/rules-server.md](../docs/rules-server.md).
 
 ## Run
 
@@ -169,4 +170,13 @@ cd rules && go test -race ./...
 ```
 
 The module depends on the root module (`replace … => ../`) for
-`pkg/scanner`, so a Docker build needs the repository root as its context.
+`pkg/scanner`, so the image is built from the repository root:
+
+```bash
+docker build -t pii-shield-rules:dev -f rules/Dockerfile .
+scripts/smoke-rules-server.sh pii-shield-rules:dev
+```
+
+The smoke script is what CI and the release workflow run: the container
+starts single-tenant, serves the panel, takes a rule set through the API and
+serves it as `policy.json` to a token with an ETag and a `304`.
