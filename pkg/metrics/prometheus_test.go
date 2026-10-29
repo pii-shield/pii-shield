@@ -44,3 +44,28 @@ func TestIncrementRedaction(t *testing.T) {
 		t.Errorf("Expected 1 for unknown, got %v", count)
 	}
 }
+
+func TestAuditCounters(t *testing.T) {
+	AuditFindingsTotal.Reset()
+	AuditLinesTotal.Reset()
+
+	IncrementAuditFinding("signature")
+	IncrementAuditFinding("signature")
+	IncrementAuditFinding("made-up")
+	RecordAuditLine(true)
+	RecordAuditLine(false)
+	RecordAuditLine(false)
+
+	if n := testutil.ToFloat64(AuditFindingsTotal.WithLabelValues("signature")); n != 2 {
+		t.Errorf("signature findings = %v, want 2", n)
+	}
+	if n := testutil.ToFloat64(AuditFindingsTotal.WithLabelValues("unknown")); n != 1 {
+		t.Errorf("unknown findings = %v, want 1", n)
+	}
+	if n := testutil.ToFloat64(AuditLinesTotal.WithLabelValues("would_redact")); n != 1 {
+		t.Errorf("would_redact lines = %v, want 1", n)
+	}
+	if n := testutil.ToFloat64(AuditLinesTotal.WithLabelValues("clean")); n != 2 {
+		t.Errorf("clean lines = %v, want 2", n)
+	}
+}

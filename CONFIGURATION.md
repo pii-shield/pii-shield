@@ -66,6 +66,16 @@ Three rules keep the file from surprising a running process:
 
 With `PII_METRICS_ENABLED=true` the sidecar also exports `piishield_config_reloads_total` (loads applied, the first included) and `piishield_config_last_reload_timestamp_seconds` (Unix time of the last applied load, `0` until the first). Each applied load is logged with the file's `revision`.
 
+## Audit mode (dry run)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PII_MODE` | `redact` sanitizes the stream. `audit` is the dry run: every line goes through the scanner, but the line written out is the original, byte for byte, and what would have been redacted is only counted, so a team can run the sidecar on real traffic for a while and look at the numbers before turning redaction on. Invalid values fall back to `redact` with a warning. | `redact` |
+
+What audit mode counts, with `PII_METRICS_ENABLED=true`: `piishield_audit_lines_total{result}` (`clean` or `would_redact`, one per line) and `piishield_audit_findings_total{type}` (one per redaction the scanner would have made, with the same bounded `type` label as `piishield_redaction_events_total`, which stays at zero in audit mode because nothing is redacted). With `PII_STATS_LOG_INTERVAL` the summary line reads `PII-Shield audit: 1,240 would-be redactions (…) in 310 of 12,345 lines (2.5%) / 5.2 MB processed; nothing was changed`. The counters hold the fact of a finding and its detector, never the value: audit mode does not record the secrets it saw, and there is no way to list them.
+
+Audit mode never drops a line: a scanner panic passes the line through and a line longer than the buffer produces the `WARN` marker whatever `PII_FAIL_POLICY` says. In file mode the sidecar reads a file the application writes and cannot block the application; in pipe and stdin modes the sidecar is still in the stream's path, audit or not. The mode is read once at start, so leaving audit mode is a restart with `PII_MODE` unset.
+
 ## Runtime Failure Policy
 
 | Variable | Description | Default |
@@ -84,12 +94,12 @@ See `docs/sidecar-failure-modes.md` for production failure-mode guidance.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. The `piishield_redaction_events_total` counter carries a `type` label bounded to `entropy`, `regex`, `luhn`, `signature` and `unknown`; `signature` counts the built-in issuer-prefix detectors (AWS, Google, GitHub, Slack, Stripe, JWT, Bearer, PEM private keys) telephone numbers found by shape and identity numbers found by their key. | `false` |
+| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. The `piishield_redaction_events_total` counter carries a `type` label bounded to `entropy`, `regex`, `luhn`, `signature` and `unknown`; `signature` counts the built-in issuer-prefix detectors (AWS, Google, GitHub, Slack, Stripe, JWT, Bearer, PEM private keys) telephone numbers found by shape and identity numbers found by their key. In audit mode (`PII_MODE=audit`) the findings go to `piishield_audit_findings_total{type}` and `piishield_audit_lines_total{result}` instead. | `false` |
 | `PII_METRICS_PORT` | Port for the metrics/health server (1–65535). | `9090` |
-| `PII_STATS_LOG_INTERVAL` | When set to a positive Go duration (e.g. `1h`, `30m`), log a periodic aggregated redaction summary — counts of high-entropy secrets, pattern matches, and card numbers, plus lines and bytes processed — and a final summary on shutdown. Empty or invalid disables it. Independent of `PII_METRICS_ENABLED`. | _(disabled)_ |
+| `PII_STATS_LOG_INTERVAL` | When set to a positive Go duration (e.g. `1h`, `30m`), log a periodic aggregated redaction summary — counts of high-entropy secrets, pattern matches, card numbers and signatures, plus lines and bytes processed — and a final summary on shutdown. Empty or invalid disables it. Independent of `PII_METRICS_ENABLED`. | _(disabled)_ |
 
 The stats summary is a single log line per interval, e.g.
-`PII-Shield stats: 1,240 redactions (900 high-entropy secrets, 297 pattern matches, 43 card numbers) across 12,345 lines / 5.2 MB processed`.
+`PII-Shield stats: 1,240 redactions (900 high-entropy secrets, 297 pattern matches, 43 card numbers, 0 signatures) across 12,345 lines / 5.2 MB processed`; `signatures` are the built-in issuer-prefix detectors.
 
 ## Value-Based Regex Redaction (Deterministic)
 
