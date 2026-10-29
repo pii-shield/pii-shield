@@ -29,6 +29,7 @@ Validation before production:
 
 - [ ] Run unit tests and scanner benchmarks for the target release.
 - [ ] Run `./scripts/test-smoke.sh` with representative log samples.
+- [ ] Or run the real stream through `PII_MODE=audit` first: the output is the input, byte for byte, and `piishield_audit_findings_total` (or the `PII-Shield audit:` summary with `PII_STATS_LOG_INTERVAL`) says what redaction would have changed.
 - [ ] Confirm JSON logs remain valid after redaction.
 - [ ] Confirm expected secrets and PII are redacted.
 - [ ] Confirm safe identifiers are not over-redacted.
@@ -53,6 +54,8 @@ Monitoring:
 Status: controlled rollout.
 
 Use this mode when the application can write logs to the configured file path consumed by the sidecar.
+
+The dry run described under Kubernetes Operator Mode (step 0) works here too: set `PII_MODE=audit` on the sidecar, with `PII_METRICS_ENABLED=true` or `PII_STATS_LOG_INTERVAL`, and the sidecar counts instead of redacting until the variable is removed.
 
 Required configuration:
 
@@ -93,6 +96,14 @@ Monitoring:
 Status: controlled rollout.
 
 Use this mode when the operator manages sidecar injection through `PiiPolicy` resources and pod labels.
+
+Step 0, before any redaction (dry run):
+
+- [ ] Create the `PiiPolicy` with `auditMode: true` and label the workloads. The sidecar then writes every line out unchanged and only counts what it would have redacted (operator README, "Audit mode"); the admission warning on each pod and the policy's `Available` condition both say so.
+- [ ] Scrape the sidecar's metrics port (9090, container port `pii-metrics`) with a `PodMonitor` or the `prometheus.io` annotations, or read the hourly `PII-Shield audit:` summary in the sidecar's log.
+- [ ] Run for two weeks of normal traffic, long enough to see the weekly batch jobs and the error paths, and confirm `piishield_audit_lines_total` is moving for every protected pod (`PIIShieldAuditSeesNoLines` fires when it is not: the application does not write to `logPath`).
+- [ ] Read `piishield_audit_findings_total` by `type` and the share of `would_redact` lines against what you expect from the application: a share far above it means the rules hide ordinary values (tune `sensitiveKeys`, `safeRegexList`, thresholds, see the false-positive runbook), a share of zero on an application that handles secrets means the rules miss them (false-negative runbook). The counters never hold the value: compare against the application's own logs for the period.
+- [ ] Set `auditMode: false` (or remove it) and `kubectl rollout restart` the workloads. Redaction starts with the new pods; `piishield_redaction_events_total` takes over from the audit counters.
 
 Required configuration:
 

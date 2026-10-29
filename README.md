@@ -180,6 +180,8 @@ spec:
 
 The Operator will automatically inject the `pii-shield-agent` using the Native Sidecar pattern (K8s 1.28+) and securely mask all logs!
 
+Not sure what the rules will hide? Add `auditMode: true` to the policy first: the sidecar leaves every line as it is and only counts what it would have redacted (`piishield_audit_*` metrics and an hourly summary in its log). Run it on real traffic for a while, then drop the field and restart the workload. In pipe mode the sidecar still sits in the stream's path; see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+
 ---
 
 📋 **Free: 25-point Kubernetes Log PII Audit Checklist** — where PII leaks from pods, which log paths bypass your filters, and how to verify redaction actually works. [Get the checklist →](https://pii-shield.com/#checklist)
