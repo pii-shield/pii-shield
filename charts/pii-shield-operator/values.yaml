@@ -107,3 +107,7 @@ metrics:
     remoteRulesStaleFor: 5m
     # spec.remoteConfig: any failed pull in the last 15 minutes
     remoteRulesErrorsFor: 15m
+    # spec.auditMode: lines the sidecar would have redacted in the last 24 hours (info)
+    auditWouldRedactFor: 15m
+    # spec.auditMode: an audit sidecar that processed no lines for an hour
+    auditNoLinesFor: 1h

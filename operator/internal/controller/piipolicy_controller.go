@@ -90,6 +90,18 @@ func (r *PiiPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		condition.Reason = "InvalidInjectionMode"
 		condition.Message = fmt.Sprintf("Unsupported injection mode: %s", effectiveMode)
 	}
+	// Audit mode: the sidecar leaves the logs as they are and counts. The
+	// CRD refuses it with ebpf; a policy created under an older CRD is
+	// reported here, and the webhook denies its pods.
+	if policy.Spec.AuditMode && condition.Status == metav1.ConditionTrue {
+		if effectiveMode == "ebpf" {
+			condition.Status = metav1.ConditionFalse
+			condition.Reason = "AuditModeUnsupported"
+			condition.Message = "auditMode is not implemented for injection mode ebpf (the read-only eBPF audit is tracked in #96); pods of this policy are denied. Use file or pipe for the audit"
+		} else {
+			condition.Message += "; audit mode: logs are not modified, what would be redacted is counted"
+		}
+	}
 
 	oldStatus := *policy.Status.DeepCopy()
 	meta.SetStatusCondition(&policy.Status.Conditions, condition)

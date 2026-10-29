@@ -11,7 +11,8 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 ## Operator
 
 - The Kubernetes operator is in stabilization. It supports policy objects and webhook injection, but advanced policy lifecycle management is still evolving.
-- eBPF mode is experimental/R&D and should not be treated as production-ready interception.
+- eBPF mode is experimental/R&D and should not be treated as production-ready interception. The read-only eBPF audit asked for in #32 does not exist: a `PiiPolicy` with `auditMode: true` and `injectionMode: ebpf` is rejected by the API server, and the audit runs through the file or pipe sidecar instead (`PII_MODE=audit`, see the operator README).
+- `auditMode` turns the sidecar's metrics endpoint on, on port 9090 of the pod; a pod that already uses that port keeps the audit's log summary but has no counters, and nothing scrapes the port unless the cluster is told to (a `PodMonitor` or the `prometheus.io` annotations).
 
 ## Scanner Configuration
 

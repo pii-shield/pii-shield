@@ -247,3 +247,41 @@ func TestPiiPolicyReconcileRendersConfigMap(t *testing.T) {
 		t.Fatal("status hash must change with the rules")
 	}
 }
+
+// Audit mode is named in the Available condition, so kubectl shows that the
+// logs of this policy are not being modified; with ebpf the policy is not
+// available, because the audit is not implemented there.
+func TestPiiPolicyReconcileReportsAuditMode(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		mode    string
+		status  metav1.ConditionStatus
+		reason  string
+		message string
+	}{
+		{"file", metav1.ConditionTrue, "PolicyAccepted", "audit mode: logs are not modified"},
+		{"pipe", metav1.ConditionTrue, "PolicyAccepted", "audit mode: logs are not modified"},
+		{"ebpf", metav1.ConditionFalse, "AuditModeUnsupported", "#96"},
+	} {
+		scheme := newTestScheme(t)
+		policy := &corev1alpha1.PiiPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "audit-" + tc.mode, Namespace: "default"},
+			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: tc.mode, AuditMode: true},
+		}
+		reconciler := newTestReconciler(t, scheme, policy)
+		if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: policy.Name, Namespace: policy.Namespace}}); err != nil {
+			t.Fatalf("%s: Reconcile: %v", tc.mode, err)
+		}
+		got := fetchPolicy(t, ctx, reconciler, policy.Name, policy.Namespace)
+		cond := meta.FindStatusCondition(got.Status.Conditions, "Available")
+		if cond == nil {
+			t.Fatalf("%s: no Available condition", tc.mode)
+		}
+		if cond.Status != tc.status || cond.Reason != tc.reason || !strings.Contains(cond.Message, tc.message) {
+			t.Errorf("%s: Available = %s/%s %q; want %s/%s containing %q", tc.mode, cond.Status, cond.Reason, cond.Message, tc.status, tc.reason, tc.message)
+		}
+		if !got.Spec.AuditMode {
+			t.Errorf("%s: reconcile changed the spec", tc.mode)
+		}
+	}
+}

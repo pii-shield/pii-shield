@@ -58,6 +58,7 @@ variable, so the scanner's built-in defaults apply.
 | PiiPolicy field | Sidecar env | Format |
 |-----------------|-------------|--------|
 | `failPolicy` | `PII_FAIL_POLICY` | `open` (default) or `closed` |
+| `auditMode` | `PII_MODE=audit` (plus the sidecar's metrics on port 9090 and an hourly summary in its log) | `true` for the dry run: see [Audit mode](#audit-mode-dry-run) |
 | `confidenceThreshold` | `PII_CONFIDENCE_THRESHOLD` | float |
 | `salt` | `PII_SALT` | plain text — prefer `saltSecretKeyRef` |
 | `saltSecretKeyRef` | `PII_SALT` via `secretKeyRef` | Secret resolved in the pod's namespace |
@@ -101,6 +102,57 @@ The status of the policy names the ConfigMap and a content hash of the file
 (`status.renderedPolicyConfigMap`, `status.renderedPolicyHash`) and carries a
 `Rendered` condition; `RenderFailed` means the file could not be written
 (the policy still works through the env vars at injection time).
+
+### Audit mode (dry run)
+
+Before a policy starts redacting, run it with `auditMode: true` on real
+traffic: the sidecar scans every line as usual, writes it out unchanged,
+byte for byte, and only counts what it would have redacted. The policy's
+`Available` condition says `audit mode: logs are not modified`, and every
+pod admitted under it gets an admission warning that its logs are not
+redacted.
+
+```yaml
+apiVersion: core.pii-shield.io/v1alpha1
+kind: PiiPolicy
+metadata:
+  name: default
+  namespace: payments
+spec:
+  injectionMode: file
+  auditMode: true
+  saltSecretKeyRef: { name: pii-shield-salt, key: salt }
+  sensitiveKeys: [password, token, geheim]
+```
+
+The numbers are the point of the mode, so the webhook turns the sidecar's
+metrics on with it: `PII_METRICS_ENABLED=true` on port `9090` (a container
+port named `pii-metrics`; the pod must leave that port free, otherwise the
+sidecar logs that its metrics server is disabled and the audit has only the
+log summary) and `PII_STATS_LOG_INTERVAL=1h`, which writes a line such as
+`PII-Shield audit: 1,240 would-be redactions (…) in 310 of 12,345 lines
+(2.5%) …; nothing was changed` into the sidecar's log every hour. The
+counters are `piishield_audit_lines_total{result="clean"|"would_redact"}`
+and `piishield_audit_findings_total{type}`; `piishield_redaction_events_total`
+stays at zero in audit mode, so an alert on it does not fire on a dry run.
+Scraping the port is the cluster's business: a `PodMonitor` on the
+workload's pods, or the `prometheus.io` annotations. With
+`metrics.prometheusRule.enabled` the chart adds two rules on those counters:
+`PIIShieldAuditWouldRedact` (info: the sidecar saw lines it would redact in
+the last 24 hours) and `PIIShieldAuditSeesNoLines` (warning: an audit sidecar
+processed no lines for an hour, so the application is quiet or does not
+write to `logPath`).
+
+The counters hold the fact of a finding and its detector, never the value:
+the audit does not record the secrets it saw. A false positive is found by
+reading the application's own logs for that period. `auditMode` is a
+setting of the pod, like the salt and the fail policy, so it comes through
+the environment, not through the rules file: switching it off is a
+`kubectl rollout restart` of the workload. It works with `injectionMode`
+`file` (the sidecar reads a file the application writes and cannot block it)
+and `pipe` (the sidecar still sits in the stream's path, audit or not); with
+`ebpf` the API server rejects the policy, because the read-only eBPF audit
+of #32 is not implemented (#96).
 
 ### Central rule repository (`remoteConfig`)
 

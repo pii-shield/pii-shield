@@ -39,6 +39,19 @@ spec:
           spec:
             description: spec defines the desired state of PiiPolicy
             properties:
+              auditMode:
+                description: |-
+                  AuditMode is the dry run: the sidecar scans every line as usual but
+                  writes it out unchanged, byte for byte, and only counts what it would
+                  have redacted (PII_MODE=audit; the counters are
+                  piishield_audit_lines_total and piishield_audit_findings_total, so the
+                  webhook also turns the sidecar's metrics on, on port 9090, and an
+                  hourly summary in its log). Run a policy in audit mode on real traffic
+                  first, look at the numbers, then set it to false; the change needs a
+                  pod restart. Works with injectionMode file and pipe (in pipe mode the
+                  sidecar still sits in the stream's path); with ebpf the policy is
+                  rejected, the read-only eBPF audit is not implemented (#96).
+                type: boolean
               confidenceThreshold:
                 description: |-
                   ConfidenceThreshold is the threshold for the PII scanner.
@@ -317,6 +330,11 @@ spec:
             required:
             - injectionMode
             type: object
+            x-kubernetes-validations:
+            - message: 'auditMode is not implemented for injectionMode ebpf (the read-only
+                eBPF audit is tracked in #96); use file or pipe'
+              rule: '!(has(self.auditMode) && self.auditMode && self.injectionMode
+                == ''ebpf'')'
           status:
             description: status defines the observed state of PiiPolicy
             properties:

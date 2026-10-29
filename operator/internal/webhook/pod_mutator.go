@@ -91,6 +91,14 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if mode == "" {
 		mode = "file" // fallback to MVP
 	}
+	// The CRD refuses this combination too (a CEL rule on the spec); this
+	// catches a policy created under an older CRD instead of injecting an
+	// eBPF sidecar that would not audit.
+	if mode == "ebpf" && policy.Spec.AuditMode {
+		return admission.Denied(fmt.Sprintf(
+			"PiiPolicy %q: auditMode is not implemented for injectionMode \"ebpf\" (the read-only eBPF audit is tracked in #96); use file or pipe for the audit",
+			policyName))
+	}
 
 	var mutatedPod *corev1.Pod
 	switch mode {
@@ -116,6 +124,11 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if mode == "pipe" {
 		resp.Warnings = append(resp.Warnings,
 			"PiiPolicy injectionMode \"pipe\" is experimental: it rewrites the target container command through /bin/sh -c and can break distroless images, argument quoting, signal handling, and the app lifecycle")
+	}
+	if policy.Spec.AuditMode {
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf(
+			"PiiPolicy %q is in auditMode: the sidecar writes every line out unchanged and only counts what it would have redacted; logs are NOT redacted until auditMode is false and the pod restarts",
+			policyName))
 	}
 	return resp
 }
@@ -335,6 +348,18 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "pii-pipe-dir", MountPath: "/shared"}, corev1.VolumeMount{Name: "pii-tmp", MountPath: "/tmp"})
 	}
 
+	// Audit mode is about the numbers, so the sidecar's metrics are turned
+	// on with it (audit.go): the counters on a named port and an hourly
+	// summary in the sidecar's log.
+	if policy.Spec.AuditMode {
+		sidecar.Env = append(sidecar.Env, auditEnv()...)
+		sidecar.Ports = append(sidecar.Ports, corev1.ContainerPort{
+			Name:          AuditMetricsPortName,
+			ContainerPort: AuditMetricsPort,
+			Protocol:      corev1.ProtocolTCP,
+		})
+	}
+
 	// The rules file rendered by the controller (policyfile): the sidecar
 	// reads it at start and reloads it when the ConfigMap changes, so a
 	// policy edit reaches this pod without a restart. The env vars above are
@@ -410,6 +435,9 @@ func scannerEnv(policy *piishieldv1alpha1.PiiPolicy) []corev1.EnvVar {
 		}
 	}
 	add("PII_FAIL_POLICY", spec.FailPolicy)
+	if spec.AuditMode {
+		add("PII_MODE", "audit")
+	}
 	if spec.ConfidenceThreshold != 0 {
 		add("PII_CONFIDENCE_THRESHOLD", strconv.FormatFloat(float64(spec.ConfidenceThreshold), 'f', -1, 32))
 	}

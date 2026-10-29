@@ -100,6 +100,36 @@ var _ = Describe("PiiPolicy Controller integration", func() {
 		}
 	})
 
+	// A CEL rule on the spec refuses auditMode with ebpf at admission, so a
+	// cluster with the current CRD never has such a policy; the webhook's
+	// denial and the controller's AuditModeUnsupported branch exist for a
+	// policy created under an older CRD and are covered by the unit tests.
+	It("rejects auditMode with injection mode ebpf at admission and accepts it with file", func() {
+		rejected := &corev1alpha1.PiiPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: "ebpf", AuditMode: true},
+		}
+		err := k8sClient.Create(ctx, rejected)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid, got %v", err)
+		Expect(err.Error()).To(ContainSubstring("#96"))
+
+		accepted := &corev1alpha1.PiiPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: "file", AuditMode: true},
+		}
+		Expect(k8sClient.Create(ctx, accepted)).To(Succeed())
+		reconciler := &PiiPolicyReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		updated := &corev1alpha1.PiiPolicy{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+		condition := meta.FindStatusCondition(updated.Status.Conditions, "Available")
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+		Expect(condition.Message).To(ContainSubstring("audit mode: logs are not modified"))
+		Expect(updated.Spec.AuditMode).To(BeTrue())
+	})
+
 	// The CRD makes injectionMode a required enum, so an empty or unknown mode
 	// never reaches the controller; its default-mode and InvalidInjectionMode
 	// branches are exercised only by the fake-client unit tests.
