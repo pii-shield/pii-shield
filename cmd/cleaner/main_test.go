@@ -27,7 +27,7 @@ func TestMainSuccess(t *testing.T) {
 	// main reads these; a value left in the developer's shell would change
 	// what is being tested. main also installs scanner.RedactionCallback when
 	// metrics or stats are on, so restore it for the tests that follow.
-	for _, k := range []string{"PII_METRICS_ENABLED", "PII_METRICS_PORT", "PII_STATS_LOG_INTERVAL", "PII_FAIL_POLICY"} {
+	for _, k := range []string{"PII_METRICS_ENABLED", "PII_METRICS_PORT", "PII_STATS_LOG_INTERVAL", "PII_FAIL_POLICY", "PII_MODE"} {
 		t.Setenv(k, "")
 	}
 	oldCallback := scanner.RedactionCallback

@@ -34,11 +34,30 @@ func main() {
 		stats = newStatsCollector()
 	}
 
-	// A single callback fans out to metrics and/or the stats summary.
+	// PII_MODE=audit: scan, count, write the original line (audit.go).
+	mode, ok := parseMode(os.Getenv("PII_MODE"))
+	if !ok {
+		log.Printf("Invalid PII_MODE %q, using %s", os.Getenv("PII_MODE"), modeRedact)
+	}
+	auditMode = mode == modeAudit
+	if auditMode {
+		log.Print("PII_MODE=audit: lines are written out unchanged; what would have been redacted is counted, not applied")
+		if metricsEnabled {
+			metrics.StartAudit()
+		}
+	}
+
+	// A single callback fans out to metrics and/or the stats summary. In
+	// audit mode a redaction the scanner makes is a finding, not an event:
+	// the redacted text is thrown away and the original line goes out.
 	if metricsEnabled || stats != nil {
 		scanner.RedactionCallback = func(strategy string) {
 			if metricsEnabled {
-				metrics.IncrementRedaction(strategy)
+				if auditMode {
+					metrics.IncrementAuditFinding(strategy)
+				} else {
+					metrics.IncrementRedaction(strategy)
+				}
 			}
 			if stats != nil {
 				stats.recordRedaction(strategy)
@@ -93,6 +112,10 @@ func main() {
 			}
 		}()
 	}
+
+	// Rules from a file (PII_CONFIG_FILE), reloaded on change without a
+	// restart; the environment stays on top of the file. Nil when unset.
+	startPolicyReloader(metricsEnabled)
 
 	failPolicy := os.Getenv("PII_FAIL_POLICY")
 	if failPolicy == "" {
@@ -184,11 +207,7 @@ func main() {
 				metrics.ErrorsTotal.Inc()
 			}
 			if err == bufio.ErrTooLong {
-				if failPolicy == "closed" {
-					writeMarker(out, "[PII_SHIELD_DROP: BUFFER_OVERFLOW]")
-				} else {
-					writeMarker(out, "[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]")
-				}
+				writeMarker(out, overflowMarker(failPolicy))
 			}
 			fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
 			finalize()
@@ -307,11 +326,7 @@ func streamPipeOnce(path string, metricsEnabled bool, failPolicy string, out io.
 			metrics.ErrorsTotal.Inc()
 		}
 		if err == bufio.ErrTooLong {
-			if failPolicy == "closed" {
-				writeMarker(out, "[PII_SHIELD_DROP: BUFFER_OVERFLOW]")
-			} else {
-				writeMarker(out, "[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]")
-			}
+			writeMarker(out, overflowMarker(failPolicy))
 		}
 		fmt.Fprintln(os.Stderr, "Error reading pipe:", err)
 	}
@@ -327,8 +342,9 @@ func processLine(text string, metricsEnabled bool, failPolicy string, out io.Wri
 				if metricsEnabled {
 					metrics.ErrorsTotal.Inc()
 				}
-				// Apply Blast Radius Control Policy
-				if failPolicy == "closed" {
+				// Apply Blast Radius Control Policy. Audit mode never
+				// drops: its promise is an unchanged stream.
+				if failPolicy == "closed" && !auditMode {
 					writeMarker(out, "[PII_SHIELD_DROP: FATAL_ERROR]")
 				} else {
 					// Fail-Open: keep the flow alive
@@ -351,6 +367,19 @@ func processLine(text string, metricsEnabled bool, failPolicy string, out io.Wri
 
 		if metricsEnabled {
 			metrics.ProcessingDuration.Observe(time.Since(start).Seconds())
+		}
+
+		if auditMode {
+			// Count what would have changed and write the original line.
+			wouldRedact := cleaned != text
+			if metricsEnabled {
+				metrics.RecordAuditLine(wouldRedact)
+			}
+			if stats != nil {
+				stats.recordAuditLine(wouldRedact)
+			}
+			_, _ = fmt.Fprintln(out, text)
+			return
 		}
 
 		// Write back to Stdout for Fluentd/Logstash

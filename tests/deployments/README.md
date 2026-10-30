@@ -118,6 +118,8 @@ Supported variables for Docker/local-binary paths:
 - `PII_SAFE_REGEX_LIST`
 - `PII_METRICS_ENABLED`
 - `PII_METRICS_PORT`
+- `PII_CONFIG_FILE` (CLI/container paths; the file must be reachable from the container)
+- `PII_CONFIG_RELOAD_SECONDS`
 
 Standalone Helm paths map supported chart variables to `piiConfig.*` and `metrics.*`.
 Node/Python WASM SDK paths map `PII_SALT`, `PII_ENTROPY_THRESHOLD`, `PII_CONFIDENCE_THRESHOLD`, and `PII_FAIL_POLICY`.
