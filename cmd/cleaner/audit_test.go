@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
@@ -161,14 +162,10 @@ func TestStatsSummaryInAuditMode(t *testing.T) {
 	}
 }
 
-// The whole binary in audit mode: stdin in, the same bytes out, and the
-// final stats summary names the lines that would have changed.
-func TestMainAuditPassesStdinThrough(t *testing.T) {
-	for _, k := range []string{"PII_METRICS_ENABLED", "PII_METRICS_PORT", "PII_FAIL_POLICY"} {
-		t.Setenv(k, "")
-	}
-	t.Setenv("PII_MODE", "audit")
-	t.Setenv("PII_STATS_LOG_INTERVAL", "1h")
+// runMainInProcess feeds input to main() through stdin and returns what it
+// wrote to stdout and to the log. The caller sets the PII_* environment.
+func runMainInProcess(t *testing.T, input string) (stdout, logs string) {
+	t.Helper()
 	oldCallback := scanner.RedactionCallback
 	oldStats := stats
 	t.Cleanup(func() {
@@ -187,7 +184,6 @@ func TestMainAuditPassesStdinThrough(t *testing.T) {
 	log.SetOutput(wStderr)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
-	input := "hello test@example.com world\nline 2\npassword=Sup3rS3cretValue!\n"
 	go func() {
 		_, _ = wStdin.Write([]byte(input))
 		_ = wStdin.Close()
@@ -201,16 +197,81 @@ func TestMainAuditPassesStdinThrough(t *testing.T) {
 	}()
 	<-done
 
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, rStdout)
-	if buf.String() != input {
-		t.Errorf("audit mode changed the stream:\n got: %q\nwant: %q", buf.String(), input)
-	}
-	var errBuf bytes.Buffer
+	var outBuf, errBuf bytes.Buffer
+	_, _ = io.Copy(&outBuf, rStdout)
 	_, _ = io.Copy(&errBuf, rStderr)
-	logs := errBuf.String()
+	return outBuf.String(), errBuf.String()
+}
+
+// The whole binary in audit mode: stdin in, the same bytes out, and the
+// final stats summary names the lines that would have changed.
+func TestMainAuditPassesStdinThrough(t *testing.T) {
+	for _, k := range []string{"PII_METRICS_ENABLED", "PII_METRICS_PORT", "PII_FAIL_POLICY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("PII_MODE", "audit")
+	t.Setenv("PII_STATS_LOG_INTERVAL", "1h")
+
+	input := "hello test@example.com world\nline 2\npassword=Sup3rS3cretValue!\n"
+	out, logs := runMainInProcess(t, input)
+	if out != input {
+		t.Errorf("audit mode changed the stream:\n got: %q\nwant: %q", out, input)
+	}
 	if !strings.Contains(logs, "PII_MODE=audit") || !strings.Contains(logs, "PII-Shield audit:") || !strings.Contains(logs, "in 2 of 3 lines") {
 		t.Errorf("expected the audit notice and summary in the log, got:\n%s", logs)
+	}
+}
+
+// With metrics on, audit mode exports piishield_audit_mode and counts what
+// the scanner finds as audit findings, never as redactions. A bad metrics
+// port keeps the metrics on but the server off, so no port is needed.
+func TestMainAuditWithMetricsCountsFindings(t *testing.T) {
+	t.Setenv("PII_METRICS_ENABLED", "true")
+	t.Setenv("PII_METRICS_PORT", "none")
+	t.Setenv("PII_FAIL_POLICY", "")
+	t.Setenv("PII_STATS_LOG_INTERVAL", "")
+	t.Setenv("PII_MODE", "audit")
+	t.Cleanup(func() { metrics.AuditMode.Set(0) })
+
+	countAll := func(v *prometheus.CounterVec) float64 {
+		var n float64
+		for _, typ := range []string{"entropy", "regex", "luhn", "signature", "unknown"} {
+			n += testutil.ToFloat64(v.WithLabelValues(typ))
+		}
+		return n
+	}
+	findingsBefore := countAll(metrics.AuditFindingsTotal)
+	redactionsBefore := countAll(metrics.RedactionEventsTotal)
+
+	input := "password=Sup3rS3cretValue!\n"
+	out, _ := runMainInProcess(t, input)
+	if out != input {
+		t.Errorf("audit mode changed the stream:\n got: %q\nwant: %q", out, input)
+	}
+	if testutil.ToFloat64(metrics.AuditMode) != 1 {
+		t.Error("piishield_audit_mode must be 1 in audit mode")
+	}
+	if n := countAll(metrics.AuditFindingsTotal) - findingsBefore; n < 1 {
+		t.Errorf("expected at least one audit finding, got %v", n)
+	}
+	if n := countAll(metrics.RedactionEventsTotal) - redactionsBefore; n != 0 {
+		t.Errorf("audit mode must count no redactions, got %v", n)
+	}
+}
+
+// An unknown PII_MODE is logged and the sidecar redacts, the safe default.
+func TestMainInvalidModeRedacts(t *testing.T) {
+	for _, k := range []string{"PII_METRICS_ENABLED", "PII_METRICS_PORT", "PII_FAIL_POLICY", "PII_STATS_LOG_INTERVAL"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("PII_MODE", "dry-run")
+
+	out, logs := runMainInProcess(t, "password=Sup3rS3cretValue!\n")
+	if strings.Contains(out, "Sup3rS3cretValue") || !strings.Contains(out, "[HIDDEN") {
+		t.Errorf("an unknown mode must redact, got: %q", out)
+	}
+	if !strings.Contains(logs, `Invalid PII_MODE "dry-run"`) {
+		t.Errorf("expected the invalid mode in the log, got:\n%s", logs)
 	}
 }
 
