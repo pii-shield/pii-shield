@@ -43,4 +43,4 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 
 ## Roadmap Boundaries
 
-Proxy-Wasm gateway integration, a visual Control Plane, and production-grade eBPF interception are planned R&D areas rather than completed stable features.
+Proxy-Wasm gateway integration and a visual Control Plane are planned R&D areas rather than completed stable features. eBPF is an experimental audit agent that observes and never redacts ([docs/ebpf-audit.md](docs/ebpf-audit.md)); eBPF redaction is not planned.

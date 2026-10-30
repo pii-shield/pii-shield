@@ -10,7 +10,7 @@ PII-Shield is an open-source security tool for redacting PII and secrets from lo
 - WASM SDK usage for in-process integrations;
 - CI/CD and release artifacts that distribute binaries, containers, charts, and SDK packages.
 
-Planned R&D areas such as production eBPF interception, Proxy-Wasm gateway integration, and hosted control-plane features are out of production security scope until explicitly marked stable.
+Planned R&D areas such as Proxy-Wasm gateway integration and hosted control-plane features are out of production security scope until explicitly marked stable. The eBPF audit agent is experimental and observation only; its privilege is covered below because it is the one component that runs with node-level capabilities.
 
 ## Security Assumptions
 
@@ -146,12 +146,16 @@ Mitigations:
 Threats:
 
 - Operator, webhook, or sidecar permissions are broader than needed.
+- The eBPF audit agent (`injectionMode: ebpf`) runs as root with `CAP_BPF`, `CAP_PERFMON` and `CAP_SYS_RESOURCE`. These let it load tracing programs that can read the memory of any process on the node. A compromised agent image, or a bug in the agent, is therefore node-level disclosure, not pod-level.
 - CI/CD tokens or package publishing credentials allow unauthorized release actions.
 - Compromised dependencies run code in privileged build or cluster contexts.
 
 Mitigations:
 
 - Use Kubernetes RBAC and namespace scoping for operator deployments.
+- The eBPF agent is opt-in per policy, needs `auditMode: true`, and gets exactly three capabilities with everything else dropped: no privileged flag, no hostPath, no host namespaces beyond the pod's own pid namespace.
+- The agent's program only reads, and only `write`/`writev` on descriptors 1 and 2 of its pid namespace. Its counters never hold a value.
+- The agent image is built from the repository in CI and published with provenance and SBOM like the other images. Operators should pin it by digest.
 - Keep CI workflow permissions minimal and explicit for release and publishing jobs.
 - Use GitHub Actions secrets and package registry credentials only in workflows that need them.
 - Review dependency updates and release workflow changes carefully.
@@ -161,7 +165,8 @@ Mitigations:
 - Full transparent interception of Kubernetes `stdout` and `stderr` logs is not complete.
 - Pipe mode is experimental: it rewrites the target container command through `/bin/sh -c` and can break distroless images, argument quoting, and signal handling.
 - The Kubernetes operator is in stabilization.
-- eBPF interception, Proxy-Wasm gateway integration, and hosted control-plane features are R&D until marked stable.
+- Proxy-Wasm gateway integration and hosted control-plane features are R&D until marked stable.
+- The eBPF audit agent is experimental. Its capabilities reach beyond the pod it watches, and its counts can miss writes: those over 8 KiB, those before it attached, and records the ring buffer dropped.
 - Redaction is probabilistic for some high-entropy and context-sensitive cases; custom rules and representative validation remain necessary.
 - Safe-list rules can create false negatives if configured too broadly.
 

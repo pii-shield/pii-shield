@@ -4,7 +4,7 @@
 
 PII-Shield is an actively developed open-source security tool in a production-hardening phase. The current release line provides usable core scanner, CLI/container, Helm/operator, and WASM SDK artifacts for controlled deployments.
 
-Production compliance use should account for the limits documented in `KNOWN_LIMITATIONS.md`, especially around Kubernetes logging modes, operator stabilization, and experimental eBPF work.
+Production compliance use should account for the limits documented in `KNOWN_LIMITATIONS.md`, especially around Kubernetes logging modes, operator stabilization, and the experimental eBPF audit agent.
 
 For deployment-mode adoption gates, see `docs/production-adoption-checklist.md`. For production incident handling, see `docs/operational-runbooks.md`. For cluster validation, see `docs/kubernetes-compatibility.md`. For sidecar runtime failure behavior, see `docs/sidecar-failure-modes.md`. For operator rollout and stabilization guidance, see `docs/operator-stabilization.md`. For transparent `stdout`/`stderr` planning, see `docs/stdout-stderr-interception-design.md`.
 
@@ -19,7 +19,7 @@ For deployment-mode adoption gates, see `docs/production-adoption-checklist.md`.
 ## Unsupported Or Experimental Areas
 
 - Full transparent interception of standard Kubernetes `stdout` and `stderr` logs.
-- Production-grade eBPF interception.
+- eBPF redaction. The eBPF audit agent exists as an experimental, observation-only tool ([ebpf-audit.md](ebpf-audit.md)); it measures what would be redacted and changes nothing.
 - Proxy-Wasm gateway integration.
 - Hosted control-plane features.
 - Broadly configured safe-list rules that have not been validated against representative production logs.
