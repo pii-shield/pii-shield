@@ -91,14 +91,18 @@ func (r *PiiPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		condition.Message = fmt.Sprintf("Unsupported injection mode: %s", effectiveMode)
 	}
 	// Audit mode: the sidecar leaves the logs as they are and counts. The
-	// CRD refuses it with ebpf; a policy created under an older CRD is
-	// reported here, and the webhook denies its pods.
-	if policy.Spec.AuditMode && condition.Status == metav1.ConditionTrue {
-		if effectiveMode == "ebpf" {
+	// eBPF agent only observes, so ebpf requires it; the CRD refuses ebpf
+	// without it, and a policy created under an older CRD is reported
+	// here, with its pods denied by the webhook.
+	if condition.Status == metav1.ConditionTrue {
+		switch {
+		case effectiveMode == "ebpf" && !policy.Spec.AuditMode:
 			condition.Status = metav1.ConditionFalse
-			condition.Reason = "AuditModeUnsupported"
-			condition.Message = "auditMode is not implemented for injection mode ebpf (the read-only eBPF audit is tracked in #96); pods of this policy are denied. Use file or pipe for the audit"
-		} else {
+			condition.Reason = "AuditModeRequired"
+			condition.Message = "injection mode ebpf is the eBPF audit agent, which only observes; set auditMode: true (there is no eBPF redaction, see #96). Pods of this policy are denied"
+		case effectiveMode == "ebpf":
+			condition.Message += "; eBPF audit agent: logs are observed, not modified, what would be redacted is counted"
+		case policy.Spec.AuditMode:
 			condition.Message += "; audit mode: logs are not modified, what would be redacted is counted"
 		}
 	}

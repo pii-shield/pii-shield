@@ -78,7 +78,8 @@ var _ = Describe("PiiPolicy Controller integration", func() {
 		for _, mode := range []string{"file", "pipe", "ebpf"} {
 			resource := &corev1alpha1.PiiPolicy{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
-				Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: mode},
+				// ebpf is the audit agent and is only accepted with auditMode.
+				Spec: corev1alpha1.PiiPolicySpec{InjectionMode: mode, AuditMode: mode == "ebpf"},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed(), "mode %s", mode)
 			created := &corev1alpha1.PiiPolicy{}
@@ -100,14 +101,15 @@ var _ = Describe("PiiPolicy Controller integration", func() {
 		}
 	})
 
-	// A CEL rule on the spec refuses auditMode with ebpf at admission, so a
-	// cluster with the current CRD never has such a policy; the webhook's
-	// denial and the controller's AuditModeUnsupported branch exist for a
-	// policy created under an older CRD and are covered by the unit tests.
-	It("rejects auditMode with injection mode ebpf at admission and accepts it with file", func() {
+	// A CEL rule on the spec refuses ebpf without auditMode at admission
+	// (the eBPF agent only observes), so a cluster with the current CRD
+	// never has such a policy; the webhook's denial and the controller's
+	// AuditModeRequired branch exist for a policy created under an older
+	// CRD and are covered by the unit tests.
+	It("rejects injection mode ebpf without auditMode at admission and accepts auditMode with file", func() {
 		rejected := &corev1alpha1.PiiPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
-			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: "ebpf", AuditMode: true},
+			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: "ebpf"},
 		}
 		err := k8sClient.Create(ctx, rejected)
 		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid, got %v", err)

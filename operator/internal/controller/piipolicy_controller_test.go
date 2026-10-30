@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -249,24 +250,27 @@ func TestPiiPolicyReconcileRendersConfigMap(t *testing.T) {
 }
 
 // Audit mode is named in the Available condition, so kubectl shows that the
-// logs of this policy are not being modified; with ebpf the policy is not
-// available, because the audit is not implemented there.
+// logs of this policy are not being modified; the eBPF agent only observes,
+// so ebpf without auditMode is not available.
 func TestPiiPolicyReconcileReportsAuditMode(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		mode    string
+		audit   bool
 		status  metav1.ConditionStatus
 		reason  string
 		message string
 	}{
-		{"file", metav1.ConditionTrue, "PolicyAccepted", "audit mode: logs are not modified"},
-		{"pipe", metav1.ConditionTrue, "PolicyAccepted", "audit mode: logs are not modified"},
-		{"ebpf", metav1.ConditionFalse, "AuditModeUnsupported", "#96"},
+		{"file", true, metav1.ConditionTrue, "PolicyAccepted", "audit mode: logs are not modified"},
+		{"pipe", true, metav1.ConditionTrue, "PolicyAccepted", "audit mode: logs are not modified"},
+		{"ebpf", true, metav1.ConditionTrue, "PolicyAccepted", "eBPF audit agent: logs are observed, not modified"},
+		{"ebpf", false, metav1.ConditionFalse, "AuditModeRequired", "#96"},
+		{"file", false, metav1.ConditionTrue, "PolicyAccepted", "Effective injection mode: file"},
 	} {
 		scheme := newTestScheme(t)
 		policy := &corev1alpha1.PiiPolicy{
-			ObjectMeta: metav1.ObjectMeta{Name: "audit-" + tc.mode, Namespace: "default"},
-			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: tc.mode, AuditMode: true},
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("audit-%s-%v", tc.mode, tc.audit), Namespace: "default"},
+			Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: tc.mode, AuditMode: tc.audit},
 		}
 		reconciler := newTestReconciler(t, scheme, policy)
 		if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: policy.Name, Namespace: policy.Namespace}}); err != nil {
@@ -280,7 +284,7 @@ func TestPiiPolicyReconcileReportsAuditMode(t *testing.T) {
 		if cond.Status != tc.status || cond.Reason != tc.reason || !strings.Contains(cond.Message, tc.message) {
 			t.Errorf("%s: Available = %s/%s %q; want %s/%s containing %q", tc.mode, cond.Status, cond.Reason, cond.Message, tc.status, tc.reason, tc.message)
 		}
-		if !got.Spec.AuditMode {
+		if got.Spec.AuditMode != tc.audit {
 			t.Errorf("%s: reconcile changed the spec", tc.mode)
 		}
 	}

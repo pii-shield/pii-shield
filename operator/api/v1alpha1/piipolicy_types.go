@@ -82,7 +82,7 @@ type RemoteConfig struct {
 }
 
 // PiiPolicySpec defines the desired state of PiiPolicy
-// +kubebuilder:validation:XValidation:rule="!(has(self.auditMode) && self.auditMode && self.injectionMode == 'ebpf')",message="auditMode is not implemented for injectionMode ebpf (the read-only eBPF audit is tracked in #96); use file or pipe"
+// +kubebuilder:validation:XValidation:rule="self.injectionMode != 'ebpf' || (has(self.auditMode) && self.auditMode)",message="injectionMode ebpf is the eBPF audit agent, which only observes; set auditMode: true (there is no eBPF redaction, see #96)"
 type PiiPolicySpec struct {
 	// FailPolicy determines the sidecar behavior when sanitization fails:
 	// "open" passes the raw line through (default), "closed" drops it.
@@ -145,6 +145,11 @@ type PiiPolicySpec struct {
 	// through "/bin/sh -c", which can break distroless images (no shell),
 	// argument quoting, signal handling, and the app lifecycle. Not
 	// recommended for production; see KNOWN_LIMITATIONS.md.
+	// "ebpf" is EXPERIMENTAL and observation only: the eBPF audit agent
+	// shares the pod's pid namespace and counts what it would have redacted
+	// in the pod's stdout and stderr, so it requires auditMode: true. It
+	// needs a kernel of 5.8 or newer with BTF and the BPF and PERFMON
+	// capabilities; there is no eBPF redaction.
 	// +kubebuilder:validation:Enum=file;pipe;ebpf
 	InjectionMode string `json:"injectionMode"`
 
@@ -172,8 +177,8 @@ type PiiPolicySpec struct {
 	// hourly summary in its log). Run a policy in audit mode on real traffic
 	// first, look at the numbers, then set it to false; the change needs a
 	// pod restart. Works with injectionMode file and pipe (in pipe mode the
-	// sidecar still sits in the stream's path); with ebpf the policy is
-	// rejected, the read-only eBPF audit is not implemented (#96).
+	// sidecar still sits in the stream's path), and is required with ebpf,
+	// whose agent only observes (#96).
 	// +optional
 	AuditMode bool `json:"auditMode,omitempty"`
 }

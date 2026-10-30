@@ -49,8 +49,8 @@ spec:
                   hourly summary in its log). Run a policy in audit mode on real traffic
                   first, look at the numbers, then set it to false; the change needs a
                   pod restart. Works with injectionMode file and pipe (in pipe mode the
-                  sidecar still sits in the stream's path); with ebpf the policy is
-                  rejected, the read-only eBPF audit is not implemented (#96).
+                  sidecar still sits in the stream's path), and is required with ebpf,
+                  whose agent only observes (#96).
                 type: boolean
               confidenceThreshold:
                 description: |-
@@ -98,6 +98,11 @@ spec:
                   through "/bin/sh -c", which can break distroless images (no shell),
                   argument quoting, signal handling, and the app lifecycle. Not
                   recommended for production; see KNOWN_LIMITATIONS.md.
+                  "ebpf" is EXPERIMENTAL and observation only: the eBPF audit agent
+                  shares the pod's pid namespace and counts what it would have redacted
+                  in the pod's stdout and stderr, so it requires auditMode: true. It
+                  needs a kernel of 5.8 or newer with BTF and the BPF and PERFMON
+                  capabilities; there is no eBPF redaction.
                 enum:
                 - file
                 - pipe
@@ -331,10 +336,9 @@ spec:
             - injectionMode
             type: object
             x-kubernetes-validations:
-            - message: 'auditMode is not implemented for injectionMode ebpf (the read-only
-                eBPF audit is tracked in #96); use file or pipe'
-              rule: '!(has(self.auditMode) && self.auditMode && self.injectionMode
-                == ''ebpf'')'
+            - message: 'injectionMode ebpf is the eBPF audit agent, which only observes;
+                set auditMode: true (there is no eBPF redaction, see #96)'
+              rule: self.injectionMode != 'ebpf' || (has(self.auditMode) && self.auditMode)
           status:
             description: status defines the observed state of PiiPolicy
             properties:

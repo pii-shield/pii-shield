@@ -79,6 +79,11 @@ sidecar:
   image:
     repository: ghcr.io/pii-shield/pii-shield-agent
     tag: ""
+  # The eBPF audit agent injected for injectionMode: ebpf (observation
+  # only; needs a kernel of 5.8 or newer with BTF).
+  ebpfImage:
+    repository: ghcr.io/pii-shield/pii-shield-ebpf
+    tag: ""
   # fsGroup to inject into the mutated pod if none is specified
   fsGroup: 65532
   # If true, injects the sidecar into 'containers' instead of 'initContainers'

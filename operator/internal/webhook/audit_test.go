@@ -138,17 +138,82 @@ func TestHandleAuditModeWarns(t *testing.T) {
 	}
 }
 
-// Audit with ebpf is denied with the issue to follow, instead of injecting
-// the eBPF sidecar, which does not audit.
-func TestHandleAuditModeWithEBPFIsDenied(t *testing.T) {
+// The eBPF agent only observes, so an ebpf policy without auditMode is
+// denied with the issue to follow; with auditMode the agent is injected
+// and the admission warning says the logs are not redacted.
+func TestHandleEBPFRequiresAuditMode(t *testing.T) {
 	resp := auditHandle(t, &piishieldv1alpha1.PiiPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "test-ns"},
-		Spec:       piishieldv1alpha1.PiiPolicySpec{InjectionMode: "ebpf", AuditMode: true},
+		Spec:       piishieldv1alpha1.PiiPolicySpec{InjectionMode: "ebpf"},
 	})
 	assert.False(t, resp.Allowed)
 	assert.Empty(t, resp.Patches)
 	if assert.NotNil(t, resp.Result) {
-		assert.Contains(t, resp.Result.Message, "auditMode")
+		assert.Contains(t, resp.Result.Message, "auditMode: true")
 		assert.Contains(t, resp.Result.Message, "#96")
 	}
+
+	resp = auditHandle(t, &piishieldv1alpha1.PiiPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "test-ns"},
+		Spec:       piishieldv1alpha1.PiiPolicySpec{InjectionMode: "ebpf", AuditMode: true},
+	})
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patches)
+	if assert.Len(t, resp.Warnings, 1) {
+		assert.Contains(t, resp.Warnings[0], "eBPF audit agent")
+		assert.Contains(t, resp.Warnings[0], "NOT redacted")
+	}
+}
+
+// The eBPF agent: the image from EBPF_AGENT_IMAGE, the pod's pid namespace
+// shared, capabilities instead of privileged, no hostPath, the metrics
+// port, the scanner env; the application container untouched.
+func TestInjectEBPFModeAddsTheAuditAgent(t *testing.T) {
+	t.Setenv("EBPF_AGENT_IMAGE", "ghcr.io/pii-shield/pii-shield-ebpf:test")
+	mutator := &PodMutator{}
+	policy := &piishieldv1alpha1.PiiPolicy{Spec: piishieldv1alpha1.PiiPolicySpec{
+		InjectionMode: "ebpf", AuditMode: true, SensitiveKeys: []string{"geheim"},
+	}}
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Command: []string{"node", "app.js"}}}}}
+	mutated, err := mutator.injectEBPFMode(pod, policy, "app")
+	assert.NoError(t, err)
+	if assert.NotNil(t, mutated.Spec.ShareProcessNamespace) {
+		assert.True(t, *mutated.Spec.ShareProcessNamespace)
+	}
+	assert.Empty(t, mutated.Spec.Volumes, "no hostPath or other volume")
+	agent := findContainer(mutated.Spec.InitContainers, "pii-shield-sidecar")
+	if !assert.NotNil(t, agent, "the agent is a native sidecar") {
+		return
+	}
+	assert.Equal(t, "ghcr.io/pii-shield/pii-shield-ebpf:test", agent.Image)
+	assert.Equal(t, []string{"/pii-shield-ebpf"}, agent.Command)
+	assert.Empty(t, agent.VolumeMounts)
+	if assert.NotNil(t, agent.SecurityContext) {
+		assert.Nil(t, agent.SecurityContext.Privileged)
+		if assert.NotNil(t, agent.SecurityContext.Capabilities) {
+			assert.ElementsMatch(t, []corev1.Capability{"BPF", "PERFMON", "SYS_RESOURCE"}, agent.SecurityContext.Capabilities.Add)
+			assert.Equal(t, []corev1.Capability{"ALL"}, agent.SecurityContext.Capabilities.Drop)
+		}
+		if assert.NotNil(t, agent.SecurityContext.RunAsUser) {
+			assert.Equal(t, int64(0), *agent.SecurityContext.RunAsUser)
+		}
+	}
+	if assert.Len(t, agent.Ports, 1) {
+		assert.Equal(t, AuditMetricsPort, agent.Ports[0].ContainerPort)
+	}
+	if v, ok := envValue(agent.Env, "PII_SENSITIVE_KEYS"); assert.True(t, ok) {
+		assert.Equal(t, "geheim", v)
+	}
+	if v, ok := envValue(agent.Env, "PII_STATS_LOG_INTERVAL"); assert.True(t, ok) {
+		assert.Equal(t, "1h", v)
+	}
+	app := findContainer(mutated.Spec.Containers, "app")
+	if assert.NotNil(t, app) {
+		assert.Equal(t, []string{"node", "app.js"}, app.Command)
+		assert.Empty(t, app.Env)
+	}
+
+	// Without the env var the default image is used.
+	t.Setenv("EBPF_AGENT_IMAGE", "")
+	assert.Equal(t, "ghcr.io/pii-shield/pii-shield-ebpf:latest", ebpfAgentImage())
 }
