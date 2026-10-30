@@ -53,7 +53,16 @@ longer than 8 KiB or a `writev` with more than 8 iovecs is cut and counted
 as `truncated`; a stream that reaches 1 MiB without a newline is counted
 as a line and as `overflow`) and `piishield_ebpf_dropped_records` (records
 the 16 MiB ring buffer had no room for; the audit undercounts by at most
-that many writes).
+that many writes), and `piishield_ebpf_attached` (1 once the program is
+attached).
+
+`/healthz` answers only after the program is attached, so a startup probe
+on it holds the application until nothing it writes can be missed. When
+the program cannot be loaded (an old kernel, no BTF, a capability
+missing), the agent watching a pid namespace does not exit: it logs why,
+serves `/healthz` and the counters at zero with `piishield_ebpf_attached
+0`, and waits, so a pod is never held back by its audit agent. With
+`--exec` or `--target-tgid` a load error is fatal.
 
 What it does not see: writes to files and sockets, `sendmsg`, memory-mapped
 output, and anything a process writes before the agent attached (`--exec`
