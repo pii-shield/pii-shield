@@ -1,0 +1,81 @@
+name: Benchmark PR Comment
+
+# Posts the Performance Check report on the pull request, the way Codecov
+# posts coverage. The benchmark job in ci.yml runs with a read-only token
+# (always read-only for pull requests from forks), so it only uploads the
+# report as the bench-report artifact; this workflow runs afterwards from the
+# default branch with a token that can comment. It never checks out or runs
+# code from the pull request: it reads the artifact as data and checks that
+# the PR number in it belongs to the commit the run tested.
+#
+# workflow_run only fires for workflow files on the default branch, so a
+# change here takes effect after it is merged into main.
+
+on:
+  workflow_run:
+    workflows: [ "PII-Shield CI" ]
+    types: [ completed ]
+
+permissions: {}
+
+jobs:
+  comment:
+    name: Post benchmark report
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+    - name: Post or update the comment
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.event.workflow_run.id }}
+        RUN_URL: ${{ github.event.workflow_run.html_url }}
+        HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      run: |
+        set -euo pipefail
+        dir="$RUNNER_TEMP/bench-report"
+        if ! gh run download "$RUN_ID" -R "$REPO" -n bench-report -D "$dir"; then
+          echo "No bench-report artifact in run $RUN_ID: Performance Check did not get to the report."
+          exit 0
+        fi
+
+        pr="$(tr -d '[:space:]' < "$dir/pr-number")"
+        if ! [[ "$pr" =~ ^[0-9]+$ ]]; then
+          echo "::error::bench-report has no valid PR number"
+          exit 1
+        fi
+        # The artifact was written by code from the pull request, so trust the
+        # number only if that PR's head is the commit the run tested. A PR
+        # pushed again since then gets the report of its newer run.
+        pr_head="$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)"
+        if [ "$pr_head" != "$HEAD_SHA" ]; then
+          echo "PR #$pr is now at $pr_head, the run tested $HEAD_SHA; not posting a stale report."
+          exit 0
+        fi
+
+        marker='<!-- bench-gate-report -->'
+        {
+          echo "$marker"
+          echo "### Performance Check"
+          echo
+          echo "Scanner benchmarks of ${HEAD_SHA:0:7} ([run]($RUN_URL)), compared with \`scripts/bench-gate.sh\`."
+          echo
+          if [ -s "$dir/report.md" ]; then
+            head -c 60000 "$dir/report.md"
+          else
+            echo "No results: the comparison did not finish, see the run."
+          fi
+        } > "$RUNNER_TEMP/body.md"
+
+        id="$(gh api --paginate "repos/$REPO/issues/$pr/comments" \
+          --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)"
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@"$RUNNER_TEMP/body.md" > /dev/null
+          echo "Updated comment $id on PR #$pr"
+        else
+          gh api -X POST "repos/$REPO/issues/$pr/comments" -F body=@"$RUNNER_TEMP/body.md" > /dev/null
+          echo "Posted a comment on PR #$pr"
+        fi

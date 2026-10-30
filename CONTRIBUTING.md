@@ -75,7 +75,9 @@ Only differences benchstat calls significant count.
   that add up across PRs.
 
 A warning does not fail the job; it shows as an annotation on the run with
-the benchstat table in the job summary. If a slowdown is worth it (a new
+the benchstat table in the job summary. Whatever the verdict, both
+comparisons with their benchstat tables are also posted as a comment on the
+PR (the "Benchmark PR Comment" workflow), updated on every push. If a slowdown is worth it (a new
 detector that costs time, say), accept it by moving `benchmark/baseline-ref`
 to the new ref in the same PR and say why in the PR description. Run the
 gate locally the same way:
