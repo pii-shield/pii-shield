@@ -86,6 +86,7 @@ Symptoms:
 Immediate checks:
 
 - [ ] Identify the affected workload and log pattern.
+- [ ] If the rules are still being tuned, put the policy back into `auditMode` so the logs flow unchanged while you work (see Audit Mode below); the counters show whether a change helps.
 - [ ] Check recent changes to `PII_ENTROPY_THRESHOLD`.
 - [ ] Check recent changes to `PII_CUSTOM_REGEX_LIST`.
 - [ ] Check recent changes to `PII_SAFE_REGEX_LIST`.
@@ -191,6 +192,21 @@ When `PIIShieldRemoteRulesStale` or `PIIShieldRemoteRulesSyncErrors` fires:
 
 Rolling back to local rules: remove `remoteConfig` from the policy. The ConfigMap is rendered from the local policy alone on the next reconcile and `remote.json` is dropped. To pin one value against the source without leaving it, set that field in the policy; a local field always wins.
 
+## Audit Mode
+
+`auditMode: true` on a `PiiPolicy` (or `PII_MODE=audit` on a sidecar run by hand) is the dry run: the sidecar scans every line, writes it out unchanged and counts what it would have redacted. The numbers are `piishield_audit_lines_total{result="clean"|"would_redact"}` per line, `piishield_audit_findings_total{type}` per finding, the gauge `piishield_audit_mode`, and an hourly `PII-Shield audit: N would-be redactions (…) in M of L lines (x%)` line in the sidecar's log. The counters never hold the value that was found; the application's own logs for the period are the only place to see it. The eBPF audit agent (`injectionMode: ebpf`, [ebpf-audit.md](ebpf-audit.md)) exports the same counters and the same summary, so everything below applies to it too; it adds `piishield_ebpf_attached`, which is 0 when its program could not be loaded and the counts stay at zero for that reason.
+
+When `PIIShieldAuditWouldRedact` fires, or the share of `would_redact` lines is not what you expect:
+
+1. Read `piishield_audit_findings_total` by `type` for the pod: `entropy` is a bare high-entropy token, `regex` a custom rule, `luhn` a card number, `signature` an issuer-prefixed key (AWS, GitHub, JWT, …), a phone number by shape or an identity number by key.
+2. A share far above what the application should produce usually means ordinary values scored as secrets: request ids, hashes, model names under a sensitive key. Take a sample of the application's logs for an hour of the audit, run it through the CLI with the policy's rules as `PII_CONFIG_FILE` and `PII_ENTITY_TYPE_LABELS=true`, and read the markers. Then follow the false-positive runbook above: a narrow `safeRegexList` rule, a shorter `sensitiveKeys` list, a threshold change tested on the sample.
+3. A share of zero, or `signature` at zero, on an application that handles credentials means the rules do not reach the values: a key name the defaults do not know (`sensitiveKeys`, `sensitiveKeyPatterns`), a structured identifier without a rule (`customRegexList`), or a log path the sidecar does not see. Follow the false-negative runbook.
+4. Edit the policy and keep auditing: the rules file is reloaded without a restart, so the next hour's summary shows the change. Switch to redaction (`auditMode: false` and a rollout restart) only when the share and the types look right for a full week, batch jobs included.
+
+When `PIIShieldAuditSeesNoLines` fires: the sidecar is in audit mode but processed no lines for an hour. Check that the application writes to the policy's `logPath` (`kubectl exec` into the app container and look at the file) and that it is not simply idle. An audit that sees nothing proves nothing, so do not count that time toward the dry run.
+
+Leaving audit mode is a pod restart: the mode comes through the sidecar's environment, not through the rules file, because whether a pod redacts or only watches must not be switchable from a central rule server.
+
 ## Prometheus Alerts
 
 The Helm chart can render a `PrometheusRule` for Prometheus Operator installations:
@@ -225,6 +241,7 @@ The operator rules cover:
 - webhook service endpoint availability;
 - webhook certificate expiry when cert-manager metrics are available;
 - injection or admission failures when Kubernetes event metrics such as `kube_event_count` are available;
-- a `PiiPolicy` with `remoteConfig` whose last successful pull is older than three intervals, and any failed pull in the last 15 minutes (operator metrics, no extra exporter needed).
+- a `PiiPolicy` with `remoteConfig` whose last successful pull is older than three intervals, and any failed pull in the last 15 minutes (operator metrics, no extra exporter needed);
+- a sidecar in `auditMode` that saw lines it would redact in the last 24 hours (info), and one that processed no lines for an hour (warning); both read the sidecar's own counters, so the sidecar pods must be scraped.
 
 These rules depend on common cluster observability components such as kube-state-metrics, cert-manager metrics, and an event metrics exporter. Disable or adjust rules that are not supported by your monitoring stack.
