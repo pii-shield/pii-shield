@@ -86,9 +86,20 @@ func main() {
 
 	p, err := probe.Load(cfg)
 	if err != nil {
-		log.Fatalf("eBPF: %v (kernel 5.8+ with BTF and CAP_BPF, CAP_PERFMON are required)", err)
+		if child != nil || cfg.TargetTgid != 0 {
+			log.Fatalf("eBPF: %v (kernel 5.8+ with BTF and CAP_BPF, CAP_PERFMON are required)", err)
+		}
+		// In a pod the agent is a native sidecar the application waits
+		// for: crashing here would hold the application back (a restart
+		// loop never passes the startup probe). Fail open instead: serve
+		// /healthz and the counters at zero, so the pod starts, the audit
+		// alert on a sidecar that sees no lines fires, and
+		// piishield_ebpf_attached says why.
+		failOpen(ctx, *listen, err)
+		return
 	}
 	defer func() { _ = p.Close() }()
+	audit.Attached.Set(1)
 	switch {
 	case child != nil:
 		log.Printf("pii-shield-ebpf: watching stdout and stderr of pid %d (%s); lines are counted, never changed", child.Process.Pid, child.Path)
@@ -201,6 +212,25 @@ loop:
 }
 
 var flushCh = make(chan struct{}, 1)
+
+// failOpen keeps the agent up without a probe: it logs why the program did
+// not load, exports the audit series at zero with piishield_ebpf_attached
+// 0, answers /healthz, and waits for the pod to stop.
+func failOpen(ctx context.Context, listen string, loadErr error) {
+	log.Printf("eBPF program not loaded, the agent watches nothing and counts nothing: %v (kernel 5.8+ with BTF and CAP_BPF, CAP_PERFMON are required); the pod's logs are not affected", loadErr)
+	audit.New()
+	audit.Attached.Set(0)
+	srv := &http.Server{Addr: listen, Handler: metricsMux(), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("metrics server: %v", err)
+		}
+	}()
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
+}
 
 func metricsMux() *http.ServeMux {
 	mux := http.NewServeMux()

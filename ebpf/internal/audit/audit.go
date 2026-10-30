@@ -25,6 +25,13 @@ var EventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Writes copied out of the kernel by the audit agent, by outcome",
 }, []string{"result"})
 
+// Attached is 1 once the eBPF program is loaded and attached, 0 when it
+// could not be loaded and the agent runs without it (fail open).
+var Attached = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "piishield_ebpf_attached",
+	Help: "1 when the eBPF program is loaded and attached, 0 when the agent runs without it",
+})
+
 // DropsTotal is the number of records the ring buffer had no room for.
 var DropsTotal = promauto.NewGauge(prometheus.GaugeOpts{
 	Name: "piishield_ebpf_dropped_records",
