@@ -162,6 +162,11 @@ jobs:
   # throughput, every PR within the 10% above). To accept a slowdown on
   # purpose, move benchmark/baseline-ref in the same PR.
   #
+  # Both comparisons append their verdict and benchstat table to a report that
+  # is uploaded as the bench-report artifact, passed or not; the bench-comment
+  # workflow posts it on the pull request. This job keeps a read-only token,
+  # so it works the same for pull requests from forks.
+  #
   # On a push there is no base to compare with, so the benchmarks only run.
   # The job name is kept because the "Protect main" ruleset lists it as a
   # required check.
@@ -181,6 +186,7 @@ jobs:
       env:
         BASE_REF: ${{ github.event.pull_request.base.sha }}
         LABEL: PR base
+        REPORT: ${{ runner.temp }}/bench-report/report.md
       run: scripts/bench-gate.sh
     - name: Compare benchmarks with the accepted baseline
       if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -188,7 +194,24 @@ jobs:
         THRESHOLD_PCT: '15'
         WARN_PCT: '8'
         LABEL: accepted baseline
+        REPORT: ${{ runner.temp }}/bench-report/report.md
       run: BASE_REF="$(tr -d '[:space:]' < benchmark/baseline-ref)" scripts/bench-gate.sh
+    - name: Record the pull request number for the report
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        DIR: ${{ runner.temp }}/bench-report
+      run: |
+        mkdir -p "$DIR"
+        touch "$DIR/report.md"
+        echo "$PR_NUMBER" > "$DIR/pr-number"
+    - name: Upload the benchmark report
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: bench-report
+        path: ${{ runner.temp }}/bench-report/
+        retention-days: 7
     - name: Run benchmarks (push, no base to compare)
       if: github.event_name != 'pull_request'
       run: go test -run '^$' -bench=. -benchmem ./pkg/scanner
