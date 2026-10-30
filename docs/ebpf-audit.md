@@ -64,6 +64,9 @@ The counters are on port 9090 of the agent container, named `pii-metrics`:
 - `piishield_audit_mode`, 1 while the agent runs.
 - `piishield_ebpf_events_total{result="ok"|"truncated"|"overflow"}`: records read, records cut at 8 KiB or at 8 iovecs, and streams that reached 1 MiB without a newline.
 - `piishield_ebpf_dropped_records`: records the ring buffer had no room for. The audit undercounts by at most that many writes.
+- `piishield_ebpf_attached`: 1 once the program is attached, 0 when it could not be loaded.
+
+If the program cannot be loaded (an old kernel, no BTF, a capability missing), the agent does not crash: it logs why, answers `/healthz`, and exports the audit counters at zero with `piishield_ebpf_attached 0`. A pod is never held back by its audit agent, and `PIIShieldAuditSeesNoLines` fires for it.
 
 The agent also logs a `PII-Shield audit: …` summary every hour. The operator chart's `PIIShieldAuditWouldRedact` and `PIIShieldAuditSeesNoLines` alerts work on these counters as they do for the sidecar. The [operational runbooks](operational-runbooks.md) say what to do with the numbers.
 
@@ -86,7 +89,7 @@ The command starts stopped, the probe attaches, and the command continues. Nothi
 
 - Writes to files and sockets, `sendmsg`, `splice`, and output a process writes through memory-mapped files. A process that logs to a file is the file sidecar's case.
 - More than 8 KiB of one write, and more than 8 iovecs of one `writev`. Both are counted as `truncated`.
-- Anything written before the agent attached. In a pod the agent starts with the other containers, so the first lines of a fast-starting application can be missed.
+- Anything written before the agent attached. In a pod this does not happen: the agent's `/healthz` answers only once the program is attached, and a startup probe on it holds the application containers until then. With `--target-tgid` on a host, the process's earlier output is missed; `--exec` starts the command stopped and misses nothing.
 - Values. The counters record that a line would change and which detector fired, never the value found. To see a false positive, read the application's own logs for that period.
 
 ## Security notes
