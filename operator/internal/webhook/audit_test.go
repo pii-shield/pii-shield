@@ -201,6 +201,12 @@ func TestInjectEBPFModeAddsTheAuditAgent(t *testing.T) {
 	if assert.Len(t, agent.Ports, 1) {
 		assert.Equal(t, AuditMetricsPort, agent.Ports[0].ContainerPort)
 	}
+	// The startup probe holds the application until the program is attached.
+	if assert.NotNil(t, agent.StartupProbe) && assert.NotNil(t, agent.StartupProbe.HTTPGet) {
+		assert.Equal(t, "/healthz", agent.StartupProbe.HTTPGet.Path)
+		assert.Equal(t, AuditMetricsPortName, agent.StartupProbe.HTTPGet.Port.String())
+		assert.Equal(t, int32(30), agent.StartupProbe.FailureThreshold)
+	}
 	if v, ok := envValue(agent.Env, "PII_SENSITIVE_KEYS"); assert.True(t, ok) {
 		assert.Equal(t, "geheim", v)
 	}

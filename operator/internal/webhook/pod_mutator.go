@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -328,6 +329,20 @@ func (m *PodMutator) injectEBPFMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 				Add:  []corev1.Capability{"BPF", "PERFMON", "SYS_RESOURCE"},
 			},
 			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		},
+		// The agent answers /healthz only once its program is attached, and
+		// a native sidecar's startup probe holds the application containers
+		// until it passes, so the application's first lines are not missed.
+		// When the program cannot load the agent fails open and answers
+		// anyway, so the probe never holds the application back for long;
+		// the threshold bounds the wait if the agent hangs.
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+				Path: "/healthz",
+				Port: intstr.FromString(AuditMetricsPortName),
+			}},
+			PeriodSeconds:    1,
+			FailureThreshold: 30,
 		},
 		Resources: policy.Spec.Resources,
 	}

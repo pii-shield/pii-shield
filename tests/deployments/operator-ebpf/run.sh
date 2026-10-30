@@ -76,10 +76,13 @@ spec:
   containers:
   - name: app
     image: busybox:1.36
-    command: ["sh", "-c", "i=0; while [ $i -lt 90 ]; do echo \"login ok password=hunter2hunter2 user=anna\"; echo \"GET /health 200 $i\"; i=$((i+1)); sleep 1; done"]
+    # The secret is the very first line and never repeats: counting it
+    # proves the agent was attached before the app wrote anything.
+    command: ["sh", "-c", "echo \"boot password=hunter2hunter2 user=anna\"; i=0; while [ $i -lt 90 ]; do echo \"GET /health 200 $i\"; i=$((i+1)); sleep 1; done"]
 YAML
 
 kubectl wait --for=condition=Ready pod/pii-ebpf-test -n "${namespace}" --timeout=120s
+
 kubectl get pod pii-ebpf-test -n "${namespace}" -o jsonpath='{.spec.initContainers[?(@.name=="pii-shield-sidecar")].image}{"\n"}' | grep -q "pii-shield-ebpf" \
   || { echo "FAIL: the eBPF agent was not injected" >&2; kubectl describe pod pii-ebpf-test -n "${namespace}"; exit 1; }
 echo "OK: agent injected"
@@ -105,8 +108,9 @@ for _ in $(seq 1 40); do
   sleep 0.5
 done
 grep -E 'piishield_audit_(lines_total|mode)|piishield_ebpf_' <<<"$metrics" || true
-grep -Eq 'piishield_audit_lines_total\{result="would_redact"\} [1-9]' <<<"$metrics" \
-  || { echo "FAIL: the agent counted no line it would redact" >&2; exit 1; }
+grep -Eq 'piishield_audit_lines_total\{result="would_redact"\} 1$' <<<"$metrics" \
+  || { echo "FAIL: the agent did not count the app's first line (the only secret); the startup probe should hold the app until the program is attached" >&2; exit 1; }
+echo "OK: the app's first line was counted, so the app started after the attach"
 grep -Eq 'piishield_audit_lines_total\{result="clean"\} [1-9]' <<<"$metrics" \
   || { echo "FAIL: the agent counted no clean line" >&2; exit 1; }
 if grep -Eq 'piishield_redaction_events_total\{[^}]*\} [1-9]' <<<"$metrics"; then

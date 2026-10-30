@@ -159,7 +159,11 @@ with the `BPF`, `PERFMON` and `SYS_RESOURCE` capabilities and nothing else
 (no privileged flag, no hostPath), from the image `sidecar.ebpfImage` of the
 chart; it needs a kernel of 5.8 or newer with BTF (`/sys/kernel/btf/vmlinux`
 on the node). It exports the same audit counters on port 9090 and writes
-the same hourly summary. What it does not see: writes to files and sockets,
+the same hourly summary. A startup probe on its `/healthz`, which answers
+only once the program is attached, holds the application containers until
+then, so the application's first lines are counted; if the program cannot
+load the agent still answers (`piishield_ebpf_attached 0`), so the pod is
+not held back. What it does not see: writes to files and sockets,
 and more than 8 KiB of one write. `tests/deployments/operator-ebpf/run.sh`
 runs it end to end in kind.
 
