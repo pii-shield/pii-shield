@@ -164,7 +164,7 @@ jobs:
         run: go mod verify
 
   image-smoke-test:
-    name: Image Smoke Tests (CLI, Agent, Operator)
+    name: Image Smoke Tests (CLI, Agent, Operator, eBPF)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -188,6 +188,12 @@ jobs:
 
       - name: Smoke test operator image
         run: docker run --rm pii-shield-operator:smoke --help 2>&1 | grep -q 'metrics-bind-address'
+
+      - name: Build eBPF agent image
+        run: docker build -t pii-shield-ebpf:smoke -f ebpf/Dockerfile .
+
+      - name: Smoke test eBPF agent image (loads the program into the runner's kernel)
+        run: scripts/smoke-ebpf-image.sh pii-shield-ebpf:smoke
 
   goreleaser:
     needs: [test, sdk-node, sdk-python, helm-lint, lint, dependency-verification, image-smoke-test]
@@ -239,6 +245,9 @@ jobs:
             context: operator
           - name: pii-shield-agent
             dockerfile: Dockerfile.agent
+            context: .
+          - name: pii-shield-ebpf
+            dockerfile: ebpf/Dockerfile
             context: .
 
     steps:

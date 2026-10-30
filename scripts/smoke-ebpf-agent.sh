@@ -36,6 +36,28 @@ run_as_root() {
   if [[ $(id -u) -eq 0 ]]; then "$@"; else sudo -E "$@"; fi
 }
 
+# stop_agent stops the agent listening on $port. The PID of the background
+# job is sudo's when the script is not root, and sudo does not relay a
+# signal sent from the command's own process group, which is where this
+# script and its kill live, so killing that PID left the agent running
+# and holding the port for the next run. Match the agent's command line
+# instead ([-] keeps the pattern from matching the pkill command line of
+# the sudo that runs it), then wait until the port is free.
+stop_agent() {
+  run_as_root pkill -TERM -f "[-]-listen 127.0.0.1:${port} " 2>/dev/null || true
+  for _ in $(seq 1 40); do
+    curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 || return 0
+    sleep 0.25
+  done
+  echo "the agent on port ${port} did not stop" >&2
+  return 1
+}
+
+if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+  echo "port ${port} is already served by something (an agent left over from an earlier run?); set EBPF_SMOKE_PORT or stop it" >&2
+  exit 1
+fi
+
 # The child writes one secret line, one clean line, then waits so the
 # metrics can be scraped while the agent still runs.
 run_as_root "$agent" --listen "127.0.0.1:${port}" --stats-interval 1h --exec \
@@ -88,7 +110,7 @@ for _ in $(seq 1 40); do
   if [[ -n "$would" && -n "$clean" ]] && (( ${would%%.*} >= 1 && ${clean%%.*} >= 1 )); then ok=1; break; fi
   sleep 0.25
 done
-run_as_root kill -TERM "$pid" 2>/dev/null || true
+stop_agent
 wait "$pid" || true
 if (( ok == 0 )); then
   echo "namespace mode: the agent did not count this shell's lines" >&2
