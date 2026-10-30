@@ -19,6 +19,10 @@
 # fail: it prints a warning, which on GitHub Actions becomes an annotation on
 # the run and a table in the job summary, so a trend shows before it blocks.
 #
+# With REPORT set, every run also appends its verdict and the benchstat table
+# to that markdown file, whether it passed or not. CI uploads the file and the
+# bench-comment workflow posts it on the pull request.
+#
 # CI runs this twice on a pull request: against the PR base, which catches one
 # PR that is too slow, and against the ref in benchmark/baseline-ref, which
 # catches many small slowdowns that add up (v2.2.0 -> v2.2.8 lost 13-24% of
@@ -39,6 +43,7 @@
 #   BENCH          benchmark regexp (default the three end-to-end benchmarks)
 #   BENCHTIME      -test.benchtime per run (default 1s)
 #   OVERLAY        test files copied into the base checkout, space-separated
+#   REPORT         markdown file to append the verdict and table to (optional)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -99,9 +104,9 @@ done
 # Read the sec/op table only: a line per benchmark such as
 #   ScanAndRedact-4   10.17µ ± 2%   11.90µ ± 3%  +17.01% (p=0.000 n=10)
 # "~" in place of a percentage means not significant.
-python3 - "${work}/benchstat.txt" "${THRESHOLD_PCT}" "${WARN_PCT}" "${LABEL} ${BASE_REF}" <<'EOF'
+python3 - "${work}/benchstat.txt" "${THRESHOLD_PCT}" "${WARN_PCT}" "${LABEL} ${BASE_REF}" "${REPORT:-}" <<'EOF'
 import os, re, sys
-path, threshold, warn, where = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+path, threshold, warn, where, report = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4], sys.argv[5]
 in_secop = False
 failed, warned = [], []
 for line in open(path):
@@ -135,6 +140,17 @@ if summary and (failed or warned):
         if warned:
             out.write("Slower by more than %.0f%%, within %.0f%%: %s\n\n" % (warn, threshold, ", ".join(warned)))
         out.write("```\n" + open(path).read() + "```\n")
+if report:
+    os.makedirs(os.path.dirname(os.path.abspath(report)), exist_ok=True)
+    with open(report, "a") as out:
+        out.write("#### Against the %s\n\n" % where)
+        if failed:
+            out.write(":x: Slower by more than %.0f%%: %s\n\n" % (threshold, ", ".join(failed)))
+        if warned:
+            out.write(":warning: Slower by more than %.0f%%, within %.0f%%: %s\n\n" % (warn, threshold, ", ".join(warned)))
+        if not failed and not warned:
+            out.write(":white_check_mark: No significant slowdown above %.0f%%.\n\n" % warn)
+        out.write("<details><summary>benchstat</summary>\n\n```\n" + open(path).read() + "```\n\n</details>\n\n")
 if warned:
     msg = "slower than the %s by more than %.0f%% (fails above %.0f%%): %s" % (where, warn, threshold, ", ".join(warned))
     print(("::warning title=Scanner benchmarks::" if gha else "WARN: ") + msg)
