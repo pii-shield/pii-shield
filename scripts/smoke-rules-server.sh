@@ -31,11 +31,13 @@ for _ in $(seq 1 50); do
   curl -fsS "$base/healthz" >/dev/null 2>&1 && break
   sleep 0.2
 done
-curl -fsS "$base/healthz" | grep -q '^ok$'
+# Every response is read before grep: with pipefail, `curl | grep -q`
+# fails at random when grep exits on the first match and curl gets SIGPIPE.
+grep -q '^ok$' <<<"$(curl -fsS "$base/healthz")"
 echo "✓ healthz"
 
-curl -fsS "$base/" | grep -q '<title>PII-Shield rules</title>'
-curl -fsS "$base/app.js" | grep -q 'X-Requested-With'
+grep -q '<title>PII-Shield rules</title>' <<<"$(curl -fsS "$base/")"
+grep -q 'X-Requested-With' <<<"$(curl -fsS "$base/app.js")"
 echo "✓ panel HTML and script served"
 
 curl -fsS -X POST "$base/api/orgs/default/sets" -d '{"slug": "smoke"}' >/dev/null
@@ -59,8 +61,9 @@ code="$(curl -s -o /dev/null -w '%{http_code}' "$base/v1/default/smoke/policy.js
 [[ "$code" == "401" ]]
 echo "✓ policy.json: 200 with ETag ${etag}, 304 on If-None-Match, 401 without a token"
 
-curl -fsS -X POST "$base/api/orgs/default/sets/smoke/preview" \
-  -d '{"text": "login geheim=abcabcabc id=TX-123456\nGET /health 200"}' | grep -Eq '"changed": *1'
+preview="$(curl -fsS -X POST "$base/api/orgs/default/sets/smoke/preview" \
+  -d '{"text": "login geheim=abcabcabc id=TX-123456\nGET /health 200"}')"
+grep -Eq '"changed": *1' <<<"$preview"
 echo "✓ preview runs the published rules on the scanner"
 
 echo "rule server image smoke: ok"
