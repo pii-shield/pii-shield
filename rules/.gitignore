@@ -1,0 +1,4 @@
+# SQLite database of a local run (and its WAL/shm files)
+*.db
+*.db-wal
+*.db-shm
