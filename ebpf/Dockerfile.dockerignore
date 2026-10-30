@@ -1,0 +1,12 @@
+# Per-Dockerfile ignore for ebpf/Dockerfile (BuildKit reads it instead of
+# the shared .dockerignore for `docker build -f ebpf/Dockerfile`). The image
+# builds ./ebpf/cmd/pii-shield-ebpf, which needs the ebpf module and
+# pkg/ from the root module; everything else stays out of the context.
+*
+!go.mod
+!go.sum
+!pkg
+!ebpf
+ebpf/pii-shield-ebpf
+ebpf/Dockerfile
+ebpf/Dockerfile.dockerignore

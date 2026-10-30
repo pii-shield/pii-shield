@@ -10,9 +10,11 @@ without a sidecar in the way, and it is **observation only**: eBPF cannot
 rewrite what a process writes in any way the kernel supports for
 production, so there is no eBPF redaction and none is planned.
 
-Status: slice 1 of the plan (milestone 3.0): the module, the program, the
-agent and a smoke on a real kernel in CI. The image, the operator's
-`injectionMode: ebpf` wiring and the docs come in the next slices.
+Status: slices 1 and 2 of the plan (milestone 3.0): the module, the
+program, the agent, a smoke on a real kernel in CI, the image
+`ghcr.io/pii-shield/pii-shield-ebpf` and the operator's `injectionMode:
+ebpf`, which injects it (operator README, "Audit mode"). The user docs and
+the comment on #96 come in the last slice.
 
 ## What it needs
 
@@ -58,6 +60,19 @@ output, and anything a process writes before the agent attached (`--exec`
 starts the command stopped and continues it after the attach, so nothing
 of it is missed). The counters hold the fact of a finding and its
 detector, never the value.
+
+## Image
+
+```bash
+docker build -t pii-shield-ebpf -f ebpf/Dockerfile .        # from the repository root
+docker run --rm --privileged --pid=host pii-shield-ebpf --listen :9090   # watches the host's pid namespace
+```
+
+Distroless, one static binary, root (the capabilities the agent needs are
+not kept by a non-root user across exec; the operator grants `BPF`,
+`PERFMON` and `SYS_RESOURCE` and drops everything else). The release
+publishes it next to the other images; `scripts/smoke-ebpf-image.sh` copies
+the binary out of the image and runs the kernel smoke with it.
 
 ## Develop
 
