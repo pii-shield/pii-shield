@@ -14,6 +14,60 @@ yet is listed at the end; the one line to know before relying on it: the
 served file is protected by HTTPS and the token, not by a signature of its
 content.
 
+## First steps
+
+This part is for someone who was given the address of a rule server and
+wants their cluster to take its rules from it. Running a server of your
+own is the next section.
+
+1. **Sign in.** Open the server's address in a browser, enter your e-mail
+   address and press **Send me a sign-in link**. Open the link from the
+   mail and press **Sign in**. The link works once, for fifteen minutes.
+   The first time you sign in, an organization is created for you.
+2. **Create a rule set.** Press **New rule set**, give it a short name such
+   as `payments`, and press **Create**. One set is usually one cluster or
+   one group of services.
+3. **Write the rules.** On the **Rules** tab list the keys whose values
+   must always be hidden (`password`, `token`, your own field names), add
+   patterns for your own identifiers if you have any, and press
+   **Validate**. It tells you whether every sidecar will accept the set.
+4. **Try them.** On the **Preview** tab paste a few lines of your real logs
+   and press **Preview with the draft**. You see each line as it goes in
+   and as it would come out.
+5. **Save and publish.** Back on **Rules**, press **Save as a new version**.
+   On the **Versions** tab press **Publish** next to that version. Only the
+   published version reaches clusters.
+6. **Get the token.** On the **Tokens** tab type a name for the cluster
+   (`prod-eu`) and press **Issue**. Copy the long string that starts with
+   `psr_` now: it is shown once. It is the key that lets that cluster, and
+   only it, read this set.
+7. **Give the token to the cluster.** In the namespace where your
+   `PiiPolicy` lives, store it as a Secret:
+
+   ```bash
+   kubectl create secret generic rules-token -n payments \
+     --from-literal=authorization="Bearer psr_…"
+   ```
+
+8. **Point the policy at the server.** The **Connect a cluster** tab shows
+   the `remoteConfig` block with this set's address already filled in.
+   Add it to your `PiiPolicy` and apply it. The operator from release 3.0
+   on is needed for `remoteConfig`.
+9. **Check.** After a minute the policy reports the pull:
+
+   ```bash
+   kubectl get piipolicy default -n payments \
+     -o jsonpath='{.status.conditions[?(@.type=="RemoteSynced")].status}'
+   ```
+
+   `True` means the cluster has your rules. Running sidecars pick them up
+   without a restart.
+
+To change the rules later, repeat steps 3 to 5: clusters take the new
+published version within their pull interval (five minutes by default). If
+a token leaks or a cluster is retired, issue a new token, update the Secret
+and press **Revoke** next to the old one; it stops working at once.
+
 ## Run it
 
 The image is `ghcr.io/pii-shield/pii-shield-rules` (the same tags as the
