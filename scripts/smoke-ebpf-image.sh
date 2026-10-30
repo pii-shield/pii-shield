@@ -15,7 +15,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-docker run --rm "$image" --help 2>&1 | grep -q -- '--exec' || {
+# Output is read before grep: with pipefail, `docker run | grep -q` fails
+# at random when grep exits on the first match and docker gets SIGPIPE.
+usage="$(docker run --rm "$image" --help 2>&1 || true)"
+grep -q -- '--exec' <<<"$usage" || {
   echo "the image does not answer --help with the agent's usage" >&2
   exit 1
 }
@@ -29,8 +32,9 @@ name="ebpf-failopen-$$"
 docker run -d --rm --name "$name" -p "127.0.0.1:${port}:9090" --cap-drop ALL "$image" >/dev/null
 ok=0
 for _ in $(seq 1 40); do
+  failopen_metrics="$(curl -fsS "http://127.0.0.1:${port}/metrics" 2>/dev/null || true)"
   if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 \
-     && curl -fsS "http://127.0.0.1:${port}/metrics" 2>/dev/null | grep -q '^piishield_ebpf_attached 0'; then
+     && grep -q '^piishield_ebpf_attached 0' <<<"$failopen_metrics"; then
     ok=1; break
   fi
   sleep 0.25
