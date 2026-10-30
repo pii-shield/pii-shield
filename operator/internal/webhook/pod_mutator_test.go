@@ -310,7 +310,68 @@ func TestBuildSidecarPassesScannerEnv(t *testing.T) {
 
 func TestBuildSidecarEmptyPolicyHasNoScannerEnv(t *testing.T) {
 	sidecar := (&PodMutator{}).buildSidecar("file", &piishieldv1alpha1.PiiPolicy{}, "/shared/app.log")
-	assert.Empty(t, sidecar.Env)
+	// Only the rules-file path is set; no scanner value is pinned by env.
+	assert.Equal(t, []corev1.EnvVar{{Name: "PII_CONFIG_FILE", Value: "/etc/pii-shield/policy.json"}}, sidecar.Env)
+}
+
+func TestBuildSidecarMountsPolicyFile(t *testing.T) {
+	for _, mode := range []string{"file", "pipe"} {
+		policy := &piishieldv1alpha1.PiiPolicy{ObjectMeta: metav1.ObjectMeta{Name: "strict"}}
+		sidecar := (&PodMutator{}).buildSidecar(mode, policy, "/shared/app.log")
+		var mount *corev1.VolumeMount
+		for i := range sidecar.VolumeMounts {
+			if sidecar.VolumeMounts[i].Name == "pii-policy" {
+				mount = &sidecar.VolumeMounts[i]
+			}
+		}
+		if assert.NotNil(t, mount, "mode %s: policy mount", mode) {
+			assert.Equal(t, "/etc/pii-shield", mount.MountPath, "mode %s", mode)
+			assert.True(t, mount.ReadOnly, "mode %s", mode)
+		}
+	}
+}
+
+func TestInjectModesAddOptionalPolicyConfigMapVolume(t *testing.T) {
+	mutator := &PodMutator{}
+	for _, mode := range []string{"file", "pipe"} {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "main-app"}}},
+		}
+		policy := &piishieldv1alpha1.PiiPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "strict"},
+			Spec:       piishieldv1alpha1.PiiPolicySpec{InjectionMode: mode, OriginalCommand: "./app"},
+		}
+		var mutated *corev1.Pod
+		var err error
+		if mode == "file" {
+			mutated, err = mutator.injectFileMode(pod, policy, "main-app")
+		} else {
+			mutated, err = mutator.injectPipeMode(pod, policy, "main-app")
+		}
+		assert.NoError(t, err, "mode %s", mode)
+
+		var vol *corev1.Volume
+		for i := range mutated.Spec.Volumes {
+			if mutated.Spec.Volumes[i].Name == "pii-policy" {
+				vol = &mutated.Spec.Volumes[i]
+			}
+		}
+		if assert.NotNil(t, vol, "mode %s: policy volume", mode) && assert.NotNil(t, vol.ConfigMap, "mode %s", mode) {
+			assert.Equal(t, "pii-shield-policy-strict", vol.ConfigMap.Name, "mode %s", mode)
+			assert.True(t, *vol.ConfigMap.Optional, "mode %s: the ConfigMap may not exist yet at admission", mode)
+		}
+		sidecar := findContainer(mutated.Spec.InitContainers, "pii-shield-sidecar")
+		if assert.NotNil(t, sidecar, "mode %s", mode) {
+			found := false
+			for _, e := range sidecar.Env {
+				if e.Name == "PII_CONFIG_FILE" && e.Value == "/etc/pii-shield/policy.json" {
+					found = true
+				}
+			}
+			assert.True(t, found, "mode %s: PII_CONFIG_FILE on the sidecar", mode)
+		}
+	}
 }
 
 func findContainer(containers []corev1.Container, name string) *corev1.Container {

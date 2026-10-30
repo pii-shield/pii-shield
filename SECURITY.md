@@ -16,7 +16,7 @@ The `main` branch is the active development line. Tagged releases should be eval
 - Set `PII_REQUIRE_STRONG_SALT=true` in production or compliance environments if weak explicit salts should fail startup instead of only logging a warning.
 - Test custom redaction and whitelist rules before rollout.
 - Review Kubernetes webhook behavior and failure policy for your compliance requirements.
-- Treat eBPF and advanced gateway interception modes as R&D until explicitly marked stable.
+- Treat advanced gateway interception modes as R&D until explicitly marked stable. The eBPF audit agent is experimental and observation only; it runs with `CAP_BPF` and `CAP_PERFMON`, which give node-level read access, so treat its image as node-level trusted code ([docs/ebpf-audit.md](docs/ebpf-audit.md)).
 
 ## Secret Handling
 

@@ -10,12 +10,14 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	piishieldv1alpha1 "github.com/pii-shield/pii-shield/operator/api/v1alpha1"
+	"github.com/pii-shield/pii-shield/operator/internal/policyfile"
 )
 
 // PodMutator mutates Pods
@@ -90,6 +92,16 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if mode == "" {
 		mode = "file" // fallback to MVP
 	}
+	// The eBPF agent only observes (#96), so an ebpf policy must say so
+	// with auditMode. The CRD refuses the combination too (a CEL rule on
+	// the spec); this catches a policy created under an older CRD instead
+	// of injecting an agent that would never redact under a policy that
+	// promises redaction.
+	if mode == "ebpf" && !policy.Spec.AuditMode {
+		return admission.Denied(fmt.Sprintf(
+			"PiiPolicy %q: injectionMode \"ebpf\" is the eBPF audit agent, which only observes; set auditMode: true (there is no eBPF redaction, see #96)",
+			policyName))
+	}
 
 	var mutatedPod *corev1.Pod
 	switch mode {
@@ -115,6 +127,16 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if mode == "pipe" {
 		resp.Warnings = append(resp.Warnings,
 			"PiiPolicy injectionMode \"pipe\" is experimental: it rewrites the target container command through /bin/sh -c and can break distroless images, argument quoting, signal handling, and the app lifecycle")
+	}
+	switch {
+	case mode == "ebpf":
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf(
+			"PiiPolicy %q injectionMode \"ebpf\" is experimental: the eBPF audit agent watches what the pod writes to stdout and stderr and counts what it would have redacted; logs are NOT redacted, and the agent needs a kernel of 5.8 or newer with BTF and the BPF and PERFMON capabilities",
+			policyName))
+	case policy.Spec.AuditMode:
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf(
+			"PiiPolicy %q is in auditMode: the sidecar writes every line out unchanged and only counts what it would have redacted; logs are NOT redacted until auditMode is false and the pod restarts",
+			policyName))
 	}
 	return resp
 }
@@ -164,6 +186,7 @@ func (m *PodMutator) injectFileMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 		Name:         "pii-tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	})
+	podCopy.Spec.Volumes = append(podCopy.Spec.Volumes, policyVolume(policy))
 
 	// Mount volume to main container
 	logPath := policy.Spec.LogPath
@@ -229,6 +252,7 @@ func (m *PodMutator) injectPipeMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 		Name:         "pii-tmp",
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	})
+	podCopy.Spec.Volumes = append(podCopy.Spec.Volumes, policyVolume(policy))
 
 	// Init container to mkfifo in emptyDir (survives main restart)
 	podCopy.Spec.InitContainers = append(podCopy.Spec.InitContainers, corev1.Container{
@@ -265,41 +289,76 @@ func (m *PodMutator) injectPipeMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 	return podCopy, nil
 }
 
-func (m *PodMutator) injectEBPFMode(pod *corev1.Pod, policy *piishieldv1alpha1.PiiPolicy, target string) (*corev1.Pod, error) {
+// injectEBPFMode adds the eBPF audit agent (ebpf/cmd/pii-shield-ebpf, #96)
+// to the pod. The agent shares the pod's pid namespace and watches what
+// every other process in it writes to stdout and stderr through an eBPF
+// program on the write syscalls; it counts what redaction would have
+// changed and never touches the stream, so the application's logs reach
+// the runtime as written and the agent is not in their path. It needs no
+// hostPath and no privileged flag: the program is attached through the
+// bpf syscall with CAP_BPF and CAP_PERFMON (CAP_SYS_RESOURCE raises the
+// memlock limit on kernels before 5.11), as root, since a non-root user
+// does not keep added capabilities across exec.
+func (m *PodMutator) injectEBPFMode(pod *corev1.Pod, policy *piishieldv1alpha1.PiiPolicy, _ string) (*corev1.Pod, error) {
 	podCopy := pod.DeepCopy()
 
-	// Share Process Namespace to scan PIDs
+	// The agent watches the tasks of its pid namespace: it must be the
+	// pod's, shared with the application containers.
 	podCopy.Spec.ShareProcessNamespace = ptr.To(true)
 
-	appName := target
-	if appName == "" && len(podCopy.Spec.Containers) > 0 {
-		appName = podCopy.Spec.Containers[0].Name
-	}
-
-	sidecar := corev1.Container{
-		Name:    "pii-shield-sidecar",
-		Image:   "ghcr.io/pii-shield/pii-shield:v2.0.0-ebpf",
-		Command: []string{"/bin/sh", "-c"},
-		Args:    []string{fmt.Sprintf("pii-shield-ebpf --target-process=\"%s\"", appName)},
+	agent := corev1.Container{
+		Name:            "pii-shield-sidecar",
+		Image:           ebpfAgentImage(),
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"/pii-shield-ebpf"},
+		Args:            []string{"--listen", fmt.Sprintf(":%d", AuditMetricsPort)},
+		Env: append(scannerEnv(policy),
+			corev1.EnvVar{Name: "PII_STATS_LOG_INTERVAL", Value: auditStatsInterval}),
+		Ports: []corev1.ContainerPort{{
+			Name:          AuditMetricsPortName,
+			ContainerPort: AuditMetricsPort,
+			Protocol:      corev1.ProtocolTCP,
+		}},
 		SecurityContext: &corev1.SecurityContext{
-			Privileged: ptr.To(true),
+			RunAsUser:                ptr.To(int64(0)),
+			RunAsNonRoot:             ptr.To(false),
+			ReadOnlyRootFilesystem:   ptr.To(true),
+			AllowPrivilegeEscalation: ptr.To(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+				Add:  []corev1.Capability{"BPF", "PERFMON", "SYS_RESOURCE"},
+			},
+			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: "kernel-debug", MountPath: "/sys/kernel/debug"},
+		// The agent answers /healthz only once its program is attached, and
+		// a native sidecar's startup probe holds the application containers
+		// until it passes, so the application's first lines are not missed.
+		// When the program cannot load the agent fails open and answers
+		// anyway, so the probe never holds the application back for long;
+		// the threshold bounds the wait if the agent hangs.
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+				Path: "/healthz",
+				Port: intstr.FromString(AuditMetricsPortName),
+			}},
+			PeriodSeconds:    1,
+			FailureThreshold: 30,
 		},
 		Resources: policy.Spec.Resources,
 	}
 
-	podCopy.Spec.Volumes = append(podCopy.Spec.Volumes, corev1.Volume{
-		Name: "kernel-debug",
-		VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{
-			Path: "/sys/kernel/debug",
-		}},
-	})
-
-	m.addSidecar(podCopy, sidecar)
+	m.addSidecar(podCopy, agent)
 
 	return podCopy, nil
+}
+
+// ebpfAgentImage is the image of the eBPF audit agent, set on the operator
+// from the chart's ebpfAgent.image values.
+func ebpfAgentImage() string {
+	if img := os.Getenv("EBPF_AGENT_IMAGE"); img != "" {
+		return img
+	}
+	return "ghcr.io/pii-shield/pii-shield-ebpf:latest"
 }
 
 func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPolicy, sidecarTargetFile string) corev1.Container {
@@ -325,13 +384,52 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 		Env:       scannerEnv(policy),
 	}
 
-	if mode == "file" {
+	switch mode {
+	case "file":
 		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "pii-shared", MountPath: "/shared"}, corev1.VolumeMount{Name: "pii-tmp", MountPath: "/tmp"})
-	} else if mode == "pipe" {
+	case "pipe":
 		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "pii-pipe-dir", MountPath: "/shared"}, corev1.VolumeMount{Name: "pii-tmp", MountPath: "/tmp"})
 	}
 
+	// Audit mode is about the numbers, so the sidecar's metrics are turned
+	// on with it (audit.go): the counters on a named port and an hourly
+	// summary in the sidecar's log.
+	if policy.Spec.AuditMode {
+		sidecar.Env = append(sidecar.Env, auditEnv()...)
+		sidecar.Ports = append(sidecar.Ports, corev1.ContainerPort{
+			Name:          AuditMetricsPortName,
+			ContainerPort: AuditMetricsPort,
+			Protocol:      corev1.ProtocolTCP,
+		})
+	}
+
+	// The rules file rendered by the controller (policyfile): the sidecar
+	// reads it at start and reloads it when the ConfigMap changes, so a
+	// policy edit reaches this pod without a restart. The env vars above are
+	// still set and win over the file, so a pod injected before the
+	// ConfigMap exists, or by an older agent image, behaves as before.
+	sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{
+		Name:      policyfile.VolumeName,
+		MountPath: policyfile.MountPath,
+		ReadOnly:  true,
+	})
+	sidecar.Env = append(sidecar.Env, corev1.EnvVar{Name: "PII_CONFIG_FILE", Value: policyfile.FilePath})
+
 	return sidecar
+}
+
+// policyVolume is the ConfigMap volume with the policy's rendered rules
+// file. It is optional: the controller may not have rendered the ConfigMap
+// yet when the pod is admitted, and the sidecar runs on its env vars until
+// the file appears.
+func policyVolume(policy *piishieldv1alpha1.PiiPolicy) corev1.Volume {
+	return corev1.Volume{
+		Name: policyfile.VolumeName,
+		VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: policyfile.ConfigMapName(policy.Name)},
+			Optional:             ptr.To(true),
+		}},
+	}
 }
 
 // scannerEnv translates PiiPolicy scanner settings into the PII_* environment
@@ -380,6 +478,9 @@ func scannerEnv(policy *piishieldv1alpha1.PiiPolicy) []corev1.EnvVar {
 		}
 	}
 	add("PII_FAIL_POLICY", spec.FailPolicy)
+	if spec.AuditMode {
+		add("PII_MODE", "audit")
+	}
 	if spec.ConfidenceThreshold != 0 {
 		add("PII_CONFIDENCE_THRESHOLD", strconv.FormatFloat(float64(spec.ConfidenceThreshold), 'f', -1, 32))
 	}

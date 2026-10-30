@@ -32,7 +32,57 @@ type RegexRule struct {
 	Pattern string `json:"pattern"`
 }
 
+// RemoteConfig points the controller at a central rule repository: a JSON
+// policy file in the SDK init_config format (entropy_threshold,
+// sensitive_keys, custom_regexes, ... plus an informational revision),
+// served over HTTPS by anything that can answer a GET — a static file on an
+// object store, an internal web server, or a rule server. The controller
+// pulls the file every IntervalSeconds with If-None-Match, lays the rule
+// fields set in this PiiPolicy over it and renders the result into the
+// policy's ConfigMap, so the sidecars pick the new rules up without a
+// restart. Nothing is ever sent to the source except the request itself.
+//
+// Only rules are accepted from the source: entropy_threshold,
+// confidence_score, min_secret_length, sensitive_keys,
+// sensitive_key_patterns, custom_regexes, safe_regexes,
+// disable_bigram_check, adaptive_threshold, entity_type_labels and
+// revision. A salt or fail_policy in the file is ignored; injectionMode,
+// logPath and resources are pod settings and cannot come from outside.
+// When the source is unreachable or serves an invalid file, the last good
+// copy stays in use and the RemoteSynced condition says why.
+type RemoteConfig struct {
+	// URL of the policy file. Must be https:// unless AllowInsecure is set.
+	// +kubebuilder:validation:Pattern=`^https?://`
+	// +kubebuilder:validation:MinLength=8
+	URL string `json:"url"`
+
+	// IntervalSeconds is how often the file is pulled. Default 300,
+	// minimum 30. A failed pull is retried after at most 60 seconds.
+	// +kubebuilder:validation:Minimum=30
+	// +optional
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
+
+	// HeaderSecretRef names a key in a Secret in the policy's namespace whose
+	// value is sent as the whole Authorization header, for example
+	// "Bearer <token>". The value never appears in the policy or its status.
+	// +optional
+	HeaderSecretRef *corev1.SecretKeySelector `json:"headerSecretRef,omitempty"`
+
+	// CABundleSecretRef names a key in a Secret in the policy's namespace
+	// that holds a PEM bundle used to verify the server certificate instead
+	// of the system roots.
+	// +optional
+	CABundleSecretRef *corev1.SecretKeySelector `json:"caBundleSecretRef,omitempty"`
+
+	// AllowInsecure permits an http:// URL and skips certificate
+	// verification for https://. For tests and air-gapped lab clusters only;
+	// the RemoteSynced condition carries a warning while it is set.
+	// +optional
+	AllowInsecure bool `json:"allowInsecure,omitempty"`
+}
+
 // PiiPolicySpec defines the desired state of PiiPolicy
+// +kubebuilder:validation:XValidation:rule="self.injectionMode != 'ebpf' || (has(self.auditMode) && self.auditMode)",message="injectionMode ebpf is the eBPF audit agent, which only observes; set auditMode: true (there is no eBPF redaction, see #96)"
 type PiiPolicySpec struct {
 	// FailPolicy determines the sidecar behavior when sanitization fails:
 	// "open" passes the raw line through (default), "closed" drops it.
@@ -95,6 +145,11 @@ type PiiPolicySpec struct {
 	// through "/bin/sh -c", which can break distroless images (no shell),
 	// argument quoting, signal handling, and the app lifecycle. Not
 	// recommended for production; see KNOWN_LIMITATIONS.md.
+	// "ebpf" is EXPERIMENTAL and observation only: the eBPF audit agent
+	// shares the pod's pid namespace and counts what it would have redacted
+	// in the pod's stdout and stderr, so it requires auditMode: true. It
+	// needs a kernel of 5.8 or newer with BTF and the BPF and PERFMON
+	// capabilities; there is no eBPF redaction.
 	// +kubebuilder:validation:Enum=file;pipe;ebpf
 	InjectionMode string `json:"injectionMode"`
 
@@ -108,6 +163,45 @@ type PiiPolicySpec struct {
 	// Resources allows configuration of compute resources for the injected sidecar
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// RemoteConfig pulls the rules from a central rule repository and lays
+	// the rule fields set in this policy over them. See RemoteConfig.
+	// +optional
+	RemoteConfig *RemoteConfig `json:"remoteConfig,omitempty"`
+
+	// AuditMode is the dry run: the sidecar scans every line as usual but
+	// writes it out unchanged, byte for byte, and only counts what it would
+	// have redacted (PII_MODE=audit; the counters are
+	// piishield_audit_lines_total and piishield_audit_findings_total, so the
+	// webhook also turns the sidecar's metrics on, on port 9090, and an
+	// hourly summary in its log). Run a policy in audit mode on real traffic
+	// first, look at the numbers, then set it to false; the change needs a
+	// pod restart. Works with injectionMode file and pipe (in pipe mode the
+	// sidecar still sits in the stream's path), and is required with ebpf,
+	// whose agent only observes (#96).
+	// +optional
+	AuditMode bool `json:"auditMode,omitempty"`
+}
+
+// RemoteStatus reports the last good pull from spec.remoteConfig.
+type RemoteStatus struct {
+	// LastSyncTime is when the source last answered with a valid file or a
+	// 304 Not Modified.
+	// +optional
+	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+	// ETag is the entity tag of the last good file, sent back as
+	// If-None-Match on the next pull.
+	// +optional
+	ETag string `json:"etag,omitempty"`
+
+	// Revision is the revision field of the last good file, if it has one.
+	// +optional
+	Revision string `json:"revision,omitempty"`
+
+	// Hash is a content hash of the last good file.
+	// +optional
+	Hash string `json:"hash,omitempty"`
 }
 
 // PiiPolicyStatus defines the observed state of PiiPolicy.
@@ -125,6 +219,24 @@ type PiiPolicyStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// RenderedPolicyConfigMap is the name of the ConfigMap in this namespace
+	// that holds the rendered rules file (policy.json) mounted into every
+	// sidecar injected for this policy. The sidecar reloads the file when it
+	// changes, so a spec edit reaches running pods without a restart.
+	// +optional
+	RenderedPolicyConfigMap string `json:"renderedPolicyConfigMap,omitempty"`
+
+	// RenderedPolicyHash is a content hash of the rendered rules file; it
+	// changes only when the rules do.
+	// +optional
+	RenderedPolicyHash string `json:"renderedPolicyHash,omitempty"`
+
+	// Remote describes the last good pull from spec.remoteConfig; unset when
+	// the policy has no remote source or no pull has succeeded yet. The
+	// RemoteSynced condition carries the outcome of the latest pull.
+	// +optional
+	Remote *RemoteStatus `json:"remote,omitempty"`
 }
 
 // +kubebuilder:object:root=true

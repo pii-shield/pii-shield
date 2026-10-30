@@ -35,7 +35,7 @@ PII-Shield is an actively developed open-source security tool in a production-ha
 | WASM SDKs | Released beta |
 | Proxy-Wasm gateway integration | Planned R&D |
 | Control Plane UI | Planned R&D |
-| eBPF interception | Experimental R&D |
+| eBPF audit agent (observes stdout/stderr, never redacts) | Experimental, see [docs/ebpf-audit.md](docs/ebpf-audit.md) |
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for the current production-hardening boundaries.
 

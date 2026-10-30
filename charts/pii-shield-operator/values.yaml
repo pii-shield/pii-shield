@@ -79,6 +79,11 @@ sidecar:
   image:
     repository: ghcr.io/pii-shield/pii-shield-agent
     tag: ""
+  # The eBPF audit agent injected for injectionMode: ebpf (observation
+  # only; needs a kernel of 5.8 or newer with BTF).
+  ebpfImage:
+    repository: ghcr.io/pii-shield/pii-shield-ebpf
+    tag: ""
   # fsGroup to inject into the mutated pod if none is specified
   fsGroup: 65532
   # If true, injects the sidecar into 'containers' instead of 'initContainers'
@@ -103,3 +108,11 @@ metrics:
     certExpiresSoonSeconds: 604800
     certExpiresSoonFor: 30m
     injectionEventFor: 5m
+    # spec.remoteConfig: the last successful pull is older than three intervals
+    remoteRulesStaleFor: 5m
+    # spec.remoteConfig: any failed pull in the last 15 minutes
+    remoteRulesErrorsFor: 15m
+    # spec.auditMode: lines the sidecar would have redacted in the last 24 hours (info)
+    auditWouldRedactFor: 15m
+    # spec.auditMode: an audit sidecar that processed no lines for an hour
+    auditNoLinesFor: 1h

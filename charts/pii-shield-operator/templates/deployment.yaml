@@ -42,6 +42,8 @@ spec:
         env:
         - name: AGENT_IMAGE
           value: "{{ .Values.sidecar.image.repository }}:{{ .Values.sidecar.image.tag | default .Chart.AppVersion }}"
+        - name: EBPF_AGENT_IMAGE
+          value: "{{ .Values.sidecar.ebpfImage.repository }}:{{ .Values.sidecar.ebpfImage.tag | default .Chart.AppVersion }}"
         - name: AGENT_FSGROUP
           value: "{{ .Values.sidecar.fsGroup }}"
         - name: LEGACY_SIDECAR_MODE

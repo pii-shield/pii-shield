@@ -39,6 +39,19 @@ spec:
           spec:
             description: spec defines the desired state of PiiPolicy
             properties:
+              auditMode:
+                description: |-
+                  AuditMode is the dry run: the sidecar scans every line as usual but
+                  writes it out unchanged, byte for byte, and only counts what it would
+                  have redacted (PII_MODE=audit; the counters are
+                  piishield_audit_lines_total and piishield_audit_findings_total, so the
+                  webhook also turns the sidecar's metrics on, on port 9090, and an
+                  hourly summary in its log). Run a policy in audit mode on real traffic
+                  first, look at the numbers, then set it to false; the change needs a
+                  pod restart. Works with injectionMode file and pipe (in pipe mode the
+                  sidecar still sits in the stream's path), and is required with ebpf,
+                  whose agent only observes (#96).
+                type: boolean
               confidenceThreshold:
                 description: |-
                   ConfidenceThreshold is the threshold for the PII scanner.
@@ -85,6 +98,11 @@ spec:
                   through "/bin/sh -c", which can break distroless images (no shell),
                   argument quoting, signal handling, and the app lifecycle. Not
                   recommended for production; see KNOWN_LIMITATIONS.md.
+                  "ebpf" is EXPERIMENTAL and observation only: the eBPF audit agent
+                  shares the pod's pid namespace and counts what it would have redacted
+                  in the pod's stdout and stderr, so it requires auditMode: true. It
+                  needs a kernel of 5.8 or newer with BTF and the BPF and PERFMON
+                  capabilities; there is no eBPF redaction.
                 enum:
                 - file
                 - pipe
@@ -105,6 +123,87 @@ spec:
                   OriginalCommand is the original app command (for the experimental
                   "pipe" mode); it is executed through "/bin/sh -c"
                 type: string
+              remoteConfig:
+                description: |-
+                  RemoteConfig pulls the rules from a central rule repository and lays
+                  the rule fields set in this policy over them. See RemoteConfig.
+                properties:
+                  allowInsecure:
+                    description: |-
+                      AllowInsecure permits an http:// URL and skips certificate
+                      verification for https://. For tests and air-gapped lab clusters only;
+                      the RemoteSynced condition carries a warning while it is set.
+                    type: boolean
+                  caBundleSecretRef:
+                    description: |-
+                      CABundleSecretRef names a key in a Secret in the policy's namespace
+                      that holds a PEM bundle used to verify the server certificate instead
+                      of the system roots.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  headerSecretRef:
+                    description: |-
+                      HeaderSecretRef names a key in a Secret in the policy's namespace whose
+                      value is sent as the whole Authorization header, for example
+                      "Bearer <token>". The value never appears in the policy or its status.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  intervalSeconds:
+                    description: |-
+                      IntervalSeconds is how often the file is pulled. Default 300,
+                      minimum 30. A failed pull is retried after at most 60 seconds.
+                    format: int32
+                    minimum: 30
+                    type: integer
+                  url:
+                    description: URL of the policy file. Must be https:// unless AllowInsecure
+                      is set.
+                    minLength: 8
+                    pattern: ^https?://
+                    type: string
+                required:
+                - url
+                type: object
               resources:
                 description: Resources allows configuration of compute resources for
                   the injected sidecar
@@ -236,6 +335,10 @@ spec:
             required:
             - injectionMode
             type: object
+            x-kubernetes-validations:
+            - message: 'injectionMode ebpf is the eBPF audit agent, which only observes;
+                set auditMode: true (there is no eBPF redaction, see #96)'
+              rule: self.injectionMode != 'ebpf' || (has(self.auditMode) && self.auditMode)
           status:
             description: status defines the observed state of PiiPolicy
             properties:
@@ -308,6 +411,43 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              remote:
+                description: |-
+                  Remote describes the last good pull from spec.remoteConfig; unset when
+                  the policy has no remote source or no pull has succeeded yet. The
+                  RemoteSynced condition carries the outcome of the latest pull.
+                properties:
+                  etag:
+                    description: |-
+                      ETag is the entity tag of the last good file, sent back as
+                      If-None-Match on the next pull.
+                    type: string
+                  hash:
+                    description: Hash is a content hash of the last good file.
+                    type: string
+                  lastSyncTime:
+                    description: |-
+                      LastSyncTime is when the source last answered with a valid file or a
+                      304 Not Modified.
+                    format: date-time
+                    type: string
+                  revision:
+                    description: Revision is the revision field of the last good file,
+                      if it has one.
+                    type: string
+                type: object
+              renderedPolicyConfigMap:
+                description: |-
+                  RenderedPolicyConfigMap is the name of the ConfigMap in this namespace
+                  that holds the rendered rules file (policy.json) mounted into every
+                  sidecar injected for this policy. The sidecar reloads the file when it
+                  changes, so a spec edit reaches running pods without a restart.
+                type: string
+              renderedPolicyHash:
+                description: |-
+                  RenderedPolicyHash is a content hash of the rendered rules file; it
+                  changes only when the rules do.
+                type: string
             type: object
         required:
         - spec
