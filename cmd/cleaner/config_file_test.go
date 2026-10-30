@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
 	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
 )
 
@@ -95,6 +98,40 @@ func TestPolicyReloader_RejectedFileKeepsPrevious(t *testing.T) {
 	}
 	if r.revision != "1" {
 		t.Errorf("revision = %q, want the previous 1", r.revision)
+	}
+}
+
+func TestPolicyReloader_CountsLoadsAndRejections(t *testing.T) {
+	restoreScannerConfig(t)
+	t.Setenv("PII_SALT", "0123456789abcdef0123456789abcdef")
+	t.Setenv("PII_SENSITIVE_KEYS", "")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "policy.json")
+	loadsBefore := testutil.ToFloat64(metrics.ConfigReloadsTotal)
+	errorsBefore := testutil.ToFloat64(metrics.ConfigReloadErrorsTotal)
+
+	writePolicy(t, path, `{"revision": "1", "sensitive_keys": ["zzz"]}`)
+	r := newPolicyReloader(path, true)
+	if !r.check() {
+		t.Fatal("first check must load the file")
+	}
+	if n := testutil.ToFloat64(metrics.ConfigReloadsTotal) - loadsBefore; n != 1 {
+		t.Errorf("loads counted = %v, want 1", n)
+	}
+	if testutil.ToFloat64(metrics.ConfigLastReloadTimestamp) == 0 {
+		t.Error("the last reload timestamp must be set after a load")
+	}
+
+	writePolicy(t, path, `{"custom_regexes": [{"pattern": "["}]}`)
+	bump(t, path, 2*time.Second)
+	if r.check() {
+		t.Fatal("an invalid file must not be applied")
+	}
+	if n := testutil.ToFloat64(metrics.ConfigReloadErrorsTotal) - errorsBefore; n != 1 {
+		t.Errorf("rejections counted = %v, want 1", n)
+	}
+	if n := testutil.ToFloat64(metrics.ConfigReloadsTotal) - loadsBefore; n != 1 {
+		t.Errorf("a rejected file must not count as a load, loads = %v", n)
 	}
 }
 

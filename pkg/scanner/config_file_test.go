@@ -15,6 +15,7 @@ func TestParsePolicyJSON_AppliesFieldsOverDefaults(t *testing.T) {
 		"min_secret_length": 8,
 		"sensitive_keys": [" Geheim ", "clave"],
 		"disable_bigram_check": true,
+		"adaptive_threshold": true,
 		"entity_type_labels": true,
 		"sensitive_key_patterns": ["^x_"],
 		"custom_regexes": [{"pattern": "^TX-\\d{5}$", "name": "tx"}],
@@ -32,7 +33,7 @@ func TestParsePolicyJSON_AppliesFieldsOverDefaults(t *testing.T) {
 	if got := strings.Join(cfg.SensitiveKeys, ","); got != "geheim,clave" {
 		t.Errorf("sensitive keys = %q, want normalized geheim,clave", got)
 	}
-	if !cfg.DisableBigramCheck || !cfg.EntityTypeLabels {
+	if !cfg.DisableBigramCheck || !cfg.AdaptiveThreshold || !cfg.EntityTypeLabels {
 		t.Errorf("bool fields not applied: %+v", cfg)
 	}
 	if len(cfg.SensitiveKeyPatterns) != 1 || len(cfg.CustomRegexes) != 1 || len(cfg.SafeRegexes) != 1 {
@@ -72,6 +73,7 @@ func TestParsePolicyJSON_RejectsWhole(t *testing.T) {
 		"empty custom pattern":    `{"custom_regexes": [{"regex": "^TX$", "name": "typo"}]}`,
 		"bad safe regex":          `{"safe_regexes": [{"pattern": "(?P<"}]}`,
 		"negative entropy":        `{"entropy_threshold": -1}`,
+		"negative confidence":     `{"confidence_score": -0.5}`,
 		"min length out of range": `{"min_secret_length": 100000}`,
 		"empty sensitive key":     `{"sensitive_keys": ["a", " "]}`,
 	}
@@ -106,6 +108,11 @@ func TestLoadPolicyFile(t *testing.T) {
 	}
 	if _, _, err := LoadPolicyFile(big); err == nil || !strings.Contains(err.Error(), "larger than") {
 		t.Errorf("oversized file: expected a size error, got %v", err)
+	}
+
+	// A directory opens but cannot be read.
+	if _, _, err := LoadPolicyFile(dir); err == nil {
+		t.Error("directory: expected a read error")
 	}
 }
 
