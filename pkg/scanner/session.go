@@ -1,5 +1,10 @@
 package scanner
 
+import (
+	"strings"
+	"unicode"
+)
+
 // A session id or a cookie value is a credential: whoever holds it is logged
 // in. When it is all digits it never reaches the entropy threshold, and
 // neither "cookie" nor "session" is a sensitive key, because a cookie
@@ -53,6 +58,26 @@ func matchSessionNumber(line string, i int) int {
 		return 0
 	}
 	return j
+}
+
+// isSessionTokenValue reports whether val, the value of a session or cookie
+// key in a name=value pair, has the shape of a session token: long enough
+// for a secret, a letter in it, and a digit or a symbol. "Cookie: sid=abc123"
+// passed because the pair was scored like any other and a short token stays
+// under the entropy threshold, while the key says what it is. A word
+// (session=default, cookie=accepted), a count or a date (session=3,
+// session=2026-10-30) has no letter or no digit and stays; a run of digits
+// is matched by its own rule (see matchSessionNumber). A ';' or ',' after
+// the value separates the next cookie and is not part of it. A value that
+// holds a space, a ';' or another pair is a cookie list ("Cookie":
+// "session=<v>; theme=dark"), whose pairs are judged one by one.
+func (st *configState) isSessionTokenValue(val string) bool {
+	val = strings.TrimRight(val, ";,")
+	if len(val) < st.config.MinSecretLength || !looksLikeSecretWord(val) ||
+		strings.ContainsAny(val, " ;") || strings.IndexByte(strings.TrimRight(val, "="), '=') >= 0 {
+		return false
+	}
+	return strings.IndexFunc(val, unicode.IsLetter) >= 0
 }
 
 // isSessionNumberValue reports whether val, a whole URL parameter value, is a

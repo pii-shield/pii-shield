@@ -65,7 +65,8 @@ func TestForcedValueWithSeparatorHiddenWhole(t *testing.T) {
 		{"password: abc:def", "abc:def", "password: [HIDDEN:key:"},
 		{"secret: k1:v1 more", "k1:v1", "] more"},
 		{"password hunter2:x", "hunter2:x", "password [HIDDEN:key:"},
-		{"Authorization: Bearer " + qboxCredential, qboxCredential, "] "},
+		// The scheme word stays (it used to be hidden as the key's value).
+		{"Authorization: Bearer " + qboxCredential, qboxCredential, "Authorization: Bearer [HIDDEN:key:"},
 		{"api_key = " + qboxCredential, qboxCredential, "api_key = [HIDDEN:key:"},
 	} {
 		out := ScanAndRedact(tc.in)
