@@ -106,6 +106,46 @@ jobs:
           exit 1
         fi
 
+  # The eBPF audit agent (ebpf/, #96) builds on Linux only. The unit tests
+  # need no kernel; the generated Go of bpf2go is compared after a rebuild
+  # with the runner's clang (the .o files are not, since clang versions
+  # differ), and the committed objects are then loaded into the runner's
+  # kernel by the smoke, which watches a shell print a secret.
+  ebpf:
+    name: eBPF Audit Agent
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Verify Dependencies
+      working-directory: ebpf
+      run: go mod verify
+
+    - name: Run Tests (Race)
+      working-directory: ebpf
+      run: go test -race ./...
+
+    - name: Rebuild the BPF program and compare the generated Go
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q clang llvm
+        (cd ebpf && go generate ./internal/probe/)
+        git diff --exit-code -- 'ebpf/internal/probe/*.go'
+        git checkout -- ebpf/internal/probe/
+
+    - name: Build the agent
+      working-directory: ebpf
+      run: go build -o ../pii-shield-ebpf ./cmd/pii-shield-ebpf
+
+    - name: Smoke on the runner kernel
+      run: |
+        uname -r
+        scripts/smoke-ebpf-agent.sh ./pii-shield-ebpf
+
   # On a pull request this job compares the scanner benchmarks against the
   # PR base (scripts/bench-gate.sh): both test binaries are built on this
   # runner and run interleaved, and the job fails when a benchmark is slower

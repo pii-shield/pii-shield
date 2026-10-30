@@ -51,6 +51,31 @@ Set `PII_REQUIRE_STRONG_SALT=true` in production if you want startup to fail ins
 | `PII_BIGRAM_DEFAULT_SCORE` | Log-probability score for unknown bigrams. Only pairs of adjacent ASCII characters are scored, so text in a non-Latin script gets no bigram adjustment at all and this value cannot push it towards redaction. | `-7.0` |
 | `PII_ENTITY_TYPE_LABELS` | Emit `[HIDDEN:<type>:<hash>]` instead of `[HIDDEN:<hash>]`, where `<type>` names the detector that fired: `card` (Luhn checksum plus a real issuer prefix and length), `key` (sensitive key, a session id of 10 or more digits under a cookie or session key such as `Cookie`, `JSESSIONID`, `session_id`, or a one-time code of 4 to 8 digits under a key such as `otp`, `otp_code`, `verification_code`, `mfa_code`, see the note below), `context` (context keyword), `url` (URL parameter entropy), `regex` (unnamed custom rule), `entropy` (plain entropy), `phone` (a telephone number found by its shape or its key, see the note below), `id-number` (digits under a key that names an identity document or a patient record number, see the note below), `dob` (a calendar date under a key that names a date of birth, see the note below), and the issuer-format detectors `aws-key`, `gcp-key`, `github-token`, `slack-token`, `stripe-key`, `jwt`, `telegram-bot-token`, plus `private-key` for a PEM private-key framing line. Named custom rules keep their own name as the label. The hash is unchanged, so enabling the flag does not break tag correlation. Accepts `1`/`true`/`yes`/`y`/`on`. | `false` |
 
+## Policy File (rules without a restart)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PII_CONFIG_FILE` | Path to a JSON policy file with the scanner rules, in the same format the SDKs pass to `init_config`: `entropy_threshold`, `confidence_score`, `min_secret_length`, `sensitive_keys`, `sensitive_key_patterns`, `custom_regexes`, `safe_regexes`, `disable_bigram_check`, `adaptive_threshold`, `entity_type_labels`, plus an informational `revision`. The file is read before the first line and re-read whenever it changes, and the new rules apply to the next line without a restart, so a ConfigMap mounted into the pod (or a rule server, see the operator docs) can change the rules of a running sidecar. A file that is missing is logged once and waited for; the scanner runs on the environment meanwhile. | _(unset)_ |
+| `PII_CONFIG_RELOAD_SECONDS` | How often the file is checked for a change (its modification time and size; the kubelet's atomic ConfigMap update is seen as a change). `0` reads the file once at start and never again. Invalid values fall back to the default. | `10` |
+
+Three rules keep the file from surprising a running process:
+
+- **The environment wins.** Every `PII_*` variable that is set is laid over the file on every load, so an operator can pin a threshold or the sensitive-key list in the pod spec and no file can move it. A variable that is unset leaves the file's value in place.
+- **The salt never comes from the file.** `salt` in the file is ignored with a warning, as is `fail_policy`; both are settings of the process, not rules, and stay with `PII_SALT` and `PII_FAIL_POLICY`. The salt chosen at start is kept across reloads, so the tags of a running process do not change because the rules did.
+- **A bad file is rejected whole.** Unlike the environment variables, which warn and skip a bad entry, invalid JSON, an invalid or empty pattern, or a value out of range rejects the whole file: the previous rules stay in force, the rejection is logged, and `piishield_config_reload_errors_total` goes up. A file larger than 4 MiB is rejected unread.
+
+With `PII_METRICS_ENABLED=true` the sidecar also exports `piishield_config_reloads_total` (loads applied, the first included) and `piishield_config_last_reload_timestamp_seconds` (Unix time of the last applied load, `0` until the first). Each applied load is logged with the file's `revision`.
+
+## Audit mode (dry run)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PII_MODE` | `redact` sanitizes the stream. `audit` is the dry run: every line goes through the scanner, but the line written out is the original, byte for byte, and what would have been redacted is only counted, so a team can run the sidecar on real traffic for a while and look at the numbers before turning redaction on. Invalid values fall back to `redact` with a warning. | `redact` |
+
+What audit mode counts, with `PII_METRICS_ENABLED=true`: `piishield_audit_lines_total{result}` (`clean` or `would_redact`, one per line; both series exist from the start, at zero, so a sidecar that sees no lines is visible as a rate of zero), `piishield_audit_findings_total{type}` (one per redaction the scanner would have made, with the same bounded `type` label as `piishield_redaction_events_total`, which stays at zero in audit mode because nothing is redacted), and the gauge `piishield_audit_mode`, `1` while the mode is on. With `PII_STATS_LOG_INTERVAL` the summary line reads `PII-Shield audit: 1,240 would-be redactions (…) in 310 of 12,345 lines (2.5%) / 5.2 MB processed; nothing was changed`. The counters hold the fact of a finding and its detector, never the value: audit mode does not record the secrets it saw, and there is no way to list them.
+
+Audit mode never drops a line: a scanner panic passes the line through and a line longer than the buffer produces the `WARN` marker whatever `PII_FAIL_POLICY` says. In file mode the sidecar reads a file the application writes and cannot block the application; in pipe and stdin modes the sidecar is still in the stream's path, audit or not. The mode is read once at start, so leaving audit mode is a restart with `PII_MODE` unset.
+
 ## Runtime Failure Policy
 
 | Variable | Description | Default |
@@ -69,12 +94,12 @@ See `docs/sidecar-failure-modes.md` for production failure-mode guidance.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. The `piishield_redaction_events_total` counter carries a `type` label bounded to `entropy`, `regex`, `luhn`, `signature` and `unknown`; `signature` counts the built-in issuer-prefix detectors (AWS, Google, GitHub, Slack, Stripe, JWT, Bearer, PEM private keys) telephone numbers found by shape and identity numbers found by their key. | `false` |
+| `PII_METRICS_ENABLED` | Expose a Prometheus `/metrics` endpoint and a `/healthz` probe. The `piishield_redaction_events_total` counter carries a `type` label bounded to `entropy`, `regex`, `luhn`, `signature` and `unknown`; `signature` counts the built-in issuer-prefix detectors (AWS, Google, GitHub, Slack, Stripe, JWT, Bearer, PEM private keys) telephone numbers found by shape and identity numbers found by their key. In audit mode (`PII_MODE=audit`) the findings go to `piishield_audit_findings_total{type}` and `piishield_audit_lines_total{result}` instead. | `false` |
 | `PII_METRICS_PORT` | Port for the metrics/health server (1–65535). | `9090` |
-| `PII_STATS_LOG_INTERVAL` | When set to a positive Go duration (e.g. `1h`, `30m`), log a periodic aggregated redaction summary — counts of high-entropy secrets, pattern matches, and card numbers, plus lines and bytes processed — and a final summary on shutdown. Empty or invalid disables it. Independent of `PII_METRICS_ENABLED`. | _(disabled)_ |
+| `PII_STATS_LOG_INTERVAL` | When set to a positive Go duration (e.g. `1h`, `30m`), log a periodic aggregated redaction summary — counts of high-entropy secrets, pattern matches, card numbers and signatures, plus lines and bytes processed — and a final summary on shutdown. Empty or invalid disables it. Independent of `PII_METRICS_ENABLED`. | _(disabled)_ |
 
 The stats summary is a single log line per interval, e.g.
-`PII-Shield stats: 1,240 redactions (900 high-entropy secrets, 297 pattern matches, 43 card numbers) across 12,345 lines / 5.2 MB processed`.
+`PII-Shield stats: 1,240 redactions (900 high-entropy secrets, 297 pattern matches, 43 card numbers, 0 signatures) across 12,345 lines / 5.2 MB processed`; `signatures` are the built-in issuer-prefix detectors.
 
 ## Value-Based Regex Redaction (Deterministic)
 

@@ -168,7 +168,7 @@ Monitoring:
 
 The following modes are not production adoption paths yet:
 
-- eBPF interception.
+- The eBPF audit agent (`injectionMode: ebpf`). It observes and never redacts, so it is a measurement before a rollout, not a compliance control; see [ebpf-audit.md](ebpf-audit.md).
 - Proxy-Wasm gateway integration.
 - Hosted Control Plane UI.
 - Full transparent Kubernetes `stdout` and `stderr` interception.

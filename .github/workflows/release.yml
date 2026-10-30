@@ -35,6 +35,10 @@ jobs:
         working-directory: operator
         run: go test -race ./...
 
+      - name: Run eBPF Agent Module Tests (Race)
+        working-directory: ebpf
+        run: go test -race ./...
+
       - name: Compile WASM FFI
         run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o pii-shield-wasi.wasm cmd/wasm-ffi/main.go
 
@@ -153,6 +157,10 @@ jobs:
 
       - name: Verify Operator Module Dependencies
         working-directory: operator
+        run: go mod verify
+
+      - name: Verify eBPF Agent Module Dependencies
+        working-directory: ebpf
         run: go mod verify
 
   image-smoke-test:

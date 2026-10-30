@@ -7,6 +7,7 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 - The default file-based sidecar mode expects the application to write logs to the configured file path.
 - Full transparent interception of standard Kubernetes `stdout`/`stderr` logs is not complete yet.
 - Pipe mode is experimental and not recommended for production. It rewrites the target container command through `/bin/sh -c`, which can break distroless images (no shell), argument quoting, signal handling, and the app lifecycle. The webhook returns a warning when a pipe-mode policy is applied.
+- Audit mode (`PII_MODE=audit`) leaves every line as it is and only counts what would have been redacted, but it is a dry run of the scanner, not of the deployment: in pipe and stdin modes the sidecar still sits in the stream's path, and only file mode keeps it off the application's path. The counters say that a line would have changed and which detector fired, not which value; the finding itself is never recorded, so a false positive is found by looking at the application's own logs for that period. Leaving audit mode is a restart.
 
 ## Operator
 
@@ -43,4 +44,4 @@ PII-Shield is released and usable, but not yet fully production-hardened across 
 
 ## Roadmap Boundaries
 
-Proxy-Wasm gateway integration, a visual Control Plane, and production-grade eBPF interception are planned R&D areas rather than completed stable features.
+Proxy-Wasm gateway integration and a visual Control Plane are planned R&D areas rather than completed stable features. eBPF is an experimental audit agent that observes and never redacts ([docs/ebpf-audit.md](docs/ebpf-audit.md)); eBPF redaction is not planned.

@@ -35,7 +35,7 @@ PII-Shield is an actively developed open-source security tool in a production-ha
 | WASM SDKs | Released beta |
 | Proxy-Wasm gateway integration | Planned R&D |
 | Control Plane UI | Planned R&D |
-| eBPF interception | Experimental R&D |
+| eBPF audit agent (observes stdout/stderr, never redacts) | Experimental, see [docs/ebpf-audit.md](docs/ebpf-audit.md) |
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for the current production-hardening boundaries.
 
@@ -126,6 +126,7 @@ See [CONFIGURATION.md](CONFIGURATION.md) for a full list of environment variable
 - `PII_DISABLE_BIGRAM_CHECK`: Optimize for non-English logs.
 - `PII_CUSTOM_REGEX_LIST`: Custom regex rules for deterministic redaction.
 - `PII_SAFE_REGEX_LIST`: Whitelist regex rules to ignore (matches are returned as-is).
+- `PII_MODE=audit`: Dry run. Lines pass through unchanged and what would have been redacted is counted (`piishield_audit_*` metrics), so you can watch real traffic before turning redaction on.
 
 ### Entropy Sensitivity Table (Default Threshold: 3.6)
 
