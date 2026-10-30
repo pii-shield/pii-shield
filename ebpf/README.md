@@ -10,11 +10,10 @@ without a sidecar in the way, and it is **observation only**: eBPF cannot
 rewrite what a process writes in any way the kernel supports for
 production, so there is no eBPF redaction and none is planned.
 
-Status: slices 1 and 2 of the plan (milestone 3.0): the module, the
-program, the agent, a smoke on a real kernel in CI, the image
-`ghcr.io/pii-shield/pii-shield-ebpf` and the operator's `injectionMode:
-ebpf`, which injects it (operator README, "Audit mode"). The user docs and
-the comment on #96 come in the last slice.
+Status: milestone 3.0, issue #96: the module, the program, the agent, a
+smoke on a real kernel in CI, the image `ghcr.io/pii-shield/pii-shield-ebpf`,
+the operator's `injectionMode: ebpf`, which injects it (operator README,
+"Audit mode"), and the user docs ([docs/ebpf-audit.md](../docs/ebpf-audit.md)).
 
 ## What it needs
 

@@ -167,6 +167,30 @@ Response target:
 - Medium reachable vulnerability: triage within 7 business days.
 - Non-reachable or module-level finding: document and remediate in the next dependency update window.
 
+## Central Rule Repository
+
+`spec.remoteConfig` on a `PiiPolicy` makes the operator pull the rules from an HTTPS address and lay the policy's own rule fields over them (operator README, "Central rule repository"). The sidecars keep the last good rules whenever a pull fails, so a broken source degrades to "rules stop updating", never to "rules disappear".
+
+Hosting the file:
+
+1. Serve `policy.json` (the SDK `init_config` format plus a `revision`) from any HTTPS endpoint that answers `GET` with an `ETag` header and `304 Not Modified` for a matching `If-None-Match`: an object store bucket, an internal web server, or a rule server. Keep it under 256 KiB.
+2. Put the whole `Authorization` header value (for example `Bearer <token>`) in a Secret in the policy's namespace and reference it with `headerSecretRef`; put a private CA bundle in a Secret and reference it with `caBundleSecretRef`. The operator reads both at every pull, so a change takes effect at the next interval.
+3. Validate a new file before publishing it: run the agent with `PII_CONFIG_FILE=<file>` on a sample line, or push it to a staging policy first. The operator rejects an invalid file whole and reports `InvalidJSON`, `InvalidRegex` or `InvalidValue` in the `RemoteSynced` condition while the sidecars keep the previous rules.
+
+Rotating the token:
+
+1. Add the new token to the source so both tokens are accepted.
+2. Update the Secret named by `headerSecretRef`.
+3. Watch `kubectl get piipolicy <name> -o jsonpath='{.status.remote.lastSyncTime}'` move past the change, then retire the old token at the source.
+
+When `PIIShieldRemoteRulesStale` or `PIIShieldRemoteRulesSyncErrors` fires:
+
+1. `kubectl describe piipolicy <name>`: the `RemoteSynced` condition names the reason (`FetchFailed` with the HTTP status or the network error, `SecretNotFound`, `TooLarge`, `InsecureURL`, or a validation reason) and `status.remote` says when the last good pull was and which revision it carried.
+2. Fix the source, the Secret or the file. The next pull happens within 60 s of the fix, or sooner if you edit the policy (any spec change triggers a pull).
+3. Nothing needs a restart: the sidecars pick the merged file up from the ConfigMap about a minute after the operator writes it.
+
+Rolling back to local rules: remove `remoteConfig` from the policy. The ConfigMap is rendered from the local policy alone on the next reconcile and `remote.json` is dropped. To pin one value against the source without leaving it, set that field in the policy; a local field always wins.
+
 ## Prometheus Alerts
 
 The Helm chart can render a `PrometheusRule` for Prometheus Operator installations:
@@ -200,6 +224,7 @@ The operator rules cover:
 - operator deployment availability;
 - webhook service endpoint availability;
 - webhook certificate expiry when cert-manager metrics are available;
-- injection or admission failures when Kubernetes event metrics such as `kube_event_count` are available.
+- injection or admission failures when Kubernetes event metrics such as `kube_event_count` are available;
+- a `PiiPolicy` with `remoteConfig` whose last successful pull is older than three intervals, and any failed pull in the last 15 minutes (operator metrics, no extra exporter needed).
 
 These rules depend on common cluster observability components such as kube-state-metrics, cert-manager metrics, and an event metrics exporter. Disable or adjust rules that are not supported by your monitoring stack.

@@ -59,4 +59,52 @@ spec:
           annotations:
             summary: PII-Shield injection or admission failures detected
             description: Kubernetes events mention PII-Shield admission, injection, or mount failures. Check affected workloads, PiiPolicy references, and operator logs.
+        - alert: PIIShieldRemoteRulesStale
+          expr: (time() - piishield_operator_remote_sync_last_success_timestamp_seconds) > 3 * piishield_operator_remote_sync_interval_seconds
+          for: {{ .Values.metrics.prometheusRule.remoteRulesStaleFor | quote }}
+          labels:
+            severity: warning
+            {{- with .Values.metrics.prometheusRule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: PII-Shield remote rules of {{ "{{ $labels.namespace }}/{{ $labels.policy }}" }} are stale
+            description: The last successful pull of spec.remoteConfig for PiiPolicy {{ "{{ $labels.namespace }}/{{ $labels.policy }}" }} is older than three pull intervals. The sidecars keep the last good rules; see the RemoteSynced condition of the policy for the reason.
+        - alert: PIIShieldRemoteRulesSyncErrors
+          expr: increase(piishield_operator_remote_sync_total{result="error"}[15m]) > 0
+          for: {{ .Values.metrics.prometheusRule.remoteRulesErrorsFor | quote }}
+          labels:
+            severity: info
+            {{- with .Values.metrics.prometheusRule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: PII-Shield remote rule pulls are failing
+            description: Pulls of spec.remoteConfig failed in the last 15 minutes. The sidecars keep the last good rules; check the RemoteSynced condition of the affected policies.
+        # The two audit rules read the sidecar's own counters (PiiPolicy
+        # spec.auditMode turns its metrics endpoint on, port 9090), so they
+        # need the sidecar pods scraped: a PodMonitor or the prometheus.io
+        # annotations on the workload.
+        - alert: PIIShieldAuditWouldRedact
+          expr: sum by (namespace, pod) (increase(piishield_audit_lines_total{result="would_redact"}[24h])) > 0
+          for: {{ .Values.metrics.prometheusRule.auditWouldRedactFor | quote }}
+          labels:
+            severity: info
+            {{- with .Values.metrics.prometheusRule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: PII-Shield audit found lines it would redact in {{ "{{ $labels.namespace }}/{{ $labels.pod }}" }}
+            description: In the last 24 hours the sidecar of {{ "{{ $labels.namespace }}/{{ $labels.pod }}" }}, running in auditMode, saw {{ "{{ $value }}" }} lines it would have redacted. Nothing was changed. Look at piishield_audit_findings_total by type and at the application's logs for that period before switching the policy to redact.
+        - alert: PIIShieldAuditSeesNoLines
+          expr: sum by (namespace, pod) (rate(piishield_audit_lines_total[1h])) == 0
+          for: {{ .Values.metrics.prometheusRule.auditNoLinesFor | quote }}
+          labels:
+            severity: warning
+            {{- with .Values.metrics.prometheusRule.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: PII-Shield audit sidecar of {{ "{{ $labels.namespace }}/{{ $labels.pod }}" }} sees no log lines
+            description: The sidecar of {{ "{{ $labels.namespace }}/{{ $labels.pod }}" }} runs in auditMode but has processed no lines for an hour. The application is quiet, or it does not write to the policy's logPath; an audit that sees nothing proves nothing.
 {{- end }}

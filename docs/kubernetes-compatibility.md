@@ -49,7 +49,7 @@ Runtime notes:
 - Workloads with custom log rotation must be validated before rollout.
 - Very high-volume workloads need throughput and backpressure validation.
 - Webhook failure policy must be reviewed for compliance requirements.
-- eBPF, Proxy-Wasm, and full transparent `stdout`/`stderr` interception are not production-supported modes yet.
+- Proxy-Wasm and full transparent `stdout`/`stderr` interception are not production-supported modes yet. The eBPF audit agent watches `stdout`/`stderr` without redacting and needs Linux 5.8 or newer with BTF on `amd64` or `arm64` nodes and the `BPF`, `PERFMON` and `SYS_RESOURCE` capabilities ([ebpf-audit.md](ebpf-audit.md)).
 
 ## Compatibility Test Checklist
 
