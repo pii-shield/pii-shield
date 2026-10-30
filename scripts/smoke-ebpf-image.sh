@@ -21,6 +21,30 @@ docker run --rm "$image" --help 2>&1 | grep -q -- '--exec' || {
 }
 echo "✓ image runs and prints its usage"
 
+# Fail open: without the capabilities the program cannot load, and the
+# agent must still come up, answer /healthz and say it is not attached,
+# so a pod is never held back by its audit agent.
+port="${EBPF_FAILOPEN_PORT:-19096}"
+name="ebpf-failopen-$$"
+docker run -d --rm --name "$name" -p "127.0.0.1:${port}:9090" --cap-drop ALL "$image" >/dev/null
+ok=0
+for _ in $(seq 1 40); do
+  if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 \
+     && curl -fsS "http://127.0.0.1:${port}/metrics" 2>/dev/null | grep -q '^piishield_ebpf_attached 0'; then
+    ok=1; break
+  fi
+  sleep 0.25
+done
+logs="$(docker logs "$name" 2>&1 || true)"
+docker stop "$name" >/dev/null 2>&1 || true
+if (( ok == 0 )); then
+  echo "without capabilities the agent did not fail open" >&2
+  echo "$logs" >&2
+  exit 1
+fi
+grep -q "eBPF program not loaded" <<<"$logs"
+echo "✓ without capabilities the agent fails open: /healthz answers, piishield_ebpf_attached 0"
+
 id="$(docker create "$image")"
 docker cp "$id:/pii-shield-ebpf" "$work/pii-shield-ebpf"
 docker rm "$id" >/dev/null
