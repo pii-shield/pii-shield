@@ -41,6 +41,13 @@ spec:
   injectionMode: ebpf
   auditMode: true
   sensitiveKeys: [password, token, geheim]
+  # A tight CPU limit slows the agent's start and the program load by
+  # several seconds. Without the startup probe the app then writes its first
+  # line before the attach and the check below fails (0 of 5 runs counted
+  # it on 2026-10-30); with the probe the app waits (5 of 5).
+  resources:
+    limits: { cpu: 20m, memory: 128Mi }
+    requests: { cpu: 20m, memory: 64Mi }
 YAML
 
 # ebpf without auditMode must not even be admitted.
@@ -83,17 +90,28 @@ YAML
 
 kubectl wait --for=condition=Ready pod/pii-ebpf-test -n "${namespace}" --timeout=120s
 
-kubectl get pod pii-ebpf-test -n "${namespace}" -o jsonpath='{.spec.initContainers[?(@.name=="pii-shield-sidecar")].image}{"\n"}' | grep -q "pii-shield-ebpf" \
+injected_image="$(kubectl get pod pii-ebpf-test -n "${namespace}" -o jsonpath='{.spec.initContainers[?(@.name=="pii-shield-sidecar")].image}')"
+grep -q "pii-shield-ebpf" <<<"${injected_image}" \
   || { echo "FAIL: the eBPF agent was not injected" >&2; kubectl describe pod pii-ebpf-test -n "${namespace}"; exit 1; }
 echo "OK: agent injected"
 
-sleep 5
-kubectl logs pii-ebpf-test -n "${namespace}" -c pii-shield-sidecar | tail -5
-kubectl logs pii-ebpf-test -n "${namespace}" -c pii-shield-sidecar | grep -q "watching stdout and stderr" \
-  || { echo "FAIL: the agent did not start watching (kernel without BTF, or capabilities missing?)" >&2; exit 1; }
+# The agent may be slow to attach under its CPU limit; give it a minute.
+for _ in $(seq 1 120); do
+  agent_log="$(kubectl logs pii-ebpf-test -n "${namespace}" -c pii-shield-sidecar 2>/dev/null || true)"
+  grep -q "watching stdout and stderr" <<<"${agent_log}" && break
+  sleep 0.5
+done
+agent_log="$(kubectl logs pii-ebpf-test -n "${namespace}" -c pii-shield-sidecar)"
+tail -5 <<<"${agent_log}"
+grep -q "watching stdout and stderr" <<<"${agent_log}" \
+  || { echo "FAIL: the agent did not start watching within a minute (kernel without BTF, or capabilities missing?)" >&2; exit 1; }
+sleep 2
 
 # The app's logs must be exactly what it printed.
-kubectl logs pii-ebpf-test -n "${namespace}" -c app | grep -q "password=hunter2hunter2" \
+# Read the logs first: with pipefail, `kubectl logs | grep -q` fails when
+# grep exits on the first match before kubectl has written everything.
+app_log="$(kubectl logs pii-ebpf-test -n "${namespace}" -c app)"
+grep -q "password=hunter2hunter2" <<<"${app_log}" \
   || { echo "FAIL: the app's own logs changed or are missing" >&2; exit 1; }
 echo "OK: the app's logs are untouched"
 
@@ -118,4 +136,44 @@ if grep -Eq 'piishield_redaction_events_total\{[^}]*\} [1-9]' <<<"$metrics"; the
   exit 1
 fi
 echo "OK: the agent counts what it would have redacted and redacts nothing"
+kill "${pf}" 2>/dev/null || true
+
+# Fail open: the same pod as the webhook rendered it, but the agent without
+# its added capabilities, so the program cannot load. The agent must not
+# crash, the startup probe must pass, the app must start, and the agent
+# must say it is not attached.
+kubectl delete pod pii-ebpf-noload -n "${namespace}" --ignore-not-found --wait
+kubectl get pod pii-ebpf-test -n "${namespace}" -o json | python3 -c '
+import json, sys
+p = json.load(sys.stdin)
+spec = p["spec"]
+spec.pop("nodeName", None)
+for c in spec["initContainers"]:
+    if c["name"] == "pii-shield-sidecar":
+        c["securityContext"]["capabilities"] = {"drop": ["ALL"]}
+for c in spec["initContainers"] + spec["containers"]:
+    c["volumeMounts"] = [m for m in c.get("volumeMounts", []) if not m["name"].startswith("kube-api-access")]
+spec["volumes"] = [v for v in spec.get("volumes", []) if not v["name"].startswith("kube-api-access")]
+print(json.dumps({"apiVersion": "v1", "kind": "Pod",
+                  "metadata": {"name": "pii-ebpf-noload", "labels": {"app": "pii-ebpf-noload"}}, "spec": spec}))
+' | kubectl apply -n "${namespace}" -f -
+kubectl wait --for=condition=Ready pod/pii-ebpf-noload -n "${namespace}" --timeout=90s \
+  || { echo "FAIL: without capabilities the pod did not start; the agent must fail open" >&2; kubectl describe pod pii-ebpf-noload -n "${namespace}"; exit 1; }
+restarts="$(kubectl get pod pii-ebpf-noload -n "${namespace}" -o jsonpath='{.status.initContainerStatuses[?(@.name=="pii-shield-sidecar")].restartCount}')"
+[[ "${restarts}" == "0" ]] || { echo "FAIL: the agent restarted ${restarts} times instead of failing open" >&2; exit 1; }
+noload_log="$(kubectl logs pii-ebpf-noload -n "${namespace}" -c pii-shield-sidecar)"
+grep -q "eBPF program not loaded" <<<"${noload_log}" \
+  || { echo "FAIL: the agent did not log why the program is not loaded" >&2; exit 1; }
+kubectl port-forward pod/pii-ebpf-noload -n "${namespace}" 19098:9090 >/dev/null 2>&1 &
+pf=$!
+noload=""
+for _ in $(seq 1 40); do
+  noload="$(curl -fsS http://127.0.0.1:19098/metrics 2>/dev/null || true)"
+  grep -q '^piishield_ebpf_attached' <<<"$noload" && break
+  sleep 0.5
+done
+grep -q '^piishield_ebpf_attached 0' <<<"$noload" \
+  || { echo "FAIL: the agent without capabilities does not report piishield_ebpf_attached 0" >&2; exit 1; }
+kubectl delete pod pii-ebpf-noload -n "${namespace}" --wait=false
+echo "OK: without capabilities the agent fails open: the pod starts, piishield_ebpf_attached 0"
 echo "eBPF audit agent end to end: ok"
