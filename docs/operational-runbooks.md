@@ -194,7 +194,7 @@ Rolling back to local rules: remove `remoteConfig` from the policy. The ConfigMa
 
 ## Audit Mode
 
-`auditMode: true` on a `PiiPolicy` (or `PII_MODE=audit` on a sidecar run by hand) is the dry run: the sidecar scans every line, writes it out unchanged and counts what it would have redacted. The numbers are `piishield_audit_lines_total{result="clean"|"would_redact"}` per line, `piishield_audit_findings_total{type}` per finding, the gauge `piishield_audit_mode`, and an hourly `PII-Shield audit: N would-be redactions (…) in M of L lines (x%)` line in the sidecar's log. The counters never hold the value that was found; the application's own logs for the period are the only place to see it.
+`auditMode: true` on a `PiiPolicy` (or `PII_MODE=audit` on a sidecar run by hand) is the dry run: the sidecar scans every line, writes it out unchanged and counts what it would have redacted. The numbers are `piishield_audit_lines_total{result="clean"|"would_redact"}` per line, `piishield_audit_findings_total{type}` per finding, the gauge `piishield_audit_mode`, and an hourly `PII-Shield audit: N would-be redactions (…) in M of L lines (x%)` line in the sidecar's log. The counters never hold the value that was found; the application's own logs for the period are the only place to see it. The eBPF audit agent (`injectionMode: ebpf`, [ebpf-audit.md](ebpf-audit.md)) exports the same counters and the same summary, so everything below applies to it too; it adds `piishield_ebpf_attached`, which is 0 when its program could not be loaded and the counts stay at zero for that reason.
 
 When `PIIShieldAuditWouldRedact` fires, or the share of `would_redact` lines is not what you expect:
 
