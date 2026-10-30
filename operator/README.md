@@ -46,7 +46,7 @@ Once installed, you can protect any application by applying a `PiiPolicy` and ad
    |------|--------|-------------|
    | `file` | Controlled rollout (default) | The sidecar tails a log file on a shared `emptyDir` volume. The recommended path; gate production use with [docs/production-adoption-checklist.md](../docs/production-adoption-checklist.md). |
    | `pipe` | **Experimental** | Rewrites the target container command through `/bin/sh -c` to redirect output into a named pipe. Can break distroless images (no shell), argument quoting, signal handling, and the app lifecycle. The webhook returns a warning on injection. Not recommended for production. |
-   | `ebpf` | Experimental / R&D | Kernel-level interception prototype. Not production-ready. |
+   | `ebpf` | **Experimental**, observation only | The eBPF audit agent: it shares the pod's pid namespace and counts what it would have redacted in the pod's stdout and stderr, without touching them. Requires `auditMode: true`, a kernel of 5.8 or newer with BTF, and the `BPF` and `PERFMON` capabilities on the agent container. There is no eBPF redaction. |
 
 ## Scanner Configuration via PiiPolicy
 
@@ -150,9 +150,18 @@ setting of the pod, like the salt and the fail policy, so it comes through
 the environment, not through the rules file: switching it off is a
 `kubectl rollout restart` of the workload. It works with `injectionMode`
 `file` (the sidecar reads a file the application writes and cannot block it)
-and `pipe` (the sidecar still sits in the stream's path, audit or not); with
-`ebpf` the API server rejects the policy, because the read-only eBPF audit
-of #32 is not implemented (#96).
+and `pipe` (the sidecar still sits in the stream's path, audit or not), and
+it is required with `ebpf`: that mode is the eBPF audit agent of #96, which
+watches the pod's stdout and stderr from outside their path and only
+observes, so the API server rejects `ebpf` without `auditMode`. The agent
+is injected as a native sidecar sharing the pod's pid namespace, as root
+with the `BPF`, `PERFMON` and `SYS_RESOURCE` capabilities and nothing else
+(no privileged flag, no hostPath), from the image `sidecar.ebpfImage` of the
+chart; it needs a kernel of 5.8 or newer with BTF (`/sys/kernel/btf/vmlinux`
+on the node). It exports the same audit counters on port 9090 and writes
+the same hourly summary. What it does not see: writes to files and sockets,
+and more than 8 KiB of one write. `tests/deployments/operator-ebpf/run.sh`
+runs it end to end in kind.
 
 ### Central rule repository (`remoteConfig`)
 
