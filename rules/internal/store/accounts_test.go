@@ -129,3 +129,23 @@ func TestSessions(t *testing.T) {
 		t.Errorf("sessions after sweep: %d %v", n, err)
 	}
 }
+
+// The address goes into the To: header of the sign-in mail, so anything
+// that could add a header or a second recipient must be refused here,
+// before the mail package's own one-line rule.
+func TestNormalizeEmailRefusesHeaderInjection(t *testing.T) {
+	for _, bad := range []string{
+		"anna@example.com\r\nBcc: eve@example.com",
+		"anna@example.com\nX-Injected: 1",
+		"anna@example.com\r\n\r\nbody",
+		"\"anna\r\nBcc: eve@example.com\"@example.com",
+		"Anna <anna@example.com>",
+		"<anna@example.com>",
+		"anna@example.com, eve@example.com",
+		"anna@example.com>\r\nBcc: <eve@example.com",
+	} {
+		if got, err := NormalizeEmail(bad); err == nil {
+			t.Errorf("NormalizeEmail(%q) = %q, want an error", bad, got)
+		}
+	}
+}
