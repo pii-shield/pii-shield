@@ -14,8 +14,10 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
-// Config selects the writes the kernel side copies out. Either the pid
-// namespace of the agent (every task in it but the agent) or one tgid.
+// Config selects the writes the kernel side copies out: the tasks of the
+// agent's pid namespace (PidNSDev, PidNSIno from SelfPidNS) but the agent
+// itself, or one tgid of that namespace. Tgids are as the namespace sees
+// them, the numbers the agent and the pod know.
 type Config struct {
 	PidNSDev   uint64
 	PidNSIno   uint64

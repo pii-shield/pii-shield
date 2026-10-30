@@ -67,4 +67,32 @@ grep -q 'password=hunter2hunter2' "$out"
 echo "✓ the child's output reached stdout unchanged"
 grep -q 'PII-Shield audit: .* in 1 of 2 lines (50.0%)' "$log"
 echo "✓ final summary: 1 of 2 lines"
+
+# The pod's case: no --exec, the agent watches every process of its pid
+# namespace. This shell is one of them, so its own lines are counted; on a
+# host namespace other processes may add to the counts, hence "at least".
+: >"$log"
+run_as_root "$agent" --listen "127.0.0.1:${port}" --stats-interval 1h >"$out" 2>"$log" &
+pid=$!
+for _ in $(seq 1 40); do
+  curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 && grep -q "watching stdout and stderr of every process" "$log" && break
+  sleep 0.25
+done
+echo "namespace mode: password=hunter2hunter2 token=abcDEF123456"
+echo "namespace mode: GET /health 200"
+ok=0
+for _ in $(seq 1 40); do
+  metrics="$(curl -fsS "http://127.0.0.1:${port}/metrics" 2>/dev/null || true)"
+  would="$(sed -n 's/^piishield_audit_lines_total{result="would_redact"} //p' <<<"$metrics")"
+  clean="$(sed -n 's/^piishield_audit_lines_total{result="clean"} //p' <<<"$metrics")"
+  if [[ -n "$would" && -n "$clean" ]] && (( ${would%%.*} >= 1 && ${clean%%.*} >= 1 )); then ok=1; break; fi
+  sleep 0.25
+done
+run_as_root kill -TERM "$pid" 2>/dev/null || true
+wait "$pid" || true
+if (( ok == 0 )); then
+  echo "namespace mode: the agent did not count this shell's lines" >&2
+  exit 1
+fi
+echo "✓ namespace mode: this shell's lines were counted (would_redact ${would}, clean ${clean})"
 echo "eBPF audit agent smoke: ok"

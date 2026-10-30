@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ func main() {
 	statsInterval := flag.Duration("stats-interval", envDuration("PII_STATS_LOG_INTERVAL", time.Hour), "how often the audit summary is logged (PII_STATS_LOG_INTERVAL)")
 	flushIdle := flag.Duration("flush-idle", 2*time.Second, "an unfinished line idle this long is counted as a line")
 	targetTgid := flag.Uint("target-tgid", 0, "watch one process instead of the pid namespace")
+	execFlag := flag.Bool("exec", false, "run the rest of the command line as a command and watch only it; exit with it")
 	flag.Usage = func() {
 		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: pii-shield-ebpf [flags] [--exec command args...]\n")
 		flag.PrintDefaults()
@@ -52,10 +54,7 @@ func main() {
 	// lines still reach whoever reads them; the probe sees the command's
 	// writes to them, not the agent's.
 	var child *exec.Cmd
-	if args := flag.Args(); len(args) > 0 {
-		if args[0] == "--exec" {
-			args = args[1:]
-		}
+	if args := flag.Args(); *execFlag || len(args) > 0 {
 		if len(args) == 0 {
 			log.Fatal("--exec needs a command")
 		}
@@ -63,24 +62,26 @@ func main() {
 		child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	}
 
-	cfg := probe.Config{SelfTgid: probe.Pid(), TargetTgid: uint32(*targetTgid)} //nolint:gosec // flag range
+	dev, ino, err := probe.SelfPidNS()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg := probe.Config{PidNSDev: dev, PidNSIno: ino, SelfTgid: probe.Pid(), TargetTgid: uint32(*targetTgid)} //nolint:gosec // flag range
 	if child != nil {
 		// The probe must be in place before the command's first write, so
-		// the command is started stopped and continued after the attach.
-		child.SysProcAttr = &syscall.SysProcAttr{}
+		// the command is traced: it stops in the kernel right after exec,
+		// before its first instruction, and is detached after the attach.
+		// ptrace calls must come from the thread that started the child.
+		runtime.LockOSThread()
+		child.SysProcAttr = &syscall.SysProcAttr{Ptrace: true}
 		if err := child.Start(); err != nil {
 			log.Fatalf("start %s: %v", child.Path, err)
 		}
-		if err := child.Process.Signal(syscall.SIGSTOP); err != nil {
-			log.Fatalf("stop %s: %v", child.Path, err)
+		var ws syscall.WaitStatus
+		if _, err := syscall.Wait4(child.Process.Pid, &ws, 0, nil); err != nil || !ws.Stopped() {
+			log.Fatalf("waiting for %s to stop at exec: %v (status %v)", child.Path, err, ws)
 		}
 		cfg.TargetTgid = uint32(child.Process.Pid) //nolint:gosec // a pid fits
-	} else if cfg.TargetTgid == 0 {
-		dev, ino, err := probe.SelfPidNS()
-		if err != nil {
-			log.Fatal(err)
-		}
-		cfg.PidNSDev, cfg.PidNSIno = dev, ino
 	}
 
 	p, err := probe.Load(cfg)
@@ -108,9 +109,10 @@ func main() {
 	}()
 
 	if child != nil {
-		if err := child.Process.Signal(syscall.SIGCONT); err != nil {
+		if err := syscall.PtraceDetach(child.Process.Pid); err != nil {
 			log.Fatalf("continue %s: %v", child.Path, err)
 		}
+		runtime.UnlockOSThread()
 		go func() {
 			err := child.Wait()
 			// Give the ring buffer a moment to deliver the last writes.

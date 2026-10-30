@@ -112,9 +112,11 @@ struct {
 } drops SEC(".maps");
 
 // Set by the agent before the program is loaded (ebpf.VariableSpec.Set).
-// Either a pid namespace (dev and inode of /proc/self/ns/pid: every task
-// in it except the agent is watched, the pod's case) or one target tgid
-// (the --exec case). The agent's own tgid is always skipped.
+// The pid namespace is the agent's own (dev and inode of
+// /proc/self/ns/pid); every tgid below is a tgid as seen in that
+// namespace, which is what the agent and the pod know, not the kernel's
+// root-namespace tgid. Without a target every task in the namespace but
+// the agent is watched (the pod's case); with one, only that tgid (--exec).
 volatile const __u64 cfg_pidns_dev = 0;
 volatile const __u64 cfg_pidns_ino = 0;
 volatile const __u32 cfg_self_tgid = 0;
@@ -161,17 +163,16 @@ int sys_enter(struct bpf_raw_tracepoint_args *ctx)
 	if (fd != 1 && fd != 2)
 		return 0;
 
-	__u32 tgid = bpf_get_current_pid_tgid() >> 32;
+	// A task outside the agent's pid namespace makes the helper fail,
+	// which is the filter; inside it, ns.tgid is the namespaced tgid.
+	struct bpf_pidns_info ns = {};
+	if (bpf_get_ns_current_pid_tgid(cfg_pidns_dev, cfg_pidns_ino, &ns, sizeof(ns)))
+		return 0;
+	__u32 tgid = ns.tgid;
 	if (tgid == cfg_self_tgid)
 		return 0;
-	if (cfg_target_tgid) {
-		if (tgid != cfg_target_tgid)
-			return 0;
-	} else if (cfg_pidns_ino) {
-		struct bpf_pidns_info ns = {};
-		if (bpf_get_ns_current_pid_tgid(cfg_pidns_dev, cfg_pidns_ino, &ns, sizeof(ns)))
-			return 0;
-	}
+	if (cfg_target_tgid && tgid != cfg_target_tgid)
+		return 0;
 
 	const void *buf = (const void *)SYSCALL_ARG2(regs);
 	__u64 count = SYSCALL_ARG3(regs);
