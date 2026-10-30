@@ -184,8 +184,6 @@ The Operator will automatically inject the `pii-shield-agent` using the Native S
 
 📋 **Free: 25-point Kubernetes Log PII Audit Checklist** — where PII leaks from pods, which log paths bypass your filters, and how to verify redaction actually works. [Get the checklist →](https://pii-shield.com/#checklist)
 
-📦 **GDPR Compliance Pack — available now (early access)**: 40+ tested redaction rules, DPO-ready docs, audit-trail templates. [$149 →](https://pii-shield.com/gdpr-pack?utm_source=github-readme&utm_medium=readme&utm_campaign=gdpr-pack) · HIPAA/PCI [on the waitlist →](https://pii-shield.com/#waitlist)
-
 💬 **Using PII-Shield?** [Tell us about your deployment →](https://tally.so/r/Gx4WoZ) — 2 minutes, and it shapes what gets built next.
 
 ## Verification
