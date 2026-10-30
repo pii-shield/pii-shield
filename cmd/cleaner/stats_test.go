@@ -86,16 +86,17 @@ func TestHumanBytes(t *testing.T) {
 	}
 }
 
-// TestStatsSignatureCountsAsOther pins where the signature detectors (F1:
+// TestStatsSignatureHasItsOwnBucket pins where the signature detectors (F1:
 // aws-key, github-token, jwt, …) land in the summary. The scanner reports
-// them as strategy "signature", which has no bucket of its own, so they are
-// counted as "other". A dedicated bucket has to change this test on purpose.
-func TestStatsSignatureCountsAsOther(t *testing.T) {
+// them as strategy "signature"; they were counted as "other" until the
+// audit mode (#32) gave them a bucket, so the summary names them.
+func TestStatsSignatureHasItsOwnBucket(t *testing.T) {
 	s := newStatsCollector()
 	s.recordRedaction("signature")
 	s.recordLine(10)
-	if got := s.summary(); !strings.Contains(got, "1 redactions") || !strings.Contains(got, "1 other") {
-		t.Errorf("signature redaction not counted as other: %q", got)
+	got := s.summary()
+	if !strings.Contains(got, "1 redactions") || !strings.Contains(got, "1 signatures") || strings.Contains(got, "other") {
+		t.Errorf("signature redaction not counted in its own bucket: %q", got)
 	}
 }
 

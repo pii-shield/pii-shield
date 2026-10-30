@@ -126,6 +126,7 @@ See [CONFIGURATION.md](CONFIGURATION.md) for a full list of environment variable
 - `PII_DISABLE_BIGRAM_CHECK`: Optimize for non-English logs.
 - `PII_CUSTOM_REGEX_LIST`: Custom regex rules for deterministic redaction.
 - `PII_SAFE_REGEX_LIST`: Whitelist regex rules to ignore (matches are returned as-is).
+- `PII_MODE=audit`: Dry run. Lines pass through unchanged and what would have been redacted is counted (`piishield_audit_*` metrics), so you can watch real traffic before turning redaction on.
 
 ### Entropy Sensitivity Table (Default Threshold: 3.6)
 
