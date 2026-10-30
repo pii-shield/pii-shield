@@ -40,16 +40,19 @@ type Config struct {
 	PolicyRate float64
 	Logger     *slog.Logger
 
-	// BaseURL is the public address of the server, for the links in mail
-	// and as a second accepted Origin; empty means the request's own host.
+	// BaseURL is the public address of the server (scheme and host), for
+	// the links in mail and as a second accepted Origin. It is required
+	// when a Mailer is set: the links are never built from the request's
+	// Host header, which a client chooses, so a forged Host cannot send a
+	// real sign-in token to another site.
 	BaseURL string
 	// Mailer sends the magic links; nil disables the sign-in.
 	Mailer mail.Mailer
 	// Signup lets an address without an account create an organization by
 	// signing in; off, only invited addresses can sign in.
 	Signup bool
-	// TrustProxy reads the client address and scheme from X-Forwarded-For
-	// and X-Forwarded-Proto, for a server behind a reverse proxy.
+	// TrustProxy reads the client address from X-Forwarded-For, for a
+	// server behind a reverse proxy (the rate limits key on it).
 	TrustProxy bool
 	// InsecureCookies drops the Secure flag of the session cookie, for a
 	// server reached over plain http on localhost.
@@ -95,6 +98,11 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, error) {
 	}
 	if cfg.LoginTTL <= 0 {
 		cfg.LoginTTL = DefaultLoginTTL
+	}
+	if cfg.Mailer != nil {
+		if err := checkBaseURL(cfg.BaseURL); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.SingleTenant {
 		if _, err := st.CreateOrg(ctx, DefaultOrg, "Default"); err != nil && !errors.Is(err, store.ErrExists) {

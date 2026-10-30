@@ -61,9 +61,9 @@ Every flag has an environment variable; the flag wins when both are set.
 | `--db` | `RULES_DB` | `rules.db` (`/data/rules.db` in the image) | The SQLite file, WAL mode. |
 | `--single-tenant` | `RULES_SINGLE_TENANT=true` | off | One organization `default`, no sign-in; for a server behind your own access control. |
 | `--policy-rate` | | `1` | `policy.json` pulls allowed per token per second (burst 10). |
-| `--base-url` | `RULES_BASE_URL` | the request's host | Public address of the server, used in the sign-in links. Set it behind a reverse proxy. |
+| `--base-url` | `RULES_BASE_URL` | required with SMTP; otherwise `http://localhost:<port>` from `--listen` | Public address of the server (`https://rules.example.com`), the only source of the sign-in links. They are never built from the request's `Host` header, which a client chooses: a forged `Host` would otherwise mail a real sign-in token inside a link to another site. With `RULES_SMTP_ADDR` set and no base URL the server refuses to start. |
 | `--signup` | `RULES_SIGNUP=open\|invite` | `open` | `open`: a new address creates its own organization by signing in. `invite`: only invited addresses can sign in. |
-| `--trust-proxy` | `RULES_TRUST_PROXY=true` | off | Read the client address and scheme from `X-Forwarded-For` and `X-Forwarded-Proto`. Only behind a proxy you control, because the rate limits key on that address. |
+| `--trust-proxy` | `RULES_TRUST_PROXY=true` | off | Read the client address from `X-Forwarded-For`. Only behind a proxy you control, because the rate limits key on that address. |
 | `--insecure-cookies` | `RULES_INSECURE_COOKIES=true` | off | Session cookie without `Secure`, for plain http on localhost. |
 | | `RULES_ADMIN_TOKEN` | unset | A token that opens every organization to `curl` (`Authorization: Bearer …`). Optional once people sign in through the panel. |
 | | `RULES_SMTP_ADDR` | unset | `host:port` of the mail server for the sign-in links. Port 465 is TLS at once; any other port starts clear and upgrades with STARTTLS, which is required when a password is set, so a password never crosses the wire in clear. |
@@ -78,7 +78,7 @@ enough for a server other people sign in to.
 ### In front of it
 
 Put TLS in front of the server, a reverse proxy or an ingress, and pass the
-original host and scheme on (`--trust-proxy`, `--base-url`). The operator
+client address on (`--trust-proxy`) and set the public address (`--base-url`). The operator
 refuses an `http://` source unless the policy sets `allowInsecure`, and the
 session cookie carries `Secure`, so a plain-http server works only on
 localhost with `--insecure-cookies`.

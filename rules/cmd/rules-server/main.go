@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -23,9 +24,9 @@ func main() {
 	dbPath := flag.String("db", envOr("RULES_DB", "rules.db"), "path of the SQLite database")
 	singleTenant := flag.Bool("single-tenant", os.Getenv("RULES_SINGLE_TENANT") == "true", "serve one organization without a login (self-hosted, behind your own access control)")
 	policyRate := flag.Float64("policy-rate", 1, "policy.json pulls allowed per token per second (burst 10)")
-	baseURL := flag.String("base-url", os.Getenv("RULES_BASE_URL"), "public address of this server, for the links in mail (default: the request's host)")
+	baseURL := flag.String("base-url", os.Getenv("RULES_BASE_URL"), "public address of this server, for the links in mail; required with RULES_SMTP_ADDR")
 	signup := flag.Bool("signup", envOr("RULES_SIGNUP", "open") == "open", "let a new e-mail address create an organization by signing in (RULES_SIGNUP=open|invite)")
-	trustProxy := flag.Bool("trust-proxy", os.Getenv("RULES_TRUST_PROXY") == "true", "read the client address and scheme from X-Forwarded-For and X-Forwarded-Proto")
+	trustProxy := flag.Bool("trust-proxy", os.Getenv("RULES_TRUST_PROXY") == "true", "read the client address from X-Forwarded-For")
 	insecureCookies := flag.Bool("insecure-cookies", os.Getenv("RULES_INSECURE_COOKIES") == "true", "session cookie without the Secure flag, for plain http on localhost")
 	flag.Parse()
 
@@ -39,9 +40,17 @@ func main() {
 			fmt.Fprintln(os.Stderr, "rules-server: RULES_SMTP_ADDR is set, so RULES_MAIL_FROM is required")
 			os.Exit(2)
 		}
+		if *baseURL == "" {
+			fmt.Fprintln(os.Stderr, "rules-server: RULES_SMTP_ADDR is set, so RULES_BASE_URL (--base-url) is required: the sign-in links in mail are built from it and never from the request's Host header")
+			os.Exit(2)
+		}
 	} else if !*singleTenant {
 		mailer = mail.Log{Logger: log}
-		log.Warn("no RULES_SMTP_ADDR: sign-in links are written to this log instead of being mailed; set RULES_SMTP_ADDR, RULES_SMTP_USER, RULES_SMTP_PASSWORD and RULES_MAIL_FROM for a server other people reach")
+		log.Warn("no RULES_SMTP_ADDR: sign-in links are written to this log instead of being mailed; set RULES_SMTP_ADDR, RULES_SMTP_USER, RULES_SMTP_PASSWORD, RULES_MAIL_FROM and RULES_BASE_URL for a server other people reach")
+		if *baseURL == "" {
+			*baseURL = localBaseURL(*listen)
+			log.Warn("no RULES_BASE_URL: the sign-in links in the log point to " + *baseURL + "; set RULES_BASE_URL to the address people open")
+		}
 	}
 	if *singleTenant && adminToken == "" {
 		log.Warn("single-tenant without RULES_ADMIN_TOKEN: the panel and the management API are open to anyone who reaches this address")
@@ -79,6 +88,20 @@ func main() {
 		log.Error("serve", "err", err)
 		os.Exit(1)
 	}
+}
+
+// localBaseURL is the address of a server on this machine listening on
+// listen (":8080", "127.0.0.1:9000", "[::1]:8080"), for the links a
+// laptop copy writes to its log.
+func localBaseURL(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil || port == "" {
+		return "http://localhost:8080"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 func envOr(key, def string) string {

@@ -28,11 +28,13 @@ copying the file or with Litestream), `--policy-rate` (pulls per token per
 second, default 1, burst 10), `--single-tenant` (`RULES_SINGLE_TENANT=true`:
 one organization named `default`, no sign-in, for a server that sits
 behind a port-forward or your own access control), `--base-url`
-(`RULES_BASE_URL`, the public address for the links in mail), `--signup`
+(`RULES_BASE_URL`, the public address for the links in mail and their only
+source, never the request's `Host`; required with SMTP, otherwise
+`http://localhost:<port>`), `--signup`
 (`RULES_SIGNUP=open|invite`, default open: a new address creates its own
 organization by signing in; `invite` lets only invited addresses in),
-`--trust-proxy` (`RULES_TRUST_PROXY=true`, read the client address and
-scheme from `X-Forwarded-For` and `X-Forwarded-Proto` behind a reverse
+`--trust-proxy` (`RULES_TRUST_PROXY=true`, read the client address from
+`X-Forwarded-For` behind a reverse
 proxy), `--insecure-cookies` (`RULES_INSECURE_COOKIES=true`, session cookie
 without `Secure`, for plain http on localhost). Mail: `RULES_SMTP_ADDR`
 (host:port; 465 is TLS at once, any other port starts clear and upgrades

@@ -5,11 +5,14 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pii-shield/pii-shield/rules/internal/store"
 )
 
 // capture keeps the mails the server sends.
@@ -118,7 +121,7 @@ func (u tsURL) URLString() string { return u.url }
 
 func TestMagicLinkSignInSignupAndOrgScope(t *testing.T) {
 	mails := &capture{}
-	ts := newTestServer(t, Config{AdminToken: admin, PolicyRate: 1000, Mailer: mails, Signup: true, InsecureCookies: true})
+	ts := newTestServer(t, Config{AdminToken: admin, PolicyRate: 1000, Mailer: mails, BaseURL: "https://rules.example.test", Signup: true, InsecureCookies: true})
 	u := tsURL{ts.URL}
 
 	// Anonymous: the API is closed, the panel page is served.
@@ -214,7 +217,7 @@ func TestMagicLinkSignInSignupAndOrgScope(t *testing.T) {
 
 func TestSessionRequestsNeedTheHeaderAndTheOrigin(t *testing.T) {
 	mails := &capture{}
-	ts := newTestServer(t, Config{PolicyRate: 1000, Mailer: mails, Signup: true, InsecureCookies: true})
+	ts := newTestServer(t, Config{PolicyRate: 1000, Mailer: mails, BaseURL: "https://rules.example.test", Signup: true, InsecureCookies: true})
 	anna := signIn(t, tsURL{ts.URL}, mails, "anna@example.com")
 	setBody := `{"slug": "s"}`
 	cases := map[string]map[string]string{
@@ -247,7 +250,7 @@ func TestSessionRequestsNeedTheHeaderAndTheOrigin(t *testing.T) {
 
 func TestSignupClosedAndBadLinks(t *testing.T) {
 	mails := &capture{}
-	ts := newTestServer(t, Config{AdminToken: admin, PolicyRate: 1000, Mailer: mails, Signup: false, InsecureCookies: true})
+	ts := newTestServer(t, Config{AdminToken: admin, PolicyRate: 1000, Mailer: mails, BaseURL: "https://rules.example.test", Signup: false, InsecureCookies: true})
 	b := newBrowser(t, ts.URL)
 	// An unknown address gets the same answer and no mail.
 	if code, _, body := b.do("POST", "/auth/login", `{"email": "nobody@example.com"}`, nil); code != 200 || !strings.Contains(body, "on its way") {
@@ -296,7 +299,7 @@ func TestSignupClosedAndBadLinks(t *testing.T) {
 
 func TestLoginIsRateLimited(t *testing.T) {
 	mails := &capture{}
-	ts := newTestServer(t, Config{AdminToken: admin, PolicyRate: 1000, Mailer: mails, Signup: true, InsecureCookies: true})
+	ts := newTestServer(t, Config{AdminToken: admin, PolicyRate: 1000, Mailer: mails, BaseURL: "https://rules.example.test", Signup: true, InsecureCookies: true})
 	b := newBrowser(t, ts.URL)
 	// Three links per address, then 429; the per-IP limit is five, so
 	// use distinct addresses to reach it after the first three.
@@ -370,5 +373,52 @@ func TestKeyedLimiterPrunesIdleBuckets(t *testing.T) {
 	k.mu.Unlock()
 	if n != 0 {
 		t.Errorf("after prune: %d", n)
+	}
+}
+
+// A sign-in link is built from the configured base URL only. A forged
+// Host header must not move it to another site: the token in it is real.
+func TestSignInLinkIgnoresTheRequestHost(t *testing.T) {
+	mails := &capture{}
+	ts := newTestServer(t, Config{PolicyRate: 1000, Mailer: mails, BaseURL: "https://rules.example.test/", Signup: true, InsecureCookies: true})
+	req, _ := http.NewRequest("POST", ts.URL+"/auth/login", strings.NewReader(`{"email": "victim@example.com"}`))
+	req.Host = "evil.example"
+	req.Header.Set("X-Requested-With", "fetch")
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("login with a forged Host: %d", resp.StatusCode)
+	}
+	link, _ := mails.lastLink(t)
+	if !strings.HasPrefix(link, "https://rules.example.test/auth/verify?token=") {
+		t.Errorf("the link follows the request instead of the configured base URL: %s", link)
+	}
+	if strings.Contains(link, "evil.example") {
+		t.Errorf("the forged Host reached the mail: %s", link)
+	}
+}
+
+// A server that sends mail must know its own address.
+func TestNewRefusesAMailerWithoutABaseURL(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "rules.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	for _, bad := range []string{"", "rules.example.test", "ftp://rules.example.test", "https://", "https://u:p@rules.example.test", "https://rules.example.test/?x=1", "https://rules.example.test/#a"} {
+		if _, err := New(context.Background(), st, Config{Mailer: &capture{}, BaseURL: bad}); err == nil {
+			t.Errorf("base URL %q with a mailer was accepted", bad)
+		}
+	}
+	if _, err := New(context.Background(), st, Config{Mailer: &capture{}, BaseURL: "http://localhost:8080"}); err != nil {
+		t.Errorf("a plain local base URL was refused: %v", err)
+	}
+	if _, err := New(context.Background(), st, Config{}); err != nil {
+		t.Errorf("no mailer needs no base URL: %v", err)
 	}
 }

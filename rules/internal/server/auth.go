@@ -159,17 +159,27 @@ func (s *Server) baseHost() string {
 	return u.Host
 }
 
-// baseURL is the public address of this server for the links in mail:
-// the configured one, else the scheme and host of the request.
-func (s *Server) baseURL(r *http.Request) string {
-	if s.cfg.BaseURL != "" {
-		return strings.TrimRight(s.cfg.BaseURL, "/")
+// baseURL is the public address of this server for the links in mail.
+// It is the configured one and nothing else: building it from the
+// request's Host header would let anyone who can reach the server have a
+// real sign-in token mailed to a victim inside a link to their own site
+// (New refuses a Mailer without a BaseURL, so this is never empty when a
+// link is sent).
+func (s *Server) baseURL() string {
+	return strings.TrimRight(s.cfg.BaseURL, "/")
+}
+
+// checkBaseURL accepts an absolute http or https address with a host and
+// nothing after the path.
+func checkBaseURL(raw string) error {
+	if raw == "" {
+		return errors.New("a base URL (RULES_BASE_URL) is required to send sign-in links: they are never built from the request's Host header")
 	}
-	scheme := "http"
-	if r.TLS != nil || (s.cfg.TrustProxy && r.Header.Get("X-Forwarded-Proto") == "https") {
-		scheme = "https"
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("base URL %q: want http:// or https:// with a host, no user, query or fragment", raw)
 	}
-	return scheme + "://" + r.Host
+	return nil
 }
 
 // clientIP is the address the login limits are keyed by: the first
@@ -258,7 +268,7 @@ func (s *Server) sendLink(r *http.Request, email, subject, bodyFormat string) er
 	if err != nil {
 		return err
 	}
-	link := s.baseURL(r) + "/auth/verify?token=" + url.QueryEscape(value)
+	link := s.baseURL() + "/auth/verify?token=" + url.QueryEscape(value)
 	return s.cfg.Mailer.Send(r.Context(), email, subject, fmt.Sprintf(bodyFormat, link))
 }
 
