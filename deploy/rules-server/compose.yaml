@@ -23,7 +23,7 @@ services:
     restart: "no"
 
   rules:
-    image: ${RULES_IMAGE:-ghcr.io/pii-shield/pii-shield-rules:2.3.1}
+    image: ${RULES_IMAGE:-ghcr.io/pii-shield/pii-shield-rules:3.0.0}
     command: ["--trust-proxy"]
     environment:
       RULES_DB: /data/rules.db

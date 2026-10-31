@@ -81,7 +81,7 @@ docker run -d --name pii-shield-rules \
   -p 127.0.0.1:8080:8080 \
   -v pii-shield-rules:/data \
   -e RULES_ADMIN_TOKEN="$(openssl rand -hex 24)" \
-  ghcr.io/pii-shield/pii-shield-rules:2.3.1 --single-tenant
+  ghcr.io/pii-shield/pii-shield-rules:3.0.0 --single-tenant
 ```
 
 That is the smallest useful server: one organization named `default`, no
@@ -159,7 +159,7 @@ load balancer:
 docker run -d -p 127.0.0.1:8080:8080 \
   -e RULES_DB='postgres://rules:…@db.internal:5432/rules?sslmode=require' \
   -e RULES_BASE_URL=https://rules.example.com -e RULES_SMTP_ADDR=… \
-  ghcr.io/pii-shield/pii-shield-rules:2.3.1
+  ghcr.io/pii-shield/pii-shield-rules:3.0.0
 ```
 
 The first instance creates the tables; one that starts at the same time
