@@ -6,6 +6,7 @@
 package remoterules
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -193,4 +194,44 @@ func Retry(seconds int32) time.Duration {
 		return d
 	}
 	return RetryInterval
+}
+
+// Post sends body as JSON to src.URL under the same rules as a pull: https
+// only unless AllowInsecure, the Authorization header and CA bundle of the
+// source, the timeout, no redirects to http. The stats channel sends its
+// reports with it. Any answer but 2xx is an error.
+func Post(ctx context.Context, src Source, body []byte) error {
+	if err := checkURL(src.URL, src.AllowInsecure); err != nil {
+		return err
+	}
+	transport, err := newTransport(src)
+	if err != nil {
+		return err
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{
+		Timeout:   Timeout,
+		Transport: transport,
+		// A redirect would turn the POST into a GET; refuse it instead.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, src.URL, bytes.NewReader(body))
+	if err != nil {
+		return fail(ReasonFetchFailed, "build request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Content-Type", "application/json")
+	if src.Authorization != "" {
+		req.Header.Set("Authorization", src.Authorization)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fail(ReasonFetchFailed, "POST %s: %w", src.URL, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fail(ReasonFetchFailed, "POST %s: HTTP %d", src.URL, resp.StatusCode)
+	}
+	return nil
 }

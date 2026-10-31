@@ -38,6 +38,7 @@ import (
 
 	corev1alpha1 "github.com/pii-shield/pii-shield/operator/api/v1alpha1"
 	"github.com/pii-shield/pii-shield/operator/internal/controller"
+	"github.com/pii-shield/pii-shield/operator/internal/stats"
 	piiwebhook "github.com/pii-shield/pii-shield/operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
@@ -186,6 +187,13 @@ func main() {
 		APIReader: mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "PiiPolicy")
+		os.Exit(1)
+	}
+
+	// The stats channel (spec.stats): reads the sidecars' counters inside the
+	// cluster and sends one summary per interval; on the leader only.
+	if err := mgr.Add(&stats.Reporter{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()}); err != nil {
+		setupLog.Error(err, "Failed to add the stats channel")
 		os.Exit(1)
 	}
 

@@ -210,6 +210,77 @@ type PiiPolicySpec struct {
 	// whose agent only observes (#96).
 	// +optional
 	AuditMode bool `json:"auditMode,omitempty"`
+
+	// Stats, when set, turns on the stats channel: the sidecars of this
+	// policy expose their counters inside the cluster, the operator reads
+	// them, and every IntervalSeconds sends one summary of counters to URL.
+	// Off by default. See StatsConfig.
+	// +optional
+	Stats *StatsConfig `json:"stats,omitempty"`
+}
+
+// StatsConfig sends a summary of the policy's counters to a receiver: a
+// rule server, or anything that accepts the JSON report (schema
+// pii-shield-stats-v1) with a POST. Only counters leave the cluster: lines
+// seen, values hidden by detector type, errors, how many pods report and
+// which rule revision they run. Never a log line, a value or a hash. The
+// sidecars are not reached from outside; the operator reads them inside the
+// cluster and is the only one that sends. Pods injected before stats were
+// turned on expose no counters until they restart.
+type StatsConfig struct {
+	// URL the report is POSTed to. Must be https:// unless AllowInsecure is
+	// set. For a rule server: https://<server>/v1/<org>/<set>/report.
+	// +kubebuilder:validation:Pattern=`^https?://`
+	// +kubebuilder:validation:MinLength=8
+	URL string `json:"url"`
+
+	// IntervalSeconds is how often a report is sent. Default 300, minimum 60.
+	// The counters are read every 30 seconds in between.
+	// +kubebuilder:validation:Minimum=60
+	// +optional
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
+
+	// ClusterName names this cluster in the reports, so a receiver can tell
+	// clusters that share a token apart. Default: empty.
+	// +kubebuilder:validation:MaxLength=128
+	// +optional
+	ClusterName string `json:"clusterName,omitempty"`
+
+	// HeaderSecretRef names a key in a Secret in the policy's namespace whose
+	// value is sent as the whole Authorization header, for example
+	// "Bearer pss_…", a rule server's report token. Use a token that can
+	// only send reports, never the one that pulls rules.
+	// +optional
+	HeaderSecretRef *corev1.SecretKeySelector `json:"headerSecretRef,omitempty"`
+
+	// CABundleSecretRef names a key in a Secret in the policy's namespace
+	// that holds a PEM bundle used to verify the receiver's certificate.
+	// +optional
+	CABundleSecretRef *corev1.SecretKeySelector `json:"caBundleSecretRef,omitempty"`
+
+	// AllowInsecure permits an http:// URL and skips certificate
+	// verification. For tests and lab clusters only.
+	// +optional
+	AllowInsecure bool `json:"allowInsecure,omitempty"`
+}
+
+// StatsStatus reports the stats channel.
+type StatsStatus struct {
+	// LastReportTime is when the receiver last accepted a report.
+	// +optional
+	LastReportTime *metav1.Time `json:"lastReportTime,omitempty"`
+
+	// LastError is why the latest report or read failed; empty after a
+	// success.
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+
+	// PodsReporting and PodsTotal count the policy's pods whose counters
+	// were read at the latest pass, and all of its injected pods.
+	// +optional
+	PodsReporting int32 `json:"podsReporting,omitempty"`
+	// +optional
+	PodsTotal int32 `json:"podsTotal,omitempty"`
 }
 
 // RemoteStatus reports the last good pull from spec.remoteConfig.
@@ -275,6 +346,10 @@ type PiiPolicyStatus struct {
 	// RemoteSynced condition carries the outcome of the latest pull.
 	// +optional
 	Remote *RemoteStatus `json:"remote,omitempty"`
+
+	// Stats describes the stats channel; unset when spec.stats is unset.
+	// +optional
+	Stats *StatsStatus `json:"stats,omitempty"`
 }
 
 // +kubebuilder:object:root=true

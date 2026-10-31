@@ -361,6 +361,95 @@ spec:
                 items:
                   type: string
                 type: array
+              stats:
+                description: |-
+                  Stats, when set, turns on the stats channel: the sidecars of this
+                  policy expose their counters inside the cluster, the operator reads
+                  them, and every IntervalSeconds sends one summary of counters to URL.
+                  Off by default. See StatsConfig.
+                properties:
+                  allowInsecure:
+                    description: |-
+                      AllowInsecure permits an http:// URL and skips certificate
+                      verification. For tests and lab clusters only.
+                    type: boolean
+                  caBundleSecretRef:
+                    description: |-
+                      CABundleSecretRef names a key in a Secret in the policy's namespace
+                      that holds a PEM bundle used to verify the receiver's certificate.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  clusterName:
+                    description: |-
+                      ClusterName names this cluster in the reports, so a receiver can tell
+                      clusters that share a token apart. Default: empty.
+                    maxLength: 128
+                    type: string
+                  headerSecretRef:
+                    description: |-
+                      HeaderSecretRef names a key in a Secret in the policy's namespace whose
+                      value is sent as the whole Authorization header, for example
+                      "Bearer pss_…", a rule server's report token. Use a token that can
+                      only send reports, never the one that pulls rules.
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  intervalSeconds:
+                    description: |-
+                      IntervalSeconds is how often a report is sent. Default 300, minimum 60.
+                      The counters are read every 30 seconds in between.
+                    format: int32
+                    minimum: 60
+                    type: integer
+                  url:
+                    description: |-
+                      URL the report is POSTed to. Must be https:// unless AllowInsecure is
+                      set. For a rule server: https://<server>/v1/<org>/<set>/report.
+                    minLength: 8
+                    pattern: ^https?://
+                    type: string
+                required:
+                - url
+                type: object
             required:
             - injectionMode
             type: object
@@ -487,6 +576,30 @@ spec:
                   RenderedPolicyHash is a content hash of the rendered rules file; it
                   changes only when the rules do.
                 type: string
+              stats:
+                description: Stats describes the stats channel; unset when spec.stats
+                  is unset.
+                properties:
+                  lastError:
+                    description: |-
+                      LastError is why the latest report or read failed; empty after a
+                      success.
+                    type: string
+                  lastReportTime:
+                    description: LastReportTime is when the receiver last accepted
+                      a report.
+                    format: date-time
+                    type: string
+                  podsReporting:
+                    description: |-
+                      PodsReporting and PodsTotal count the policy's pods whose counters
+                      were read at the latest pass, and all of its injected pods.
+                    format: int32
+                    type: integer
+                  podsTotal:
+                    format: int32
+                    type: integer
+                type: object
             type: object
         required:
         - spec

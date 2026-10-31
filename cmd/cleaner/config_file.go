@@ -89,6 +89,8 @@ func (r *policyReloader) check() bool {
 	if r.metrics {
 		metrics.ConfigReloadsTotal.Inc()
 		metrics.ConfigLastReloadTimestamp.SetToCurrentTime()
+		metrics.ConfigRevisionInfo.Reset()
+		metrics.ConfigRevisionInfo.WithLabelValues(rev).Set(1)
 	}
 	log.Printf("Policy file %s loaded (revision %q)", r.path, rev)
 	return true
