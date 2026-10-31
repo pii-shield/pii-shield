@@ -1,0 +1,13 @@
+# Caddy gets and renews the certificate for RULES_DOMAIN by itself (the
+# domain's A/AAAA record must point at this machine and ports 80 and 443
+# must be open) and passes the client address on in X-Forwarded-For, which
+# the server reads because it runs with --trust-proxy.
+
+{$RULES_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy rules:8080
+}

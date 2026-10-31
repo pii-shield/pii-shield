@@ -178,6 +178,13 @@ Hosting the file:
 2. Put the whole `Authorization` header value (for example `Bearer <token>`) in a Secret in the policy's namespace and reference it with `headerSecretRef`; put a private CA bundle in a Secret and reference it with `caBundleSecretRef`. The operator reads both at every pull, so a change takes effect at the next interval.
 3. Validate a new file before publishing it: run the agent with `PII_CONFIG_FILE=<file>` on a sample line, or push it to a staging policy first. The operator rejects an invalid file whole and reports `InvalidJSON`, `InvalidRegex` or `InvalidValue` in the `RemoteSynced` condition while the sidecars keep the previous rules.
 
+Rotating a signing key (policies with `remoteConfig.signature`):
+
+1. Make the new key and register it with the source (on a rule server, the Signing keys page).
+2. Add its public key to `signature.publicKeys` next to the old one in every policy that pulls the set.
+3. Publish once with the new key; check `status.remote.signedBy` shows its id.
+4. Remove the old key from `publicKeys`, then revoke it at the source. A key that may have leaked is removed from `publicKeys` first: until then a cluster accepts what it signs.
+
 Rotating the token:
 
 1. Add the new token to the source so both tokens are accepted.
@@ -186,7 +193,7 @@ Rotating the token:
 
 When `PIIShieldRemoteRulesStale` or `PIIShieldRemoteRulesSyncErrors` fires:
 
-1. `kubectl describe piipolicy <name>`: the `RemoteSynced` condition names the reason (`FetchFailed` with the HTTP status or the network error, `SecretNotFound`, `TooLarge`, `InsecureURL`, or a validation reason) and `status.remote` says when the last good pull was and which revision it carried.
+1. `kubectl describe piipolicy <name>`: the `RemoteSynced` condition names the reason (`FetchFailed` with the HTTP status or the network error, `SecretNotFound`, `TooLarge`, `InsecureURL`, a validation reason, or with signatures `SignatureMissing`, `SignatureInvalid`, `SignatureUntrusted`, `SignatureReplayed`, `SignatureConfig`) and `status.remote` says when the last good pull was and which revision it carried.
 2. Fix the source, the Secret or the file. The next pull happens within 60 s of the fix, or sooner if you edit the policy (any spec change triggers a pull).
 3. Nothing needs a restart: the sidecars pick the merged file up from the ConfigMap about a minute after the operator writes it.
 

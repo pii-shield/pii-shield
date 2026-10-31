@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -180,4 +181,44 @@ func caPEM(t *testing.T, srv *httptest.Server) []byte {
 		t.Fatal(err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+}
+
+func TestPost(t *testing.T) {
+	var got []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok":
+			if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Authorization") != "Bearer pss_x" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			got, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		case "/moved":
+			http.Redirect(w, r, "/ok", http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	src := Source{URL: srv.URL + "/ok", Authorization: "Bearer pss_x", AllowInsecure: true}
+	if err := Post(ctx, src, []byte(`{"a":1}`)); err != nil || string(got) != `{"a":1}` {
+		t.Fatalf("post: %v %q", err, got)
+	}
+	for path, want := range map[string]string{"/down": "HTTP 503", "/moved": "HTTP 302"} {
+		src.URL = srv.URL + path
+		if err := Post(ctx, src, []byte(`{}`)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %s", path, err, want)
+		}
+	}
+	if err := Post(ctx, Source{URL: srv.URL + "/ok"}, nil); err == nil || !strings.Contains(err.Error(), "not https") {
+		t.Errorf("http without allowInsecure: %v", err)
+	}
+	if err := Post(ctx, Source{URL: "https://x.test/r", CABundle: []byte("not pem")}, nil); err == nil {
+		t.Error("a bad CA bundle must fail")
+	}
+	if err := Post(ctx, Source{URL: "http://127.0.0.1:1/r", AllowInsecure: true}, nil); err == nil {
+		t.Error("an unreachable receiver must fail")
+	}
 }

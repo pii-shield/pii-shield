@@ -3,11 +3,13 @@
 The rule server keeps rule sets for the operator's `spec.remoteConfig`
 (#36): a security team publishes a version here, and every cluster whose
 `PiiPolicy` names the set pulls it with a read-only token, without a pod
-restart. Nothing about a cluster is sent here; the server only answers
-`GET`. One binary serves the hosted service and a self-hosted copy inside
-your own perimeter.
+restart. Nothing about a cluster is sent here unless the cluster turns on
+the stats channel, which sends counters only. One binary serves many
+organizations with sign-in, or one team behind your own access control
+(`--single-tenant`), inside your own perimeter.
 
-Status: first version (milestone 3.0, #95). The model, the SQLite store,
+Status: first version (milestone 3.0, #95). The model, the store on
+SQLite or Postgres,
 the public `policy.json` with ETag and tokens, a management API, a validate
 and a preview call that run a draft on the real scanner, a panel with a
 magic-link sign-in, and the image `ghcr.io/pii-shield/pii-shield-rules`.
@@ -23,8 +25,9 @@ RULES_ADMIN_TOKEN=$(openssl rand -hex 24) ./rules-server --listen :8080 --db rul
 ```
 
 Flags and env: `--listen` (`RULES_LISTEN`, default `:8080`), `--db`
-(`RULES_DB`, default `rules.db`, one SQLite file in WAL mode: back it up by
-copying the file or with Litestream), `--policy-rate` (pulls per token per
+(`RULES_DB`, default `rules.db`, one SQLite file in WAL mode: back it up
+with `sqlite3 .backup` or Litestream; or a `postgres://` URL that several
+processes share), `--policy-rate` (pulls per token per
 second, default 1, burst 10), `--single-tenant` (`RULES_SINGLE_TENANT=true`:
 one organization named `default`, no sign-in, for a server that sits
 behind a port-forward or your own access control), `--base-url`
@@ -107,6 +110,37 @@ immutable and numbered from 1; `revision` in the served file is that
 number. Publishing an older revision is the rollback. The token value is
 shown once in the response; only its hash is stored.
 
+Signed publications: `POST /api/orgs/{org}/signing-keys` registers a
+public key (`{"name", "publicKey": "ed25519:<base64>"}`; `internal/signing`
+defines the statement and the key id); from the first key on, `publish`
+needs `publication`, `keyId` and `signature`, the Ed25519 signature of the
+`text` from `GET .../publish/statement?revision=N`, checked inside the
+publish transaction against the stored file. `GET /v1/{org}/{set}/policy.json.sig`
+serves it to the cluster. The operator's check is
+`operator/internal/remoterules/signature.go`; the two must stay in step.
+The panel keeps its key as a non-extractable WebCrypto key in IndexedDB.
+Described for users in [docs/rules-server.md](../docs/rules-server.md#signed-publications).
+
+Activity log: `internal/store/audit.go` (append-only, triggers refuse
+`UPDATE` and `DELETE`), written by `Server.audit` after each change in
+`internal/server`; `GET /api/orgs/{org}/audit?limit=&before=`. A token keeps
+its last pull (`last_used_at`, `last_used_ip`, written at most once a
+minute) instead of an entry per pull.
+
+Stats reports: a token has a kind, `pull` (`psr_`, reads `policy.json`
+and `.sig`) or `report` (`pss_`, only `POST /v1/{org}/{set}/report`); each
+is refused on the other's path with `403`. A report is the operator's
+`pii-shield-stats-v1` JSON (`operator/internal/stats.Report`), checked and
+stored in `reports` (`internal/store/reports.go`, kept 90 days);
+`GET .../clusters?hours=` summarizes them per token, cluster and policy for
+the panel's Clusters tab.
+
+Watching it (`internal/server/observe.go`, `internal/store/pulls.go`): a
+daily pull count per token (`pull_counts`, 90 days), Prometheus metrics on
+`--metrics-listen`, and an access log line per request (`--access-log`, on
+by default) with the route pattern and the token prefix, never a token
+value or a header.
+
 Other calls: `GET /api/orgs`, `GET /api/orgs/{org}/sets`,
 `GET /api/orgs/{org}/sets/{set}` (set, versions, tokens, the policy path),
 `GET .../versions`, `GET .../versions/{rev}`, `GET .../publications`
@@ -169,7 +203,17 @@ set with nothing published is `404`. Pulls are rate-limited per token
 
 ```bash
 cd rules && go test -race ./...
+# the same store and server tests on Postgres: each test gets its own
+# database on this server and drops it afterwards
+RULES_TEST_POSTGRES='postgres://postgres:…@127.0.0.1:5432/postgres?sslmode=disable' go test -race ./internal/store/... ./internal/server/...
 ```
+
+The store writes its queries once, with `?` placeholders and nothing only
+one database has; `internal/store/db.go` rewrites the placeholders and the
+schema for Postgres, ids come back with `RETURNING`, and a transaction
+that numbers a set's versions or publications locks the set's row first
+(`FOR UPDATE` on Postgres; SQLite's single connection already serializes
+them).
 
 The module depends on the root module (`replace … => ../`) for
 `pkg/scanner`, so the image is built from the repository root:

@@ -1,4 +1,5 @@
-// Package store keeps the rule server's data in one SQLite file: an
+// Package store keeps the rule server's data in one SQLite file, or in
+// Postgres for several server processes (db.go): an
 // organization owns rule sets, a rule set owns immutable versions and
 // read-only tokens, and points at the version it publishes. Rolling back is
 // publishing an older version, never editing one; a trigger refuses any
@@ -17,7 +18,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // database/sql driver, pure Go
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for Postgres, pure Go
+	_ "modernc.org/sqlite"             // database/sql driver, pure Go
 )
 
 // Errors callers can test for.
@@ -71,44 +73,75 @@ type Version struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// Token is a read-only credential for one rule set's policy.json. The
-// value is shown once at creation; only its hash is stored.
+// Token is a credential for one rule set: a pull token reads its
+// policy.json, a report token sends its stats reports (Kind). The value is
+// shown once at creation; only its hash is stored.
 type Token struct {
 	ID        int64      `json:"id"`
 	SetID     int64      `json:"setId"`
 	Name      string     `json:"name"`
+	Kind      string     `json:"kind"`
 	Prefix    string     `json:"prefix"`
 	CreatedAt time.Time  `json:"createdAt"`
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
+	// LastUsedAt and LastUsedIP are the last pull with the token, recorded
+	// at most once a minute.
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	LastUsedIP string     `json:"lastUsedIp,omitempty"`
+	// PullsToday and PullsWeek are filled by the server from the daily
+	// pull counts (pulls.go): today and the last seven days, UTC.
+	PullsToday int64 `json:"pullsToday"`
+	PullsWeek  int64 `json:"pullsWeek"`
 }
 
-// Publication is one entry of a set's publish history.
+// Publication is one entry of a set's publish history. Seq numbers the
+// publications of a set from 1 and is the number a signature covers; KeyID
+// and Signature are empty for an unsigned publication.
 type Publication struct {
+	Seq         int64     `json:"publication"`
 	Revision    int64     `json:"revision"`
 	Author      string    `json:"author,omitempty"`
+	KeyID       string    `json:"keyId,omitempty"`
+	Signature   string    `json:"signature,omitempty"`
 	PublishedAt time.Time `json:"publishedAt"`
 }
 
-// Store is the SQLite-backed store.
+// Store is the rule server's store, on SQLite or on Postgres (db.go).
 type Store struct {
-	db *sql.DB
+	db *dbx
 }
 
-// Open opens or creates the database at path and applies the schema.
-func Open(path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+// Open opens the database and applies the schema. A postgres:// or
+// postgresql:// URL opens Postgres, which several server processes can
+// share; anything else is the path of a SQLite file for one process.
+func Open(dsn string) (*Store, error) {
+	ddl := schema + accountsSchema + signingSchema + auditSchema + reportsSchema + pullsSchema
+	if IsPostgres(dsn) {
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return nil, err
+		}
+		db.SetMaxOpenConns(10)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := applyPostgresSchema(ctx, db, postgresSchema(ddl)); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("apply schema: %w", err)
+		}
+		return &Store{db: &dbx{DB: db, pg: true}}, nil
+	}
+	db, err := sql.Open("sqlite", "file:"+dsn+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 	// One connection: SQLite serializes writers anyway, and one connection
 	// means a transaction never waits on the pool for a second one.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + accountsSchema); err != nil {
+	if _, err := db.Exec(ddl); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: &dbx{DB: db}}, nil
 }
 
 // Close closes the database.
@@ -151,17 +184,24 @@ CREATE TABLE IF NOT EXISTS tokens (
 	id INTEGER PRIMARY KEY,
 	set_id INTEGER NOT NULL REFERENCES rule_sets(id),
 	name TEXT NOT NULL,
+	kind TEXT NOT NULL DEFAULT 'pull',
 	prefix TEXT NOT NULL,
 	hash TEXT NOT NULL UNIQUE,
 	created_at TEXT NOT NULL,
-	revoked_at TEXT
+	revoked_at TEXT,
+	last_used_at TEXT,
+	last_used_ip TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS publications (
 	id INTEGER PRIMARY KEY,
 	set_id INTEGER NOT NULL REFERENCES rule_sets(id),
+	seq INTEGER NOT NULL,
 	version_id INTEGER NOT NULL REFERENCES versions(id),
 	author TEXT NOT NULL DEFAULT '',
-	published_at TEXT NOT NULL
+	key_id TEXT NOT NULL DEFAULT '',
+	signature TEXT NOT NULL DEFAULT '',
+	published_at TEXT NOT NULL,
+	UNIQUE(set_id, seq)
 );
 `
 
@@ -172,8 +212,10 @@ func parseTime(s string) time.Time {
 	return t
 }
 
+// isUnique reports a unique constraint violation: SQLite's message, or
+// Postgres's SQLSTATE 23505.
 func isUnique(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	return err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "SQLSTATE 23505"))
 }
 
 // CreateOrg creates an organization.
@@ -184,14 +226,14 @@ func (s *Store) CreateOrg(ctx context.Context, slug, name string) (*Org, error) 
 	if name == "" {
 		name = slug
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO orgs (slug, name, created_at) VALUES (?, ?, ?)`, slug, name, now())
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO orgs (slug, name, created_at) VALUES (?, ?, ?) RETURNING id`, slug, name, now()).Scan(&id)
 	if isUnique(err) {
 		return nil, ErrExists
 	}
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
 	return s.GetOrgByID(ctx, id)
 }
 
@@ -310,12 +352,33 @@ func (s *Store) ListSets(ctx context.Context, orgID int64) ([]RuleSet, error) {
 // the revision the version gets, which is the next number in the set; the
 // store calls it inside the transaction so two concurrent appends cannot
 // produce the same revision.
+//
+// On Postgres two server processes can read the same next number at once;
+// the loser's insert hits the unique (set_id, revision) and is retried with
+// the following number.
 func (s *Store) CreateVersion(ctx context.Context, setID int64, author, comment string, canonical func(revision int64) (content []byte, etag string, err error)) (*Version, error) {
+	for attempt := 0; ; attempt++ {
+		v, err := s.createVersion(ctx, setID, author, comment, canonical)
+		if isUnique(err) && attempt < maxRaceRetries {
+			continue
+		}
+		return v, err
+	}
+}
+
+// maxRaceRetries bounds the retries of an insert that lost a race for the
+// next number to another server process.
+const maxRaceRetries = 5
+
+func (s *Store) createVersion(ctx context.Context, setID int64, author, comment string, canonical func(revision int64) (content []byte, etag string, err error)) (*Version, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := tx.lockSet(ctx, setID); err != nil {
+		return nil, err
+	}
 
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM rule_sets WHERE id = ?`, setID).Scan(&exists); err != nil {
@@ -332,12 +395,12 @@ func (s *Store) CreateVersion(ctx context.Context, setID int64, author, comment 
 	if err != nil {
 		return nil, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO versions (set_id, revision, content, etag, author, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		setID, revision, content, etag, author, comment, now())
+	var id int64
+	err = tx.QueryRowContext(ctx, `INSERT INTO versions (set_id, revision, content, etag, author, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+		setID, revision, content, etag, author, comment, now()).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -389,28 +452,115 @@ func (s *Store) ListVersions(ctx context.Context, setID int64) ([]Version, error
 	return out, rows.Err()
 }
 
+// PublishRequest is one publication: the revision to serve and, for a
+// signed one, the publication number the signature covers and the
+// signature. Check runs inside the transaction with the number the
+// publication gets and the version it serves, so a signature is checked
+// against exactly what is stored and two concurrent publishes cannot both
+// claim the same number.
+type PublishRequest struct {
+	Revision int64
+	Author   string
+	// Seq, when not zero, must be the number this publication gets;
+	// otherwise the publish fails with ErrStale.
+	Seq       int64
+	KeyID     string
+	Signature string
+	Check     func(seq int64, v *Version) error
+}
+
+// ErrStale means the set was published by someone else since the caller
+// read the next publication number; the caller signs again.
+var ErrStale = errors.New("the set was published meanwhile; sign the new statement")
+
 // Publish makes the revision the one the set serves. Publishing an older
-// revision is the rollback.
-func (s *Store) Publish(ctx context.Context, setID, revision int64, author string) error {
+// revision is the rollback; it is a new publication with a higher number.
+// An unsigned publication that lost the race for its number to another
+// server process is retried with the next one; a signed one is ErrStale,
+// because its signature covers the number.
+func (s *Store) Publish(ctx context.Context, setID int64, req PublishRequest) (*Publication, error) {
+	for attempt := 0; ; attempt++ {
+		p, err := s.publish(ctx, setID, req)
+		if errors.Is(err, ErrStale) && req.Seq == 0 && attempt < maxRaceRetries {
+			continue
+		}
+		return p, err
+	}
+}
+
+func (s *Store) publish(ctx context.Context, setID int64, req PublishRequest) (*Publication, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var versionID int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM versions WHERE set_id = ? AND revision = ?`, setID, revision).Scan(&versionID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+	if err := tx.lockSet(ctx, setID); err != nil {
+		return nil, err
+	}
+	v, err := scanVersion(tx.QueryRowContext(ctx, `SELECT `+versionColumns+` FROM versions v WHERE v.set_id = ? AND v.revision = ?`, setID, req.Revision))
+	if err != nil {
+		return nil, err
+	}
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM publications WHERE set_id = ?`, setID).Scan(&seq); err != nil {
+		return nil, err
+	}
+	if req.Seq != 0 && req.Seq != seq {
+		return nil, ErrStale
+	}
+	if req.Check != nil {
+		if err := req.Check(seq, v); err != nil {
+			return nil, err
 		}
-		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE rule_sets SET published_version_id = ? WHERE id = ?`, versionID, setID); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `UPDATE rule_sets SET published_version_id = ? WHERE id = ?`, v.ID, setID); err != nil {
+		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO publications (set_id, version_id, author, published_at) VALUES (?, ?, ?, ?)`, setID, versionID, author, now()); err != nil {
-		return err
+	at := now()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO publications (set_id, seq, version_id, author, key_id, signature, published_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		setID, seq, v.ID, req.Author, req.KeyID, req.Signature, at); err != nil {
+		if isUnique(err) {
+			return nil, ErrStale
+		}
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &Publication{Seq: seq, Revision: v.Revision, Author: req.Author, KeyID: req.KeyID, Signature: req.Signature, PublishedAt: parseTime(at)}, nil
+}
+
+// NextPublication returns the number the set's next publication gets.
+func (s *Store) NextPublication(ctx context.Context, setID int64) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM publications WHERE set_id = ?`, setID).Scan(&seq)
+	return seq, err
+}
+
+// LatestPublication returns the set's newest publication, the one it
+// serves, or ErrNotPublished.
+func (s *Store) LatestPublication(ctx context.Context, setID int64) (*Publication, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+publicationColumns+` FROM publications p JOIN versions v ON v.id = p.version_id WHERE p.set_id = ? ORDER BY p.seq DESC LIMIT 1`, setID)
+	p, err := scanPublication(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotPublished
+	}
+	return p, err
+}
+
+const publicationColumns = `p.seq, v.revision, p.author, p.key_id, p.signature, p.published_at`
+
+func scanPublication(row scanner) (*Publication, error) {
+	var p Publication
+	var at string
+	if err := row.Scan(&p.Seq, &p.Revision, &p.Author, &p.KeyID, &p.Signature, &at); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	p.PublishedAt = parseTime(at)
+	return &p, nil
 }
 
 // Published returns the set's published version, or ErrNotPublished.
@@ -424,30 +574,52 @@ func (s *Store) Published(ctx context.Context, setID int64) (*Version, error) {
 
 // Publications returns the set's publish history, newest first.
 func (s *Store) Publications(ctx context.Context, setID int64) ([]Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT v.revision, p.author, p.published_at FROM publications p JOIN versions v ON v.id = p.version_id WHERE p.set_id = ? ORDER BY p.id DESC`, setID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+publicationColumns+` FROM publications p JOIN versions v ON v.id = p.version_id WHERE p.set_id = ? ORDER BY p.seq DESC`, setID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []Publication
 	for rows.Next() {
-		var p Publication
-		var at string
-		if err := rows.Scan(&p.Revision, &p.Author, &at); err != nil {
+		p, err := scanPublication(rows)
+		if err != nil {
 			return nil, err
 		}
-		p.PublishedAt = parseTime(at)
-		out = append(out, p)
+		out = append(out, *p)
 	}
 	return out, rows.Err()
 }
 
-// TokenPrefix starts every token value, so a leaked one is recognizable.
-const TokenPrefix = "psr_"
+// Token kinds. A pull token reads the set's policy.json and its signature;
+// a report token only sends stats reports for the set. Neither can do the
+// other's job, so the credential a cluster keeps for reports can never read
+// rules, and the one that reads rules can never write.
+const (
+	KindPull   = "pull"
+	KindReport = "report"
+)
 
-// CreateToken issues a read-only token for the set and returns its value,
-// which is never stored or shown again.
-func (s *Store) CreateToken(ctx context.Context, setID int64, name string) (*Token, string, error) {
+// TokenPrefix starts every pull token value and ReportTokenPrefix every
+// report token value, so a leaked one is recognizable and its kind visible.
+const (
+	TokenPrefix       = "psr_"
+	ReportTokenPrefix = "pss_"
+)
+
+// ErrInvalidKind is returned for a token kind other than pull or report.
+var ErrInvalidKind = errors.New(`kind must be "pull" or "report"`)
+
+// CreateToken issues a token of the kind for the set and returns its
+// value, which is never stored or shown again.
+func (s *Store) CreateToken(ctx context.Context, setID int64, name, kind string) (*Token, string, error) {
+	prefixOf := map[string]string{KindPull: TokenPrefix, KindReport: ReportTokenPrefix}
+	if kind == "" {
+		kind = KindPull
+	}
+	tp, ok := prefixOf[kind]
+	if !ok {
+		return nil, "", ErrInvalidKind
+	}
 	if _, err := s.GetSetByID(ctx, setID); err != nil {
 		return nil, "", err
 	}
@@ -455,14 +627,14 @@ func (s *Store) CreateToken(ctx context.Context, setID int64, name string) (*Tok
 	if _, err := rand.Read(raw); err != nil {
 		return nil, "", err
 	}
-	value := TokenPrefix + hex.EncodeToString(raw)
-	prefix := value[:len(TokenPrefix)+8]
-	res, err := s.db.ExecContext(ctx, `INSERT INTO tokens (set_id, name, prefix, hash, created_at) VALUES (?, ?, ?, ?, ?)`,
-		setID, name, prefix, HashToken(value), now())
+	value := tp + hex.EncodeToString(raw)
+	prefix := value[:len(tp)+8]
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO tokens (set_id, name, kind, prefix, hash, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+		setID, name, kind, prefix, HashToken(value), now()).Scan(&id)
 	if err != nil {
 		return nil, "", err
 	}
-	id, _ := res.LastInsertId()
 	t, err := s.getToken(ctx, id)
 	return t, value, err
 }
@@ -473,13 +645,13 @@ func HashToken(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-const tokenColumns = `id, set_id, name, prefix, created_at, revoked_at`
+const tokenColumns = `id, set_id, name, kind, prefix, created_at, revoked_at, last_used_at, last_used_ip`
 
 func scanToken(row scanner) (*Token, error) {
 	var t Token
 	var created string
-	var revoked sql.NullString
-	if err := row.Scan(&t.ID, &t.SetID, &t.Name, &t.Prefix, &created, &revoked); err != nil {
+	var revoked, used sql.NullString
+	if err := row.Scan(&t.ID, &t.SetID, &t.Name, &t.Kind, &t.Prefix, &created, &revoked, &used, &t.LastUsedIP); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -489,6 +661,10 @@ func scanToken(row scanner) (*Token, error) {
 	if revoked.Valid {
 		at := parseTime(revoked.String)
 		t.RevokedAt = &at
+	}
+	if used.Valid {
+		at := parseTime(used.String)
+		t.LastUsedAt = &at
 	}
 	return &t, nil
 }

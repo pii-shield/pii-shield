@@ -52,6 +52,16 @@ var (
 		Help: "Unix time of the last applied policy file load",
 	})
 
+	// ConfigRevisionInfo is 1 for the revision of the policy file the
+	// sidecar runs, with the revision as its label; the series of the
+	// previous revision is removed on a reload, so there is one at a time.
+	// The operator's stats channel reads it to tell which rule version each
+	// pod actually runs.
+	ConfigRevisionInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "piishield_config_revision_info",
+		Help: "1 for the revision of the policy file the sidecar runs",
+	}, []string{"revision"})
+
 	// AuditLinesTotal counts the lines seen in audit mode (PII_MODE=audit),
 	// by whether redaction would have changed them: "clean" or
 	// "would_redact". In redact mode it stays at zero.

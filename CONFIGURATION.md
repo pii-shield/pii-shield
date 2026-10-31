@@ -64,7 +64,7 @@ Three rules keep the file from surprising a running process:
 - **The salt never comes from the file.** `salt` in the file is ignored with a warning, as is `fail_policy`; both are settings of the process, not rules, and stay with `PII_SALT` and `PII_FAIL_POLICY`. The salt chosen at start is kept across reloads, so the tags of a running process do not change because the rules did.
 - **A bad file is rejected whole.** Unlike the environment variables, which warn and skip a bad entry, invalid JSON, an invalid or empty pattern, or a value out of range rejects the whole file: the previous rules stay in force, the rejection is logged, and `piishield_config_reload_errors_total` goes up. A file larger than 4 MiB is rejected unread.
 
-With `PII_METRICS_ENABLED=true` the sidecar also exports `piishield_config_reloads_total` (loads applied, the first included) and `piishield_config_last_reload_timestamp_seconds` (Unix time of the last applied load, `0` until the first). Each applied load is logged with the file's `revision`.
+With `PII_METRICS_ENABLED=true` the sidecar also exports `piishield_config_reloads_total` (loads applied, the first included) `piishield_config_last_reload_timestamp_seconds` (Unix time of the last applied load, `0` until the first) and `piishield_config_revision_info{revision}` (`1` for the revision of the file in force, one series at a time). Each applied load is logged with the file's `revision`.
 
 ## Audit mode (dry run)
 

@@ -21,6 +21,17 @@ jobs:
   test:
     name: Test, Lint & Fuzz
     runs-on: ubuntu-latest
+    # The rule server's store runs on SQLite or Postgres; its tests run on
+    # both (rules/internal/storetest).
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -72,6 +83,12 @@ jobs:
     - name: Run Rule Server Tests
       working-directory: rules
       run: go test -v -race ./...
+
+    - name: Run Rule Server Tests on Postgres
+      working-directory: rules
+      env:
+        RULES_TEST_POSTGRES: postgres://postgres:ci@127.0.0.1:5432/postgres?sslmode=disable
+      run: go test -race -count=1 ./internal/store/... ./internal/server/...
 
     # The envtest suite is behind //go:build integration, so the step above
     # skips it: it starts a real kube-apiserver and checks the CRD schema and
