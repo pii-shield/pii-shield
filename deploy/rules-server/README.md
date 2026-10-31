@@ -11,8 +11,7 @@ one small machine with Docker:
 - `restore`: on a machine whose volume is empty, brings the database back
   from the bucket before the server starts.
 
-It is how the hosted copy is meant to run, and it suits a self-hosted copy
-just as well. For more than one server process, see
+For more than one server process, see
 [Several instances](#several-instances).
 
 ## What you need

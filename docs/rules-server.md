@@ -5,9 +5,9 @@ security team edits a set in the browser, sees on the real scanner what a
 draft does to pasted log lines, publishes a version, and every cluster whose
 `PiiPolicy` names the set pulls it with a read-only token, without a pod
 restart. Nothing about a cluster is sent to the server: the operator only
-asks for a file, and the server only answers `GET`. The same binary serves
-the hosted copy and a self-hosted copy inside your own perimeter; this page
-is about running your own.
+asks for a file, unless the cluster turns on the stats channel, which sends
+counters only ([Stats from clusters](#stats-from-clusters)). You run the
+server yourself, inside your own perimeter.
 
 This is the first version (milestone 3.0, issue #95). What it does not do
 yet is listed at the end. Publications can be signed with a key that only
@@ -460,7 +460,5 @@ token used and the time; that is what its log records.
   errors, but nothing sends a message about it; alert on the operator's
   metrics in the cluster instead.
 - **Sign in any other way.** Magic link by e-mail; no passwords, no OAuth.
-- **Serve a hosted copy yet.** The hosted service on a pii-shield.com
-  subdomain opens by [waitlist](https://tally.so/r/PdY7Ze).
 
 The code is in [`rules/`](../rules/) with its own README for development.

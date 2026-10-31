@@ -1,7 +1,7 @@
 // rules-server serves rule sets to clusters: a PiiPolicy with
 // spec.remoteConfig pulls GET /v1/<org>/<set>/policy.json with a read-only
-// token, and the management API publishes versions. One binary for the
-// hosted service and for a self-hosted copy (--single-tenant).
+// token, and the management API publishes versions. One binary for many
+// organizations with sign-in, or for one team (--single-tenant).
 package main
 
 import (

@@ -3,9 +3,10 @@
 The rule server keeps rule sets for the operator's `spec.remoteConfig`
 (#36): a security team publishes a version here, and every cluster whose
 `PiiPolicy` names the set pulls it with a read-only token, without a pod
-restart. Nothing about a cluster is sent here; the server only answers
-`GET`. One binary serves the hosted service and a self-hosted copy inside
-your own perimeter.
+restart. Nothing about a cluster is sent here unless the cluster turns on
+the stats channel, which sends counters only. One binary serves many
+organizations with sign-in, or one team behind your own access control
+(`--single-tenant`), inside your own perimeter.
 
 Status: first version (milestone 3.0, #95). The model, the store on
 SQLite or Postgres,
