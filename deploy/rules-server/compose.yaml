@@ -1,0 +1,83 @@
+# One rule server on one machine: the server, Caddy in front of it for
+# HTTPS, and Litestream copying the SQLite database to an S3-compatible
+# bucket as it changes. Read README.md first; every setting comes from .env.
+#
+#   cp .env.example .env && $EDITOR .env
+#   docker compose up -d
+#
+# The images are pinned by digest; change them together with the notes in
+# README.md ("Upgrade").
+
+name: pii-shield-rules
+
+services:
+  # Brings the database back from the bucket when the volume is empty (a new
+  # machine, a lost disk) and does nothing otherwise. The server waits for it.
+  restore:
+    image: litestream/litestream:0.5.17@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a
+    command: ["restore", "-if-db-not-exists", "-if-replica-exists", "/data/rules.db"]
+    env_file: .env
+    volumes:
+      - data:/data
+      - ./litestream.yml:/etc/litestream.yml:ro
+    restart: "no"
+
+  rules:
+    image: ${RULES_IMAGE:-ghcr.io/pii-shield/pii-shield-rules:3.0.0}
+    command: ["--trust-proxy"]
+    environment:
+      RULES_DB: /data/rules.db
+      RULES_LISTEN: ":8080"
+      RULES_BASE_URL: https://${RULES_DOMAIN:?set RULES_DOMAIN in .env}
+      RULES_SIGNUP: ${RULES_SIGNUP:-invite}
+      RULES_ADMIN_TOKEN: ${RULES_ADMIN_TOKEN:-}
+      RULES_SMTP_ADDR: ${RULES_SMTP_ADDR:?set RULES_SMTP_ADDR in .env}
+      RULES_SMTP_USER: ${RULES_SMTP_USER:-}
+      RULES_SMTP_PASSWORD: ${RULES_SMTP_PASSWORD:-}
+      RULES_MAIL_FROM: ${RULES_MAIL_FROM:?set RULES_MAIL_FROM in .env}
+    volumes:
+      - data:/data
+    depends_on:
+      restore:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # Reached through Caddy only; no port on the host.
+    expose: ["8080"]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+
+  # Streams every change of the database to the bucket, a few seconds behind.
+  litestream:
+    image: litestream/litestream:0.5.17@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a
+    command: ["replicate"]
+    env_file: .env
+    volumes:
+      - data:/data
+      - ./litestream.yml:/etc/litestream.yml:ro
+    depends_on:
+      rules:
+        condition: service_started
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      RULES_DOMAIN: ${RULES_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      rules:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  data:
+  caddy-data:
+  caddy-config:

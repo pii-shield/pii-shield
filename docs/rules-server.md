@@ -132,7 +132,11 @@ enough for a server other people sign in to.
 
 ### In front of it
 
-Put TLS in front of the server, a reverse proxy or an ingress, and pass the
+[`deploy/rules-server`](../deploy/rules-server/) is a ready setup for one
+machine with Docker Compose: the server, Caddy for HTTPS, and Litestream
+copying the database to a bucket, with a restore on an empty disk.
+
+Otherwise, put TLS in front of the server, a reverse proxy or an ingress, and pass the
 client address on (`--trust-proxy`) and set the public address (`--base-url`). The operator
 refuses an `http://` source unless the policy sets `allowInsecure`, and the
 session cookie carries `Secure`, so a plain-http server works only on

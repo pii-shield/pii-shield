@@ -1,0 +1,11 @@
+# Litestream copies /data/rules.db to an S3-compatible bucket (Cloudflare R2,
+# AWS S3, Backblaze B2, MinIO, ...) as it changes, and restores it from
+# there. The values come from .env.
+dbs:
+  - path: /data/rules.db
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}
+      endpoint: ${LITESTREAM_ENDPOINT}
+      region: ${LITESTREAM_REGION}
+      access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
