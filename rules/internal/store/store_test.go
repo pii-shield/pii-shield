@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/pii-shield/pii-shield/rules/internal/storetest"
 	"path/filepath"
 	"strconv"
@@ -354,5 +355,56 @@ func TestReportsRetentionAndClusters(t *testing.T) {
 	cs, err := s.Clusters(ctx, set.ID, time.Now().Add(-time.Hour))
 	if err != nil || len(cs) != 2 || cs[0].Cluster != "b" || cs[1].Lines != 20 || cs[1].Redactions["entropy"] != 2 || cs[0].TokenName != "stats" {
 		t.Errorf("Clusters = %+v %v", cs, err)
+	}
+}
+
+func TestPullCounts(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
+	other, _ := s.CreateSet(ctx, org.ID, "other", "")
+	a, _, _ := s.CreateToken(ctx, set.ID, "a", KindPull)
+	b, _, _ := s.CreateToken(ctx, set.ID, "b", KindPull)
+	c, _, _ := s.CreateToken(ctx, other.ID, "c", KindPull)
+	for _, nm := range []bool{false, true, true} {
+		if err := s.CountPull(ctx, a.ID, nm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.CountPull(ctx, b.ID, false)
+	_ = s.CountPull(ctx, c.ID, false)
+	// An old day is kept until the retention, then dropped by a new day's first pull.
+	_, _ = s.db.ExecContext(ctx, `INSERT INTO pull_counts (token_id, day, pulls) VALUES (?, '2000-01-01', 5), (?, ?, 7)`,
+		a.ID, a.ID, time.Now().UTC().AddDate(0, 0, -1).Format(dayLayout))
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM pull_counts WHERE token_id = ? AND day = ?`, b.ID, time.Now().UTC().Format(dayLayout))
+	_ = s.CountPull(ctx, b.ID, false) // a first pull of the day prunes only b's rows
+
+	got, err := s.Pulls(ctx, set.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]PullDay{}
+	for _, p := range got {
+		want[fmt.Sprintf("%d/%s", p.TokenID, p.Day)] = p
+	}
+	today := time.Now().UTC().Format(dayLayout)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(dayLayout)
+	if p := want[fmt.Sprintf("%d/%s", a.ID, today)]; p.Pulls != 3 || p.NotModified != 2 {
+		t.Errorf("a today = %+v", p)
+	}
+	if p := want[fmt.Sprintf("%d/%s", a.ID, yesterday)]; p.Pulls != 7 {
+		t.Errorf("a yesterday = %+v", p)
+	}
+	if p := want[fmt.Sprintf("%d/%s", b.ID, today)]; p.Pulls != 1 {
+		t.Errorf("b today = %+v", p)
+	}
+	if len(got) != 3 {
+		t.Errorf("rows = %+v (another set's token and days outside the window must not appear)", got)
+	}
+	var old int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pull_counts WHERE day = '2000-01-01'`).Scan(&old)
+	if old != 1 {
+		t.Errorf("a's old day must stay until a's own new day prunes it: %d", old)
 	}
 }

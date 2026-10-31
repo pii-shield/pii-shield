@@ -27,7 +27,11 @@ const (
 
 // actorOf names who a request runs as in the audit log.
 func actorOf(r *http.Request) string {
-	p := principalOf(r)
+	return principalOf(r).actor()
+}
+
+// actor names the principal in the audit and access logs.
+func (p *principal) actor() string {
 	switch {
 	case p.user != nil:
 		return p.user.Email

@@ -135,6 +135,12 @@ stored in `reports` (`internal/store/reports.go`, kept 90 days);
 `GET .../clusters?hours=` summarizes them per token, cluster and policy for
 the panel's Clusters tab.
 
+Watching it (`internal/server/observe.go`, `internal/store/pulls.go`): a
+daily pull count per token (`pull_counts`, 90 days), Prometheus metrics on
+`--metrics-listen`, and an access log line per request (`--access-log`, on
+by default) with the route pattern and the token prefix, never a token
+value or a header.
+
 Other calls: `GET /api/orgs`, `GET /api/orgs/{org}/sets`,
 `GET /api/orgs/{org}/sets/{set}` (set, versions, tokens, the policy path),
 `GET .../versions`, `GET .../versions/{rev}`, `GET .../publications`

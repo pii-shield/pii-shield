@@ -59,6 +59,8 @@ type Config struct {
 	// InsecureCookies drops the Secure flag of the session cookie, for a
 	// server reached over plain http on localhost.
 	InsecureCookies bool
+	// AccessLog writes one log line per request (observe.go).
+	AccessLog bool
 	// SessionTTL and LoginTTL are the lifetimes of a session and of a
 	// magic link; zero means the defaults.
 	SessionTTL time.Duration
@@ -158,6 +160,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/orgs/{org}/signing-keys/{id}", admin(s.revokeSigningKey))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publications", admin(s.publications))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/tokens", admin(s.listTokens))
+	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/pulls", admin(s.listPulls))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/clusters", admin(s.listClusters))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/tokens", admin(s.createToken))
 	s.mux.HandleFunc("DELETE /api/orgs/{org}/sets/{set}/tokens/{id}", admin(s.revokeToken))
@@ -166,7 +169,7 @@ func (s *Server) routes() {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	s.mux.ServeHTTP(w, r)
+	s.observe(w, r)
 }
 
 // ---- public: policy.json ----
@@ -192,9 +195,11 @@ func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", v.ETag)
 	w.Header().Set("X-Policy-Revision", strconv.FormatInt(v.Revision, 10))
 	if etagMatches(r.Header.Get("If-None-Match"), v.ETag) {
+		s.countPull(r, acc, true)
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
+	s.countPull(r, acc, false)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(v.Content)))
 	_, _ = w.Write(v.Content)
@@ -237,6 +242,7 @@ func (s *Server) tokenAccess(w http.ResponseWriter, r *http.Request, kind string
 		s.fail(w, http.StatusNotFound, "no such rule set for this token")
 		return nil, false
 	}
+	infoOf(r).token = acc.Token.Prefix
 	if acc.Token.Kind != kind {
 		if kind == store.KindPull {
 			s.fail(w, http.StatusForbidden, "this token sends stats reports; it cannot read rules")
@@ -246,6 +252,19 @@ func (s *Server) tokenAccess(w http.ResponseWriter, r *http.Request, kind string
 		return nil, false
 	}
 	return acc, true
+}
+
+// countPull adds the pull to the token's daily count and to the metrics.
+// A failure only costs the count.
+func (s *Server) countPull(r *http.Request, acc *store.Access, notModified bool) {
+	result := "new"
+	if notModified {
+		result = "not_modified"
+	}
+	policyPullsTotal.WithLabelValues(result).Inc()
+	if err := s.store.CountPull(r.Context(), acc.Token.ID, notModified); err != nil {
+		s.log.Error("count the pull", "token", acc.Token.Prefix, "err", err)
+	}
 }
 
 // touch records the pull on the token: when and from where it was last
@@ -406,6 +425,9 @@ func (s *Server) getSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokens, err := s.store.ListTokens(r.Context(), set.ID)
+	if err == nil {
+		tokens, err = s.withPullCounts(r, set.ID, tokens)
+	}
 	if err != nil {
 		s.internal(w, err)
 		return
@@ -631,6 +653,9 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokens, err := s.store.ListTokens(r.Context(), set.ID)
+	if err == nil {
+		tokens, err = s.withPullCounts(r, set.ID, tokens)
+	}
 	if err != nil {
 		s.internal(w, err)
 		return

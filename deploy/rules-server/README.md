@@ -99,8 +99,12 @@ digest in `compose.yaml`; update them on purpose, one at a time.
 ## Watch it
 
 - `https://<your domain>/healthz` answers `ok`; point an uptime check at it.
-- `docker compose logs rules`: sign-ins, publications, tokens issued and
-  revoked. The panel's Activity page has the same, per organization.
+- `docker compose logs rules`: one line per request, and sign-ins,
+  publications, tokens issued and revoked. The panel's Activity page has
+  the changes per organization; the Tokens tab, each token's pulls today and
+  in the last seven days.
+- For Prometheus, set `RULES_METRICS_LISTEN: ":9091"` on the `rules` service
+  and scrape it from inside the Docker network; do not publish the port.
 - `docker compose logs litestream`: an error here means the copies stopped;
   fix it before anything else.
 

@@ -88,6 +88,10 @@ type Token struct {
 	// at most once a minute.
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	LastUsedIP string     `json:"lastUsedIp,omitempty"`
+	// PullsToday and PullsWeek are filled by the server from the daily
+	// pull counts (pulls.go): today and the last seven days, UTC.
+	PullsToday int64 `json:"pullsToday"`
+	PullsWeek  int64 `json:"pullsWeek"`
 }
 
 // Publication is one entry of a set's publish history. Seq numbers the
@@ -111,7 +115,7 @@ type Store struct {
 // postgresql:// URL opens Postgres, which several server processes can
 // share; anything else is the path of a SQLite file for one process.
 func Open(dsn string) (*Store, error) {
-	ddl := schema + accountsSchema + signingSchema + auditSchema + reportsSchema
+	ddl := schema + accountsSchema + signingSchema + auditSchema + reportsSchema + pullsSchema
 	if IsPostgres(dsn) {
 		db, err := sql.Open("pgx", dsn)
 		if err != nil {

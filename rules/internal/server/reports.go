@@ -111,6 +111,7 @@ func (s *Server) receiveReport(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	reportsReceivedTotal.Inc()
 	w.WriteHeader(http.StatusNoContent)
 }
 

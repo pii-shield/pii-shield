@@ -80,6 +80,7 @@ func (s *Server) requireAccess(next http.HandlerFunc) http.HandlerFunc {
 			s.fail(w, http.StatusUnauthorized, "sign in, or send the admin token")
 			return
 		}
+		infoOf(r).actor = p.actor()
 		if p.user != nil && !safeMethod(r.Method) {
 			if msg := s.csrfProblem(r); msg != "" {
 				s.fail(w, http.StatusForbidden, msg)

@@ -496,9 +496,10 @@
     const shown = h('div');
     return h('div', null,
       h('div', { class: 'card' },
-        h('table', null, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Kind'), h('th', null, 'Prefix'), h('th', null, 'Created'), h('th', null, 'Last used'), h('th', null, 'Status'), h('th', null, ''))),
+        h('table', null, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Kind'), h('th', null, 'Prefix'), h('th', null, 'Created'), h('th', null, 'Last used'), h('th', null, 'Pulls today / 7 days'), h('th', null, 'Status'), h('th', null, ''))),
           h('tbody', null, ctx.tokens.map(t => h('tr', null, h('td', null, t.name), h('td', null, t.kind === 'report' ? 'sends reports' : 'reads rules'), h('td', null, h('code', null, t.prefix + '…')), h('td', null, fmtDate(t.createdAt)),
             h('td', null, t.lastUsedAt ? fmtDate(t.lastUsedAt) + ' from ' + t.lastUsedIp : h('span', { class: 'badge off' }, 'never')),
+            h('td', null, t.kind === 'report' ? '—' : (t.pullsToday || 0).toLocaleString() + ' / ' + (t.pullsWeek || 0).toLocaleString()),
             h('td', null, t.revokedAt ? h('span', { class: 'badge off' }, 'revoked ' + fmtDate(t.revokedAt)) : h('span', { class: 'badge ok' }, 'active')),
             h('td', null, t.revokedAt ? null : h('button', { class: 'danger', onclick: async () => {
               if (!confirm('Revoke "' + t.name + '"? The cluster holding it keeps its last good rules and stops receiving updates.')) return;

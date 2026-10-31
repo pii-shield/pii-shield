@@ -120,6 +120,8 @@ Every flag has an environment variable; the flag wins when both are set.
 | `--signup` | `RULES_SIGNUP=open\|invite` | `open` | `open`: a new address creates its own organization by signing in. `invite`: only invited addresses can sign in. |
 | `--trust-proxy` | `RULES_TRUST_PROXY=true` | off | Read the client address from `X-Forwarded-For`. Only behind a proxy you control, because the rate limits key on that address. |
 | `--insecure-cookies` | `RULES_INSECURE_COOKIES=true` | off | Session cookie without `Secure`, for plain http on localhost. |
+| `--metrics-listen` | `RULES_METRICS_LISTEN` | off | Address of a separate listener for Prometheus `/metrics`, such as `127.0.0.1:9091`. Keep it off the public address. |
+| `--access-log` | `RULES_ACCESS_LOG=false` turns it off | on | One log line per request: method, path, route, status, time, client address, and the token prefix or the caller. Health checks are not logged. |
 | | `RULES_ADMIN_TOKEN` | unset | A token that opens every organization to `curl` (`Authorization: Bearer …`). Optional once people sign in through the panel. |
 | | `RULES_SMTP_ADDR` | unset | `host:port` of the mail server for the sign-in links. Port 465 is TLS at once; any other port starts clear and upgrades with STARTTLS, which is required when a password is set, so a password never crosses the wire in clear. |
 | | `RULES_SMTP_USER`, `RULES_SMTP_PASSWORD` | unset | SMTP credentials (PLAIN). |
@@ -220,6 +222,29 @@ something must carry the `X-Requested-With` header and an `Origin` or
 requests are limited per client address and per e-mail address, link
 attempts per client address; the limits live in the process's memory,
 start over with it, and are counted per instance.
+
+## Watching the server
+
+**Pulls.** Each token counts its `policy.json` pulls per UTC day, new files
+(`200`) and unchanged ones (`304`) apart, kept 90 days. The Tokens tab shows
+today's pulls and the last seven days' next to the last pull's time and
+address; `GET /api/orgs/{org}/sets/{set}/pulls?days=30` gives the daily
+counts per token. A cluster pulls every `intervalSeconds` (300 by default),
+so a day's pulls divided by 288 is about how many clusters use the token.
+
+**Metrics.** With `--metrics-listen` the server serves Prometheus metrics on
+that address: `piishield_rules_requests_total{route, code}`,
+`piishield_rules_request_duration_seconds{route}`,
+`piishield_rules_policy_pulls_total{result="new"|"not_modified"}`,
+`piishield_rules_reports_received_total`, and the Go runtime and process
+series. The route is the pattern (`GET /v1/{org}/{set}/policy.json`), never
+an organization, a set or a token, so the series stay few.
+
+**Access log.** On by default: one JSON line per request with the method,
+path, route pattern, status, milliseconds, client address, and the token's
+prefix or the caller (an address, `admin token`). No header, cookie, query
+string or body is written, and no token value. `RULES_ACCESS_LOG=false`
+turns it off; health checks are never logged.
 
 ## Activity log
 
@@ -403,6 +428,7 @@ curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/tokens -d '{"name": "prod-eu
 | `GET …/clusters?hours=24` | Per cluster: the latest report and the sums over the last `hours` (up to 2160), with the set's published revision and latest publication. |
 | `GET /v1/{org}/{set}/policy.json.sig` | With the pull token: the statement fields, `keyId` and `signature` of the publication the set serves; `404` when it is unsigned. |
 | `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; `POST` with `{"name": …, "kind": "pull" or "report"}` (default pull); the value is in the answer once. |
+| `GET …/pulls?days=30` | The set's daily pull counts per token (`pulls`, `notModified`), up to 90 days. |
 | `GET /api/orgs/{org}/audit` | The activity log, newest first; `limit` (default 100, at most 500) and `before` page through it. |
 | `GET /healthz` | `ok`. |
 
