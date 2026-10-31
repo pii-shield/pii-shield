@@ -157,7 +157,7 @@ load balancer:
 docker run -d -p 127.0.0.1:8080:8080 \
   -e RULES_DB='postgres://rules:…@db.internal:5432/rules?sslmode=require' \
   -e RULES_BASE_URL=https://rules.example.com -e RULES_SMTP_ADDR=… \
-  ghcr.io/pii-shield/pii-shield-rules:3.0.0
+  ghcr.io/pii-shield/pii-shield-rules:2.3.1
 ```
 
 The first instance creates the tables; one that starts at the same time
