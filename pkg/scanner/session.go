@@ -29,6 +29,18 @@ var sessionKeyWords = map[string]bool{
 
 // isSessionKey reports whether key names a session id or a cookie value.
 func isSessionKey(key string) bool {
+	// Every session key ends in e (cookie), n (session) or d (sid,
+	// session_id): reject the rest before splitKeyWords lowercases them
+	// ("[12/Oct/2026" in every access log line would allocate).
+	k := strings.TrimRight(key, "_-.")
+	if k == "" {
+		return false
+	}
+	switch k[len(k)-1] | 0x20 {
+	case 'e', 'n', 'd':
+	default:
+		return false
+	}
 	var words [maxKeyWords]string
 	n := splitKeyWords(key, &words)
 	return n > 0 && isSessionKeyWords(words[:n])
