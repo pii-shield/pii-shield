@@ -16,7 +16,7 @@ var (
 	RedactionEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "piishield_redaction_events_total",
 		Help: "Total number of secrets redacted",
-	}, []string{"type"}) // Strictly using "entropy", "regex", "luhn", "signature" to avoid high cardinality
+	}, []string{"type"}) // Strictly using "entropy", "regex", "luhn", "signature", "key" to avoid high cardinality
 
 	// ProcessingDuration seconds tracks the time spent sanitizing logs.
 	ProcessingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -90,7 +90,7 @@ func StartAudit() {
 // counters, so an unexpected value cannot add a label value.
 func boundStrategy(strategyType string) string {
 	switch strategyType {
-	case "entropy", "regex", "luhn", "signature":
+	case "entropy", "regex", "luhn", "signature", "key":
 		return strategyType
 	}
 	return "unknown"

@@ -78,7 +78,7 @@ func TestProcessLineAuditPassesLinesThroughAndCounts(t *testing.T) {
 		t.Errorf("clean lines = %v, want 1", n)
 	}
 	findings := 0.0
-	for _, typ := range []string{"entropy", "regex", "luhn", "signature", "unknown"} {
+	for _, typ := range []string{"entropy", "regex", "luhn", "signature", "key", "unknown"} {
 		findings += testutil.ToFloat64(metrics.AuditFindingsTotal.WithLabelValues(typ))
 	}
 	if findings < 3 {
@@ -87,7 +87,10 @@ func TestProcessLineAuditPassesLinesThroughAndCounts(t *testing.T) {
 	if n := testutil.ToFloat64(metrics.AuditFindingsTotal.WithLabelValues("signature")); n < 1 {
 		t.Errorf("the AWS key must be a signature finding, got %v", n)
 	}
-	for _, typ := range []string{"entropy", "regex", "luhn", "signature", "unknown"} {
+	if n := testutil.ToFloat64(metrics.AuditFindingsTotal.WithLabelValues("key")); n < 1 {
+		t.Errorf("the password must be a key finding, got %v", n)
+	}
+	for _, typ := range []string{"entropy", "regex", "luhn", "signature", "key", "unknown"} {
 		if n := testutil.ToFloat64(metrics.RedactionEventsTotal.WithLabelValues(typ)); n != 0 {
 			t.Errorf("redaction_events_total{type=%q} = %v in audit mode, want 0", typ, n)
 		}
@@ -235,7 +238,7 @@ func TestMainAuditWithMetricsCountsFindings(t *testing.T) {
 
 	countAll := func(v *prometheus.CounterVec) float64 {
 		var n float64
-		for _, typ := range []string{"entropy", "regex", "luhn", "signature", "unknown"} {
+		for _, typ := range []string{"entropy", "regex", "luhn", "signature", "key", "unknown"} {
 			n += testutil.ToFloat64(v.WithLabelValues(typ))
 		}
 		return n
