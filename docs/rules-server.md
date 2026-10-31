@@ -10,9 +10,9 @@ the hosted copy and a self-hosted copy inside your own perimeter; this page
 is about running your own.
 
 This is the first version (milestone 3.0, issue #95). What it does not do
-yet is listed at the end; the one line to know before relying on it: the
-served file is protected by HTTPS and the token, not by a signature of its
-content.
+yet is listed at the end. Publications can be signed with a key that only
+the publisher holds, and a cluster can be told to accept nothing else; see
+[Signed publications](#signed-publications).
 
 ## First steps
 
@@ -172,7 +172,7 @@ button; a preview of the draft or of the published version on pasted log
 lines, run on the real scanner with a preview salt, so the markers show
 what will be hidden while the hashes match no cluster; versions with
 publish, roll back, a diff of two versions and the publish history; tokens;
-the `PiiPolicy` snippet that connects a cluster; and members.
+the `PiiPolicy` snippet that connects a cluster; members; and signing keys.
 
 Sign-in is by magic link; there are no passwords. You enter your address,
 a link arrives by mail, and the page it opens has one button that signs you
@@ -188,6 +188,87 @@ something must carry the `X-Requested-With` header and an `Origin` or
 requests are limited per client address and per e-mail address, link
 attempts per client address; the limits live in the process's memory and
 start over with it.
+
+## Signed publications
+
+HTTPS and the token protect the way from the server to the cluster. A
+signature protects against the server itself: a server that is taken over,
+or a proxy or bucket in between, can serve any file, but it cannot sign
+one, because the key is the publisher's and never reaches the server.
+
+1. **Make a key.** On the **Signing keys** page give the key a name and
+   press **Create key**. The browser makes an Ed25519 key, keeps the private
+   half in its own storage where it cannot be copied out, and sends the
+   public half to the server. Each person, and each browser, makes its own.
+   From the first key on, the server refuses an unsigned publication in this
+   organization.
+2. **Publish as before.** The **publish** and **roll back** buttons now ask
+   the server for the statement of the next publication, sign it in the
+   browser and send the signature. The server checks it against the key and
+   the stored file before it publishes, so it never serves a signature a
+   cluster would refuse. The publish history shows which key signed what.
+3. **Tell the cluster.** Copy the keys from the bottom of the Signing keys
+   page into the policy:
+
+   ```yaml
+   spec:
+     remoteConfig:
+       url: https://rules.example.internal/v1/acme/payments/policy.json
+       headerSecretRef: { name: rules-token, key: authorization }
+       signature:
+         publicKeys:
+           - ed25519:gbR9pp6kubV6w0aRR9…   # alice, work laptop
+   ```
+
+   The operator then pulls `policy.json.sig` next to the file with the same
+   token and accepts the file only if one of these keys signed it, for this
+   set, with a publication number not lower than the last one it accepted.
+   Anything else is refused, the last good copy stays, and the
+   `RemoteSynced` condition says why (`SignatureMissing`,
+   `SignatureInvalid`, `SignatureUntrusted`, `SignatureReplayed`).
+   `status.remote.signedBy` and `status.remote.publication` say what was
+   accepted.
+
+What is signed is a short statement, not the file alone:
+
+```text
+pii-shield-policy-signature-v1
+set: acme/payments
+publication: 7
+revision: 3
+sha256: <hex SHA-256 of policy.json exactly as served>
+```
+
+The set stops one set's file from being served as another's. The
+publication number grows with every publish, a rollback included, so an old
+signed file cannot be replayed to a cluster that has seen a newer one.
+
+A script or a CI job signs with any Ed25519 tool; with OpenSSL 3 or later:
+
+```bash
+openssl genpkey -algorithm ed25519 -out signing-key.pem       # once; keep it secret
+PUB="ed25519:$(openssl pkey -in signing-key.pem -pubout -outform DER | tail -c 32 | base64)"
+curl -X POST -H "$H" $B/api/orgs/acme/signing-keys -d "{\"name\": \"ci\", \"publicKey\": \"$PUB\"}"
+# for each publish: sign the statement text exactly as the server returns it
+curl -s -H "$H" "$B/api/orgs/acme/sets/payments/publish/statement?revision=3" > st.json
+jq -j .text st.json > st.txt                                 # -j: no newline added
+SIG=$(openssl pkeyutl -sign -inkey signing-key.pem -rawin -in st.txt | base64 | tr -d '\n')
+curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/publish \
+  -d "{\"revision\": 3, \"publication\": $(jq .statement.publication st.json), \"keyId\": \"<key id from the first call>\", \"signature\": \"$SIG\"}"
+```
+
+If someone else published between the two calls, the publish answers `409`;
+ask for the statement again. A lost browser key is revoked on the Signing
+keys page and replaced by a new one; clusters keep trusting a key until it
+is removed from their `publicKeys`, so remove it there too when it may have
+leaked.
+
+What a signature does not stop: a server that is taken over can still stop
+answering, or keep serving the last signed file instead of a newer one.
+The page that does the signing also comes from the server, so a server
+that is taken over could serve a panel that signs something else the next
+time someone publishes from it; for sets where that matters, publish from
+a script with a key kept off the server's machine.
 
 ## The API
 
@@ -222,7 +303,10 @@ curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/tokens -d '{"name": "prod-eu
 | `GET`, `POST …/versions`, `GET …/versions/{rev}` | Versions; `POST` validates `content` whole and appends the next number; `422` names the scanner's reason. |
 | `POST …/validate` | The checks of a version create without storing; `200` with the effective settings after defaults, or `422`. |
 | `POST …/preview` | Up to 200 lines (`lines` or `text`) through the draft in `content`, or the published version without it; each line as `in`, `out`, `changed`. |
-| `POST …/publish`, `GET …/publications` | Publish a revision (an older one is the rollback); the publish history. |
+| `POST …/publish`, `GET …/publications` | Publish a revision (an older one is the rollback); the publish history. A signed publish adds `publication`, `keyId` and `signature`; once the organization has a signing key, it is required. |
+| `GET …/publish/statement?revision=N` | The statement of the next publication of revision `N` and its exact `text` to sign. |
+| `GET`, `POST /api/orgs/{org}/signing-keys`, `DELETE …/signing-keys/{id}` | Public signing keys; `POST` with `{"name": …, "publicKey": "ed25519:…"}`. |
+| `GET /v1/{org}/{set}/policy.json.sig` | With the pull token: the statement fields, `keyId` and `signature` of the publication the set serves; `404` when it is unsigned. |
 | `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; the value is in the `POST` answer once. |
 | `GET /healthz` | `ok`. |
 
@@ -276,10 +360,6 @@ token used and the time; that is what its log records.
 
 ## What it does not do yet
 
-- **Sign the file.** HTTPS and the token protect the channel; a server
-  that is taken over can serve any rule set to the clusters that trust it.
-  A signature of `policy.json` with a server key is the first candidate for
-  the next version.
 - **Run as more than one instance.** One process, one SQLite file. Postgres
   comes when a second instance is needed.
 - **Report anything back.** No redaction analytics, no Slack alerting: they

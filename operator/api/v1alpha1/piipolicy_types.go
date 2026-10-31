@@ -79,6 +79,35 @@ type RemoteConfig struct {
 	// the RemoteSynced condition carries a warning while it is set.
 	// +optional
 	AllowInsecure bool `json:"allowInsecure,omitempty"`
+
+	// Signature, when set, makes the controller accept only a file signed
+	// with one of PublicKeys. A file without a valid signature, signed by
+	// another key, for another set, or older than the last one accepted is
+	// refused and the last good copy stays in use.
+	// +optional
+	Signature *RemoteSignature `json:"signature,omitempty"`
+}
+
+// RemoteSignature names the keys a remote policy file must be signed with.
+// The signature is a separate file next to the policy (a rule server serves
+// it at the policy's path plus ".sig"); it signs a statement that binds the
+// file's SHA-256 to the set and to a publication number that only grows.
+type RemoteSignature struct {
+	// PublicKeys are the trusted Ed25519 public keys, each
+	// "ed25519:<base64 of the 32-byte key>" as the rule server's Signing
+	// keys page shows them.
+	// +kubebuilder:validation:MinItems=1
+	PublicKeys []string `json:"publicKeys"`
+
+	// URL of the signature file. Default: the policy URL with ".sig"
+	// appended to its path.
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// Set is the "<org>/<set>" name the signed statement must carry.
+	// Default: taken from a policy URL ending in /v1/<org>/<set>/policy.json.
+	// +optional
+	Set string `json:"set,omitempty"`
 }
 
 // PiiPolicySpec defines the desired state of PiiPolicy
@@ -202,6 +231,15 @@ type RemoteStatus struct {
 	// Hash is a content hash of the last good file.
 	// +optional
 	Hash string `json:"hash,omitempty"`
+
+	// Publication is the publication number of the last good file when
+	// signatures are required; a lower one is refused as a replay.
+	// +optional
+	Publication int64 `json:"publication,omitempty"`
+
+	// SignedBy is the id of the key that signed the last good file.
+	// +optional
+	SignedBy string `json:"signedBy,omitempty"`
 }
 
 // PiiPolicyStatus defines the observed state of PiiPolicy.

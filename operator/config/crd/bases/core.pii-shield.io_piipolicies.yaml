@@ -195,6 +195,35 @@ spec:
                     format: int32
                     minimum: 30
                     type: integer
+                  signature:
+                    description: |-
+                      Signature, when set, makes the controller accept only a file signed
+                      with one of PublicKeys. A file without a valid signature, signed by
+                      another key, for another set, or older than the last one accepted is
+                      refused and the last good copy stays in use.
+                    properties:
+                      publicKeys:
+                        description: |-
+                          PublicKeys are the trusted Ed25519 public keys, each
+                          "ed25519:<base64 of the 32-byte key>" as the rule server's Signing
+                          keys page shows them.
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      set:
+                        description: |-
+                          Set is the "<org>/<set>" name the signed statement must carry.
+                          Default: taken from a policy URL ending in /v1/<org>/<set>/policy.json.
+                        type: string
+                      url:
+                        description: |-
+                          URL of the signature file. Default: the policy URL with ".sig"
+                          appended to its path.
+                        type: string
+                    required:
+                    - publicKeys
+                    type: object
                   url:
                     description: URL of the policy file. Must be https:// unless AllowInsecure
                       is set.
@@ -431,9 +460,19 @@ spec:
                       304 Not Modified.
                     format: date-time
                     type: string
+                  publication:
+                    description: |-
+                      Publication is the publication number of the last good file when
+                      signatures are required; a lower one is refused as a replay.
+                    format: int64
+                    type: integer
                   revision:
                     description: Revision is the revision field of the last good file,
                       if it has one.
+                    type: string
+                  signedBy:
+                    description: SignedBy is the id of the key that signed the last
+                      good file.
                     type: string
                 type: object
               renderedPolicyConfigMap:

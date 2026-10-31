@@ -107,6 +107,17 @@ immutable and numbered from 1; `revision` in the served file is that
 number. Publishing an older revision is the rollback. The token value is
 shown once in the response; only its hash is stored.
 
+Signed publications: `POST /api/orgs/{org}/signing-keys` registers a
+public key (`{"name", "publicKey": "ed25519:<base64>"}`; `internal/signing`
+defines the statement and the key id); from the first key on, `publish`
+needs `publication`, `keyId` and `signature`, the Ed25519 signature of the
+`text` from `GET .../publish/statement?revision=N`, checked inside the
+publish transaction against the stored file. `GET /v1/{org}/{set}/policy.json.sig`
+serves it to the cluster. The operator's check is
+`operator/internal/remoterules/signature.go`; the two must stay in step.
+The panel keeps its key as a non-extractable WebCrypto key in IndexedDB.
+Described for users in [docs/rules-server.md](../docs/rules-server.md#signed-publications).
+
 Other calls: `GET /api/orgs`, `GET /api/orgs/{org}/sets`,
 `GET /api/orgs/{org}/sets/{set}` (set, versions, tokens, the policy path),
 `GET .../versions`, `GET .../versions/{rev}`, `GET .../publications`

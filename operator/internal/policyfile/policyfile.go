@@ -50,6 +50,11 @@ const (
 	AnnotationRemoteETag = "pii-shield.io/remote-etag"
 	// AnnotationRemoteHash carries Hash of the last good remote file.
 	AnnotationRemoteHash = "pii-shield.io/remote-hash"
+	// AnnotationRemotePublication and AnnotationRemoteSignedBy record the
+	// publication number and key of the last good remote file when the
+	// policy requires signatures; an empty signer means it was not checked.
+	AnnotationRemotePublication = "pii-shield.io/remote-publication"
+	AnnotationRemoteSignedBy    = "pii-shield.io/remote-signed-by"
 
 	// MaxMinSecretLength mirrors the scanner's limit on min_secret_length.
 	MaxMinSecretLength = 1024

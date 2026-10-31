@@ -61,7 +61,7 @@
     nav.replaceChildren();
     const me = state.me;
     if (!me) return;
-    if (me.org) nav.append(h('a', { href: '#/' }, 'Rule sets'), h('a', { href: '#/members' }, 'Members'));
+    if (me.org || state.org) nav.append(h('a', { href: '#/' }, 'Rule sets'), h('a', { href: '#/members' }, 'Members'), h('a', { href: '#/keys' }, 'Signing keys'));
     if (me.mode === 'admin') nav.append(h('a', { href: '#/orgs' }, 'Organizations'));
     nav.append(h('span', { class: 'small' }, me.mode === 'session' ? me.email : me.mode === 'admin' ? 'admin token' : 'single tenant'));
     if (me.mode === 'session') nav.append(h('button', { class: 'link', onclick: async () => { await api('POST', '/auth/logout'); state.me = null; location.hash = '#/login'; route(); } }, 'Sign out'));
@@ -80,6 +80,7 @@
       if (state.me.mode === 'admin' && !state.me.org && parts[0] !== 'orgs' && !state.org) return renderOrgs();
       if (parts[0] === 'orgs') { if (parts[1]) { state.org = parts[1]; location.hash = '#/'; return; } return renderOrgs(); }
       if (parts[0] === 'members') return renderMembers();
+      if (parts[0] === 'keys') return renderKeys();
       if (parts[0] === 'sets' && parts[1]) return renderSet(parts[1], parts[2] || 'editor');
       return renderSets();
     } catch (e) {
@@ -344,7 +345,7 @@
               h('button', { class: 'link', onclick: () => { draftCache[ctx.slug] = null; loadContent(ctx, v.revision).then(c => { draftCache[ctx.slug] = c; location.hash = '#/sets/' + ctx.slug + '/editor'; }); } }, 'edit as draft'), ' ',
               v.revision === pub ? null : h('button', { class: 'link', onclick: async () => {
                 if (!confirm((pub && v.revision < pub ? 'Roll back to' : 'Publish') + ' r' + v.revision + '? Every cluster pulling this set gets it on its next poll.')) return;
-                try { await api('POST', ctx.setBase + '/publish', { revision: v.revision }); toast('Published r' + v.revision); renderSet(ctx.slug, 'versions'); }
+                try { const signed = await publishRevision(ctx, v.revision); toast('Published r' + v.revision + (signed ? ', signed with ' + signed : '')); renderSet(ctx.slug, 'versions'); }
                 catch (e) { toast(e.message); }
               } }, pub && v.revision < pub ? 'roll back to this' : 'publish')))))),
         versions.length ? null : h('p', { class: 'muted' }, 'No versions yet: write rules on the Rules tab and save them.'),
@@ -357,9 +358,94 @@
           } }, 'Diff'))),
         diffOut) : null,
       h('div', { class: 'card' }, h('h2', null, 'Publish history'),
-        h('table', null, h('thead', null, h('tr', null, h('th', null, 'Revision'), h('th', null, 'By'), h('th', null, 'When'))),
-          h('tbody', null, (publications || []).map(p => h('tr', null, h('td', null, 'r' + p.revision), h('td', null, p.author || '—'), h('td', null, fmtDate(p.publishedAt)))))),
+        h('table', null, h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, 'Revision'), h('th', null, 'By'), h('th', null, 'Signed with'), h('th', null, 'When'))),
+          h('tbody', null, (publications || []).map(p => h('tr', null, h('td', null, p.publication), h('td', null, 'r' + p.revision), h('td', null, p.author || '—'),
+            h('td', null, p.keyId ? h('code', null, p.keyId) : h('span', { class: 'badge off' }, 'unsigned')), h('td', null, fmtDate(p.publishedAt)))))),
         (publications || []).length ? null : h('p', { class: 'muted' }, 'Nothing published yet.')));
+  }
+
+  // ---- signing ----
+  // A signing key is made in this browser and never leaves it: the private
+  // half is a non-extractable CryptoKey kept in IndexedDB, the server gets
+  // the public half. Publishing asks the server for the statement of the
+  // next publication, signs its text here and sends the signature; the
+  // server checks it and clusters check it again.
+  function keyDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('pii-shield-rules', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('keys', { keyPath: 'keyId' });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function keyStore(mode, fn) {
+    const db = await keyDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('keys', mode);
+      const req = fn(tx.objectStore('keys'));
+      tx.oncomplete = () => resolve(req && req.result);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  const localKeys = () => keyStore('readonly', st => st.getAll());
+  const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+  async function createLocalKey(name) {
+    if (!window.crypto || !crypto.subtle) throw new Error('This page is not a secure context (https or localhost), so the browser offers no signing.');
+    let pair;
+    try { pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']); }
+    catch (e) { throw new Error('This browser cannot make Ed25519 keys; use a current Chrome, Firefox or Safari, or sign with openssl (see the docs).'); }
+    const raw = await crypto.subtle.exportKey('raw', pair.publicKey);
+    const k = await api('POST', base() + '/signing-keys', { name, publicKey: 'ed25519:' + b64(raw) });
+    await keyStore('readwrite', st => st.put({ keyId: k.keyId, org: orgSlug(), name, origin: location.origin, privateKey: pair.privateKey, createdAt: new Date().toISOString() }));
+    return k;
+  }
+
+  // publishRevision publishes, signing when the organization has keys.
+  // It returns the key id it signed with, or '' for an unsigned publish.
+  async function publishRevision(ctx, revision) {
+    const { keys } = await api('GET', base() + '/signing-keys');
+    const active = (keys || []).filter(k => !k.revokedAt).map(k => k.keyId);
+    if (!active.length) { await api('POST', ctx.setBase + '/publish', { revision }); return ''; }
+    const mine = (await localKeys()).find(k => k.org === orgSlug() && active.includes(k.keyId));
+    if (!mine) throw new Error('This organization signs its publications, and this browser holds none of its active keys. Create one on the Signing keys page.');
+    const st = await api('GET', ctx.setBase + '/publish/statement?revision=' + revision);
+    const sig = await crypto.subtle.sign({ name: 'Ed25519' }, mine.privateKey, new TextEncoder().encode(st.text));
+    await api('POST', ctx.setBase + '/publish', { revision, publication: st.statement.publication, keyId: mine.keyId, signature: b64(sig) });
+    return mine.keyId;
+  }
+
+  async function renderKeys() {
+    const [{ keys }, local] = await Promise.all([api('GET', base() + '/signing-keys'), localKeys().catch(() => [])]);
+    const here = new Set(local.filter(k => k.org === orgSlug()).map(k => k.keyId));
+    const name = h('input', { type: 'text', placeholder: 'alice, work laptop' });
+    const msg = h('div');
+    const active = (keys || []).filter(k => !k.revokedAt);
+    const trusted = active.map(k => '      - ' + k.publicKey + '   # ' + k.name).join('\n');
+    app.replaceChildren(
+      h('h1', null, 'Signing keys', ' ', h('span', { class: 'muted small' }, orgSlug())),
+      h('div', { class: 'card' },
+        h('p', null, 'A cluster that lists these keys accepts only rule files published with a signature from one of them, so a server that is taken over cannot hand it rules nobody signed. ',
+          active.length ? 'This organization has a key, so every publication must be signed.' : 'Until the first key is added, publications are not signed.'),
+        h('table', null, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Key id'), h('th', null, 'Added by'), h('th', null, 'Added'), h('th', null, 'Status'), h('th', null, ''))),
+          h('tbody', null, (keys || []).map(k => h('tr', null, h('td', null, k.name), h('td', null, h('code', null, k.keyId)), h('td', null, k.createdBy || '—'), h('td', null, fmtDate(k.createdAt)),
+            h('td', null, k.revokedAt ? h('span', { class: 'badge off' }, 'revoked ' + fmtDate(k.revokedAt)) : h('span', { class: 'badge ok' }, here.has(k.keyId) ? 'active, in this browser' : 'active')),
+            h('td', null, k.revokedAt ? null : h('button', { class: 'danger', onclick: async () => {
+              if (!confirm('Revoke "' + k.name + '"? It can no longer sign here. Clusters that list it keep trusting what it signed until you remove it from their PiiPolicy.')) return;
+              try { await api('DELETE', base() + '/signing-keys/' + k.id); toast('Revoked'); renderKeys(); } catch (e) { toast(e.message); }
+            } }, 'Revoke')))))),
+        (keys || []).length ? null : h('p', { class: 'muted' }, 'No keys yet.')),
+      h('div', { class: 'card' }, h('h2', null, 'Create a key in this browser'),
+        h('p', { class: 'muted small' }, 'The private key stays in this browser and cannot be copied out of it. Another person or another browser makes its own key. If this browser is wiped, the key is gone: revoke it here and make a new one.'),
+        h('div', { class: 'row' }, h('div', null, h('label', null, 'Name ', h('span', { class: 'hint' }, 'whose key and where it lives')), name),
+          h('div', { class: 'fixed' }, h('button', { class: 'primary', onclick: async () => {
+            try { const k = await createLocalKey(name.value); toast('Key ' + k.keyId + ' added'); renderKeys(); }
+            catch (e) { msg.replaceChildren(h('div', { class: 'msg error' }, e.message)); }
+          } }, 'Create key'))),
+        msg),
+      active.length ? h('div', { class: 'card' }, h('h2', null, 'Trust these keys in a cluster'),
+        h('p', null, 'Add to the ', h('code', null, 'remoteConfig'), ' of the PiiPolicy:'),
+        h('pre', null, '    signature:\n      publicKeys:\n' + trusted)) : '');
   }
 
   // ---- tokens ----

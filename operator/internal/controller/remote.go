@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ type remoteOutcome struct {
 	haveDoc   bool
 	raw       []byte
 	etag      string
+	verified  remoterules.Verified
 	condition metav1.Condition
 	status    *corev1alpha1.RemoteStatus
 	requeue   time.Duration
@@ -57,15 +59,43 @@ func (r *PiiPolicyReconciler) syncRemote(ctx context.Context, policy *corev1alph
 	}
 	remoteSyncInterval.WithLabelValues(policy.Namespace, policy.Name).Set(remoterules.Interval(rc.IntervalSeconds).Seconds())
 
-	// The last good copy, if the ConfigMap has one.
+	// With signatures required, the trusted keys and the set the statement
+	// must name; a mistake here is a configuration error, not a pull error.
+	var keys []remoterules.TrustedKey
+	var sigURL, sigSet string
+	if rc.Signature != nil {
+		var err error
+		if keys, err = remoterules.ParseTrustedKeys(rc.Signature.PublicKeys); err == nil {
+			if sigURL, err = remoterules.SignatureURL(rc.URL, rc.Signature.URL); err == nil {
+				sigSet, err = remoterules.ExpectedSet(rc.URL, rc.Signature.Set)
+			}
+		}
+		if err != nil {
+			remoteSyncTotal.WithLabelValues("error").Inc()
+			out.condition.Status = metav1.ConditionFalse
+			out.condition.Reason = remoterules.ReasonSignatureConfig
+			out.condition.Message = "signature: " + err.Error() + "; no remote rules are applied until it is fixed"
+			out.status = nil
+			return out
+		}
+	}
+
+	// The last good copy, if the ConfigMap has one. When signatures are
+	// required, only a copy that a key trusted now signed counts: a copy
+	// accepted before signatures were turned on, or signed by a key since
+	// removed from the list, is dropped and pulled again in full.
 	var prevRaw []byte
 	var prevETag string
 	if lastGood != nil {
 		if s, ok := lastGood.Data[policyfile.RemoteKey]; ok && s != "" {
-			if doc, _, err := policyfile.Parse([]byte(s)); err == nil {
+			if doc, _, err := policyfile.Parse([]byte(s)); err == nil && (keys == nil || trusted(keys, lastGood.Annotations[policyfile.AnnotationRemoteSignedBy])) {
 				prevRaw = []byte(s)
 				prevETag = lastGood.Annotations[policyfile.AnnotationRemoteETag]
 				out.doc, out.haveDoc, out.raw, out.etag = doc, true, prevRaw, prevETag
+				if keys != nil {
+					pub, _ := strconv.ParseInt(lastGood.Annotations[policyfile.AnnotationRemotePublication], 10, 64)
+					out.verified = remoterules.Verified{Publication: pub, KeyID: lastGood.Annotations[policyfile.AnnotationRemoteSignedBy]}
+				}
 			}
 		}
 	}
@@ -121,9 +151,22 @@ func (r *PiiPolicyReconciler) syncRemote(ctx context.Context, policy *corev1alph
 			}
 			return fail(policyfile.ReasonInvalidJSON, perr)
 		}
+		var verified remoterules.Verified
+		if keys != nil {
+			sigBody, serr := remoterules.FetchSignature(ctx, src, sigURL)
+			if serr == nil {
+				verified, serr = remoterules.Check(sigBody, res.Body, sigSet, keys, out.verified.Publication)
+			}
+			if serr != nil {
+				if fe, ok := errors.AsType[*remoterules.Error](serr); ok {
+					return fail(fe.Reason, serr)
+				}
+				return fail(remoterules.ReasonSignatureInvalid, serr)
+			}
+		}
 		remoteSyncTotal.WithLabelValues("updated").Inc()
 		ignored = ign
-		out.doc, out.haveDoc, out.raw, out.etag = doc, true, res.Body, res.ETag
+		out.doc, out.haveDoc, out.raw, out.etag, out.verified = doc, true, res.Body, res.ETag, verified
 	}
 
 	remoteSyncLastSuccess.WithLabelValues(policy.Namespace, policy.Name).Set(float64(now.Unix()))
@@ -133,6 +176,8 @@ func (r *PiiPolicyReconciler) syncRemote(ctx context.Context, policy *corev1alph
 		ETag:         out.etag,
 		Revision:     out.doc.Revision,
 		Hash:         policyfile.Hash(out.raw),
+		Publication:  out.verified.Publication,
+		SignedBy:     out.verified.KeyID,
 	}
 	out.condition.Status = metav1.ConditionTrue
 	out.condition.Reason = reasonSynced
@@ -142,6 +187,9 @@ func (r *PiiPolicyReconciler) syncRemote(ctx context.Context, policy *corev1alph
 	} else {
 		fmt.Fprintf(&msg, "Remote rules pulled, revision %q, hash %s", out.doc.Revision, out.status.Hash)
 	}
+	if keys != nil {
+		fmt.Fprintf(&msg, "; signed by key %s, publication %d", out.verified.KeyID, out.verified.Publication)
+	}
 	if len(ignored) > 0 {
 		fmt.Fprintf(&msg, "; ignored keys in the remote file: %s", strings.Join(ignored, ", "))
 	}
@@ -150,6 +198,15 @@ func (r *PiiPolicyReconciler) syncRemote(ctx context.Context, policy *corev1alph
 	}
 	out.condition.Message = msg.String()
 	return out
+}
+
+func trusted(keys []remoterules.TrustedKey, id string) bool {
+	for _, k := range keys {
+		if id != "" && k.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // secretValue reads one key of a Secret in the policy's namespace through

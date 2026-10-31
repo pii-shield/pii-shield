@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -207,9 +208,18 @@ func (r *PiiPolicyReconciler) renderConfigMap(ctx context.Context, policy *corev
 			} else {
 				delete(cm.Annotations, policyfile.AnnotationRemoteETag)
 			}
+			if remote.verified.KeyID != "" {
+				cm.Annotations[policyfile.AnnotationRemoteSignedBy] = remote.verified.KeyID
+				cm.Annotations[policyfile.AnnotationRemotePublication] = strconv.FormatInt(remote.verified.Publication, 10)
+			} else {
+				delete(cm.Annotations, policyfile.AnnotationRemoteSignedBy)
+				delete(cm.Annotations, policyfile.AnnotationRemotePublication)
+			}
 		} else {
 			delete(cm.Annotations, policyfile.AnnotationRemoteHash)
 			delete(cm.Annotations, policyfile.AnnotationRemoteETag)
+			delete(cm.Annotations, policyfile.AnnotationRemoteSignedBy)
+			delete(cm.Annotations, policyfile.AnnotationRemotePublication)
 		}
 		return controllerutil.SetControllerReference(policy, cm, r.Scheme)
 	})

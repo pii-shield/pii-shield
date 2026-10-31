@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"github.com/pii-shield/pii-shield/rules/internal/mail"
 	"github.com/pii-shield/pii-shield/rules/internal/panel"
 	"github.com/pii-shield/pii-shield/rules/internal/policy"
+	"github.com/pii-shield/pii-shield/rules/internal/signing"
 	"github.com/pii-shield/pii-shield/rules/internal/store"
 )
 
@@ -123,6 +125,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, error) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json", s.servePolicy)
+	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json.sig", s.serveSignature)
 
 	s.mux.Handle("GET /{$}", panel.Handler())
 	s.mux.Handle("GET /app.js", panel.Handler())
@@ -147,6 +150,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/validate", admin(s.validate))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/preview", admin(s.preview))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/publish", admin(s.publish))
+	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publish/statement", admin(s.statement))
+	s.mux.HandleFunc("GET /api/orgs/{org}/signing-keys", admin(s.listSigningKeys))
+	s.mux.HandleFunc("POST /api/orgs/{org}/signing-keys", admin(s.addSigningKey))
+	s.mux.HandleFunc("DELETE /api/orgs/{org}/signing-keys/{id}", admin(s.revokeSigningKey))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publications", admin(s.publications))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/tokens", admin(s.listTokens))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/tokens", admin(s.createToken))
@@ -163,34 +170,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // servePolicy answers the pull of part 3 of #36: a bearer token names the
 // set, the published version is the body, ETag is its hash, 304 on a
-// matching If-None-Match. Any token problem is 401 without detail; a token
-// used against another set's path is 404, so a token discloses nothing
-// about sets it does not own.
+// matching If-None-Match.
 func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-cache")
-	value, ok := bearer(r)
+	acc, ok := s.pullAccess(w, r)
 	if !ok {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules"`)
-		s.fail(w, http.StatusUnauthorized, "missing or malformed Authorization: Bearer <token>")
-		return
-	}
-	acc, err := s.store.Authenticate(r.Context(), value)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrTokenRevoked) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules", error="invalid_token"`)
-			s.fail(w, http.StatusUnauthorized, "invalid token")
-			return
-		}
-		s.internal(w, err)
-		return
-	}
-	if !s.limiter(acc.Token.ID).Allow() {
-		w.Header().Set("Retry-After", "1")
-		s.fail(w, http.StatusTooManyRequests, "too many pulls with this token")
-		return
-	}
-	if acc.Org.Slug != r.PathValue("org") || acc.Set.Slug != r.PathValue("set") {
-		s.fail(w, http.StatusNotFound, "no such rule set for this token")
 		return
 	}
 	v, err := s.store.Published(r.Context(), acc.Set.ID)
@@ -211,6 +194,40 @@ func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(v.Content)))
 	_, _ = w.Write(v.Content)
+}
+
+// pullAccess checks the read-only token of a pull and that it belongs to
+// the set of the path. Any token problem is 401 without detail; a token
+// used against another set's path is 404, so a token discloses nothing
+// about sets it does not own.
+func (s *Server) pullAccess(w http.ResponseWriter, r *http.Request) (*store.Access, bool) {
+	w.Header().Set("Cache-Control", "no-cache")
+	value, ok := bearer(r)
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules"`)
+		s.fail(w, http.StatusUnauthorized, "missing or malformed Authorization: Bearer <token>")
+		return nil, false
+	}
+	acc, err := s.store.Authenticate(r.Context(), value)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrTokenRevoked) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules", error="invalid_token"`)
+			s.fail(w, http.StatusUnauthorized, "invalid token")
+			return nil, false
+		}
+		s.internal(w, err)
+		return nil, false
+	}
+	if !s.limiter(acc.Token.ID).Allow() {
+		w.Header().Set("Retry-After", "1")
+		s.fail(w, http.StatusTooManyRequests, "too many pulls with this token")
+		return nil, false
+	}
+	if acc.Org.Slug != r.PathValue("org") || acc.Set.Slug != r.PathValue("set") {
+		s.fail(w, http.StatusNotFound, "no such rule set for this token")
+		return nil, false
+	}
+	return acc, true
 }
 
 func (s *Server) limiter(tokenID int64) *rate.Limiter {
@@ -449,8 +466,18 @@ func (s *Server) getVersion(w http.ResponseWriter, r *http.Request) {
 type publishRequest struct {
 	Revision int64  `json:"revision"`
 	Author   string `json:"author"`
+	// Publication, KeyID and Signature sign the publication: the number
+	// from GET .../publish/statement, the id of a key registered with the
+	// organization, and the base64 Ed25519 signature of the statement text.
+	Publication int64  `json:"publication"`
+	KeyID       string `json:"keyId"`
+	Signature   string `json:"signature"`
 }
 
+// publish serves a revision. Once the organization has a signing key, a
+// publication must be signed with one of its active keys: the server checks
+// the signature against the statement it builds itself from the stored
+// file, so it stores only signatures that a cluster will accept.
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	set, ok := s.set(w, r)
 	if !ok {
@@ -464,14 +491,88 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, `"revision" is required`)
 		return
 	}
+	signed := req.Signature != "" || req.KeyID != ""
+	if signed && (req.Signature == "" || req.KeyID == "" || req.Publication <= 0) {
+		s.fail(w, http.StatusBadRequest, `a signed publish needs "publication", "keyId" and "signature" together`)
+		return
+	}
+	var key ed25519.PublicKey
+	if signed {
+		k, err := s.store.ActiveSigningKey(r.Context(), set.OrgID, req.KeyID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				s.fail(w, http.StatusUnprocessableEntity, "no active signing key "+req.KeyID+" in this organization")
+				return
+			}
+			s.internal(w, err)
+			return
+		}
+		if key, err = signing.ParsePublicKey(k.PublicKey); err != nil {
+			s.internal(w, err)
+			return
+		}
+	} else {
+		has, err := s.store.HasSigningKeys(r.Context(), set.OrgID)
+		if err != nil {
+			s.internal(w, err)
+			return
+		}
+		if has {
+			s.fail(w, http.StatusUnprocessableEntity, "this organization signs its publications: sign the statement from GET "+r.URL.Path+"/statement?revision=N and send publication, keyId and signature")
+			return
+		}
+	}
 	author := authorOf(r, req.Author)
-	if err := s.store.Publish(r.Context(), set.ID, req.Revision, author); err != nil {
+	setPath := r.PathValue("org") + "/" + set.Slug
+	pub, err := s.store.Publish(r.Context(), set.ID, store.PublishRequest{
+		Revision: req.Revision, Author: author, Seq: req.Publication, KeyID: req.KeyID, Signature: req.Signature,
+		Check: func(seq int64, v *store.Version) error {
+			if !signed {
+				return nil
+			}
+			return signing.Verify(key, signing.For(setPath, seq, v.Revision, v.Content), req.Signature)
+		},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, signing.ErrBadSignature):
+			s.fail(w, http.StatusUnprocessableEntity, "the signature does not verify with key "+req.KeyID+" for this statement")
+		case errors.Is(err, store.ErrStale):
+			s.fail(w, http.StatusConflict, err.Error())
+		default:
+			s.storeError(w, err)
+		}
+		return
+	}
+	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "publication", pub.Seq, "author", author, "key", req.KeyID)
+	set, _ = s.store.GetSetByID(r.Context(), set.ID)
+	s.json(w, http.StatusOK, set)
+}
+
+// statement answers what a publisher signs to publish a revision now: the
+// statement with the next publication number, and its exact text.
+func (s *Server) statement(w http.ResponseWriter, r *http.Request) {
+	set, ok := s.set(w, r)
+	if !ok {
+		return
+	}
+	rev, err := strconv.ParseInt(r.URL.Query().Get("revision"), 10, 64)
+	if err != nil || rev <= 0 {
+		s.fail(w, http.StatusBadRequest, "revision must be a positive number")
+		return
+	}
+	v, err := s.store.GetVersion(r.Context(), set.ID, rev)
+	if err != nil {
 		s.storeError(w, err)
 		return
 	}
-	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "author", author)
-	set, _ = s.store.GetSetByID(r.Context(), set.ID)
-	s.json(w, http.StatusOK, set)
+	seq, err := s.store.NextPublication(r.Context(), set.ID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	st := signing.For(r.PathValue("org")+"/"+set.Slug, seq, v.Revision, v.Content)
+	s.json(w, http.StatusOK, map[string]any{"statement": st, "text": st.Text()})
 }
 
 func (s *Server) publications(w http.ResponseWriter, r *http.Request) {

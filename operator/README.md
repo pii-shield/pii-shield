@@ -190,6 +190,8 @@ spec:
     headerSecretRef: { name: rules-token, key: authorization }   # whole Authorization header value, e.g. "Bearer …"
     caBundleSecretRef: { name: rules-ca, key: ca.crt }          # PEM bundle instead of the system roots
     # allowInsecure: true                # http:// or an unverified certificate; labs only, the status warns
+    # signature:                         # accept only files signed with one of these keys
+    #   publicKeys: ["ed25519:…"]
   sensitiveKeys: [password, token, geheim]   # a local field always wins over the source
 ```
 
@@ -219,11 +221,23 @@ How a pull works:
   edit of the policy still applies on top of it. The pull is retried after
   at most 60 s. Before the first successful pull the local policy alone is
   rendered, the same as without `remoteConfig`.
+- With `signature.publicKeys` set, the controller also pulls the signature
+  file (`signature.url`, by default the file's URL plus `.sig`, with the
+  same credentials) and accepts the file only if one of the keys signed a
+  statement that names this set (`signature.set`, by default taken from a
+  `/v1/<org>/<set>/policy.json` URL), the file's SHA-256, and a publication
+  number not lower than the last accepted one. A refused file leaves the
+  last good copy in place; a copy accepted before signatures were turned
+  on, or signed by a key no longer listed, is not kept. The rule server's
+  [signed publications](../docs/rules-server.md#signed-publications) make
+  these files; any Ed25519 tool can make them for a file on an object store.
 - `status.remote` reports the last good pull (`lastSyncTime`, `etag`,
-  `revision`, `hash`); the `RemoteSynced` condition reports the latest
-  attempt with a reason: `Synced`, `FetchFailed`, `TooLarge`,
-  `InvalidJSON`, `InvalidRegex`, `InvalidValue`, `InsecureURL`,
-  `SecretNotFound`.
+  `revision`, `hash`, and with signatures `publication` and `signedBy`);
+  the `RemoteSynced` condition reports the latest attempt with a reason:
+  `Synced`, `FetchFailed`, `TooLarge`, `InvalidJSON`, `InvalidRegex`,
+  `InvalidValue`, `InsecureURL`, `SecretNotFound`, `SignatureMissing`,
+  `SignatureInvalid`, `SignatureUntrusted`, `SignatureReplayed`,
+  `SignatureConfig`.
 - Rollback: remove `remoteConfig` from the policy; on the next reconcile
   the ConfigMap is rendered from the local policy alone and `remote.json`
   is dropped. To pin a value against the source, set it in the policy.

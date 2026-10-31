@@ -82,10 +82,15 @@ type Token struct {
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
-// Publication is one entry of a set's publish history.
+// Publication is one entry of a set's publish history. Seq numbers the
+// publications of a set from 1 and is the number a signature covers; KeyID
+// and Signature are empty for an unsigned publication.
 type Publication struct {
+	Seq         int64     `json:"publication"`
 	Revision    int64     `json:"revision"`
 	Author      string    `json:"author,omitempty"`
+	KeyID       string    `json:"keyId,omitempty"`
+	Signature   string    `json:"signature,omitempty"`
 	PublishedAt time.Time `json:"publishedAt"`
 }
 
@@ -104,7 +109,7 @@ func Open(path string) (*Store, error) {
 	// One connection: SQLite serializes writers anyway, and one connection
 	// means a transaction never waits on the pool for a second one.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + accountsSchema); err != nil {
+	if _, err := db.Exec(schema + accountsSchema + signingSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -159,9 +164,13 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE TABLE IF NOT EXISTS publications (
 	id INTEGER PRIMARY KEY,
 	set_id INTEGER NOT NULL REFERENCES rule_sets(id),
+	seq INTEGER NOT NULL,
 	version_id INTEGER NOT NULL REFERENCES versions(id),
 	author TEXT NOT NULL DEFAULT '',
-	published_at TEXT NOT NULL
+	key_id TEXT NOT NULL DEFAULT '',
+	signature TEXT NOT NULL DEFAULT '',
+	published_at TEXT NOT NULL,
+	UNIQUE(set_id, seq)
 );
 `
 
@@ -389,28 +398,99 @@ func (s *Store) ListVersions(ctx context.Context, setID int64) ([]Version, error
 	return out, rows.Err()
 }
 
+// PublishRequest is one publication: the revision to serve and, for a
+// signed one, the publication number the signature covers and the
+// signature. Check runs inside the transaction with the number the
+// publication gets and the version it serves, so a signature is checked
+// against exactly what is stored and two concurrent publishes cannot both
+// claim the same number.
+type PublishRequest struct {
+	Revision int64
+	Author   string
+	// Seq, when not zero, must be the number this publication gets;
+	// otherwise the publish fails with ErrStale.
+	Seq       int64
+	KeyID     string
+	Signature string
+	Check     func(seq int64, v *Version) error
+}
+
+// ErrStale means the set was published by someone else since the caller
+// read the next publication number; the caller signs again.
+var ErrStale = errors.New("the set was published meanwhile; sign the new statement")
+
 // Publish makes the revision the one the set serves. Publishing an older
-// revision is the rollback.
-func (s *Store) Publish(ctx context.Context, setID, revision int64, author string) error {
+// revision is the rollback; it is a new publication with a higher number.
+func (s *Store) Publish(ctx context.Context, setID int64, req PublishRequest) (*Publication, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var versionID int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM versions WHERE set_id = ? AND revision = ?`, setID, revision).Scan(&versionID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+	v, err := scanVersion(tx.QueryRowContext(ctx, `SELECT `+versionColumns+` FROM versions v WHERE v.set_id = ? AND v.revision = ?`, setID, req.Revision))
+	if err != nil {
+		return nil, err
+	}
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM publications WHERE set_id = ?`, setID).Scan(&seq); err != nil {
+		return nil, err
+	}
+	if req.Seq != 0 && req.Seq != seq {
+		return nil, ErrStale
+	}
+	if req.Check != nil {
+		if err := req.Check(seq, v); err != nil {
+			return nil, err
 		}
-		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE rule_sets SET published_version_id = ? WHERE id = ?`, versionID, setID); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `UPDATE rule_sets SET published_version_id = ? WHERE id = ?`, v.ID, setID); err != nil {
+		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO publications (set_id, version_id, author, published_at) VALUES (?, ?, ?, ?)`, setID, versionID, author, now()); err != nil {
-		return err
+	at := now()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO publications (set_id, seq, version_id, author, key_id, signature, published_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		setID, seq, v.ID, req.Author, req.KeyID, req.Signature, at); err != nil {
+		if isUnique(err) {
+			return nil, ErrStale
+		}
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &Publication{Seq: seq, Revision: v.Revision, Author: req.Author, KeyID: req.KeyID, Signature: req.Signature, PublishedAt: parseTime(at)}, nil
+}
+
+// NextPublication returns the number the set's next publication gets.
+func (s *Store) NextPublication(ctx context.Context, setID int64) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM publications WHERE set_id = ?`, setID).Scan(&seq)
+	return seq, err
+}
+
+// LatestPublication returns the set's newest publication, the one it
+// serves, or ErrNotPublished.
+func (s *Store) LatestPublication(ctx context.Context, setID int64) (*Publication, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+publicationColumns+` FROM publications p JOIN versions v ON v.id = p.version_id WHERE p.set_id = ? ORDER BY p.seq DESC LIMIT 1`, setID)
+	p, err := scanPublication(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotPublished
+	}
+	return p, err
+}
+
+const publicationColumns = `p.seq, v.revision, p.author, p.key_id, p.signature, p.published_at`
+
+func scanPublication(row scanner) (*Publication, error) {
+	var p Publication
+	var at string
+	if err := row.Scan(&p.Seq, &p.Revision, &p.Author, &p.KeyID, &p.Signature, &at); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	p.PublishedAt = parseTime(at)
+	return &p, nil
 }
 
 // Published returns the set's published version, or ErrNotPublished.
@@ -424,20 +504,18 @@ func (s *Store) Published(ctx context.Context, setID int64) (*Version, error) {
 
 // Publications returns the set's publish history, newest first.
 func (s *Store) Publications(ctx context.Context, setID int64) ([]Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT v.revision, p.author, p.published_at FROM publications p JOIN versions v ON v.id = p.version_id WHERE p.set_id = ? ORDER BY p.id DESC`, setID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+publicationColumns+` FROM publications p JOIN versions v ON v.id = p.version_id WHERE p.set_id = ? ORDER BY p.seq DESC`, setID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []Publication
 	for rows.Next() {
-		var p Publication
-		var at string
-		if err := rows.Scan(&p.Revision, &p.Author, &at); err != nil {
+		p, err := scanPublication(rows)
+		if err != nil {
 			return nil, err
 		}
-		p.PublishedAt = parseTime(at)
-		out = append(out, p)
+		out = append(out, *p)
 	}
 	return out, rows.Err()
 }

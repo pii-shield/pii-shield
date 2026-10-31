@@ -102,18 +102,18 @@ func TestVersionsAreImmutableAndPublishRollsBack(t *testing.T) {
 		t.Errorf("DELETE on a version must be refused by the trigger, got %v", err)
 	}
 
-	if err := s.Publish(ctx, set.ID, 2, "alice"); err != nil {
-		t.Fatal(err)
+	if p, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 2, Author: "alice"}); err != nil || p.Seq != 1 {
+		t.Fatalf("first publish: %+v %v", p, err)
 	}
 	pub, _ := s.Published(ctx, set.ID)
 	if pub.Revision != 2 {
 		t.Errorf("published = %d", pub.Revision)
 	}
-	if err := s.Publish(ctx, set.ID, 3, ""); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 3}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("publishing a missing revision: %v", err)
 	}
 	// Rollback is publishing the older revision.
-	if err := s.Publish(ctx, set.ID, 1, "bob"); err != nil {
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 1, Author: "bob"}); err != nil {
 		t.Fatal(err)
 	}
 	pub, _ = s.Published(ctx, set.ID)
@@ -122,8 +122,28 @@ func TestVersionsAreImmutableAndPublishRollsBack(t *testing.T) {
 		t.Errorf("after rollback: published %d, set %+v", pub.Revision, got)
 	}
 	hist, _ := s.Publications(ctx, set.ID)
-	if len(hist) != 2 || hist[0].Revision != 1 || hist[0].Author != "bob" || hist[1].Revision != 2 {
+	if len(hist) != 2 || hist[0].Revision != 1 || hist[0].Author != "bob" || hist[0].Seq != 2 || hist[1].Revision != 2 || hist[1].Seq != 1 {
 		t.Errorf("publish history = %+v", hist)
+	}
+	// A publication that names a number other than the next one is stale,
+	// and a failed check leaves nothing behind.
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 2, Seq: 2}); !errors.Is(err, ErrStale) {
+		t.Errorf("stale publication number: %v", err)
+	}
+	refuse := errors.New("refused")
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 2, Seq: 3, Check: func(seq int64, v *Version) error {
+		if seq != 3 || v.Revision != 2 {
+			t.Errorf("check got seq %d, revision %d", seq, v.Revision)
+		}
+		return refuse
+	}}); !errors.Is(err, refuse) {
+		t.Errorf("failed check: %v", err)
+	}
+	if latest, _ := s.LatestPublication(ctx, set.ID); latest.Seq != 2 || latest.Revision != 1 {
+		t.Errorf("after a refused publish: %+v", latest)
+	}
+	if next, _ := s.NextPublication(ctx, set.ID); next != 3 {
+		t.Errorf("NextPublication = %d", next)
 	}
 	list, _ := s.ListVersions(ctx, set.ID)
 	if len(list) != 2 || list[0].Revision != 2 || list[0].Content != nil || list[1].Author != "alice" {
@@ -197,5 +217,44 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	if got, err := s.GetOrg(ctx, "acme"); err != nil || got.ID != org.ID {
 		t.Errorf("data lost across Open: %+v, %v", got, err)
+	}
+}
+
+func TestSigningKeys(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	other, _ := s.CreateOrg(ctx, "other", "")
+	if has, _ := s.HasSigningKeys(ctx, org.ID); has {
+		t.Fatal("a new organization has no keys")
+	}
+	k, err := s.AddSigningKey(ctx, org.ID, "0011223344556677", "alice laptop", "ed25519:AAAA", "alice@acme.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddSigningKey(ctx, org.ID, "0011223344556677", "again", "ed25519:AAAA", ""); !errors.Is(err, ErrExists) {
+		t.Errorf("the same key twice: %v", err)
+	}
+	if has, _ := s.HasSigningKeys(ctx, org.ID); !has {
+		t.Error("HasSigningKeys after adding one")
+	}
+	if _, err := s.ActiveSigningKey(ctx, other.ID, k.KeyID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another organization's key: %v", err)
+	}
+	if err := s.RevokeSigningKey(ctx, other.ID, k.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("revoking through another organization: %v", err)
+	}
+	if err := s.RevokeSigningKey(ctx, org.ID, k.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActiveSigningKey(ctx, org.ID, k.KeyID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a revoked key is not active: %v", err)
+	}
+	if has, _ := s.HasSigningKeys(ctx, org.ID); has {
+		t.Error("only a revoked key left")
+	}
+	keys, _ := s.ListSigningKeys(ctx, org.ID)
+	if len(keys) != 1 || keys[0].RevokedAt == nil || keys[0].CreatedBy != "alice@acme.test" {
+		t.Errorf("ListSigningKeys = %+v", keys)
 	}
 }
