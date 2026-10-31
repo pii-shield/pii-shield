@@ -17,6 +17,7 @@ Shared utilities live in `shared/`:
 | `operator-kustomize` | Dev-only `operator/Makefile` / Kustomize deploy |
 | `operator-pipe` | Existing operator install with `PiiPolicy.spec.injectionMode=pipe` |
 | `operator-ebpf` | Experimental eBPF mutation/rendering only |
+| `operator-rules-server` | Operator and rule server built from the tree, in a kind cluster of its own: signed remote rules reach a sidecar, a new signed publication reaches the running pod without a restart, an untrusted key is refused, stats reports reach the server |
 
 All paths are self-contained: they recreate the local Kind cluster if it is missing, and `operator-pipe` / `operator-ebpf` install the operator themselves when it is not present. Scripts that build docker images remove them (and prune dangling layers) on exit via `cleanup_docker_images`. Before creating test pods the scripts wait for the mutating webhook to actually inject (server-side dry-run canary) — right after an install/upgrade the webhook cert can lag and pods would otherwise be created without a sidecar.
 
