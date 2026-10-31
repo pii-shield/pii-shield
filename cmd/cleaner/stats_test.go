@@ -100,6 +100,24 @@ func TestStatsSignatureHasItsOwnBucket(t *testing.T) {
 	}
 }
 
+// A value hidden because of its key has a bucket of its own; it was counted
+// with the high-entropy secrets before the scanner reported it as "key".
+func TestStatsKeyHasItsOwnBucket(t *testing.T) {
+	s := newStatsCollector()
+	s.recordRedaction("key")
+	s.recordRedaction("key")
+	s.recordRedaction("entropy")
+	got := s.summary()
+	for _, want := range []string{"3 redactions", "1 high-entropy secrets", "2 sensitive-key values"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "other") {
+		t.Errorf("key redactions counted as other: %s", got)
+	}
+}
+
 // TestStatsSummaryLoggedOnShutdown checks the wiring, not the collector:
 // with PII_STATS_LOG_INTERVAL set, main counts real redactions through the
 // scanner callback and logs the summary when stdin ends.

@@ -20,6 +20,7 @@ type statsCollector struct {
 	regex     atomic.Uint64
 	luhn      atomic.Uint64
 	signature atomic.Uint64
+	key       atomic.Uint64
 	other     atomic.Uint64
 	lines     atomic.Uint64
 	bytes     atomic.Uint64
@@ -32,7 +33,7 @@ type statsCollector struct {
 func newStatsCollector() *statsCollector { return &statsCollector{} }
 
 // recordRedaction maps a scanner strategy ("entropy", "regex", "luhn",
-// "signature") to a counter. Unknown strategies fall into "other" so new
+// "signature", "key") to a counter. Unknown strategies fall into "other" so new
 // detectors are not lost.
 func (s *statsCollector) recordRedaction(strategy string) {
 	switch strategy {
@@ -44,6 +45,8 @@ func (s *statsCollector) recordRedaction(strategy string) {
 		s.luhn.Add(1)
 	case "signature":
 		s.signature.Add(1)
+	case "key":
+		s.key.Add(1)
 	default:
 		s.other.Add(1)
 	}
@@ -71,14 +74,16 @@ func (s *statsCollector) summary() string {
 	regex := s.regex.Load()
 	luhn := s.luhn.Load()
 	signature := s.signature.Load()
+	key := s.key.Load()
 	other := s.other.Load()
-	total := entropy + regex + luhn + signature + other
+	total := entropy + regex + luhn + signature + key + other
 
 	parts := []string{
 		fmt.Sprintf("%s high-entropy secrets", withThousands(entropy)),
 		fmt.Sprintf("%s pattern matches", withThousands(regex)),
 		fmt.Sprintf("%s card numbers", withThousands(luhn)),
 		fmt.Sprintf("%s signatures", withThousands(signature)),
+		fmt.Sprintf("%s sensitive-key values", withThousands(key)),
 	}
 	if other > 0 {
 		parts = append(parts, fmt.Sprintf("%s other", withThousands(other)))

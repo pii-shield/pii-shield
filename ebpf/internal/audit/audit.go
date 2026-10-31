@@ -44,10 +44,10 @@ type Auditor struct {
 	wouldRedact atomic.Uint64
 	bytes       atomic.Uint64
 	findings    atomic.Uint64
-	byType      [5]atomic.Uint64
+	byType      [6]atomic.Uint64
 }
 
-var typeNames = [5]string{"entropy", "regex", "luhn", "signature", "other"}
+var typeNames = [6]string{"entropy", "regex", "luhn", "signature", "key", "other"}
 
 // New wires the scanner's callback to the findings counters and marks the
 // process as running in audit mode (piishield_audit_mode = 1, the audit
@@ -57,8 +57,8 @@ func New() *Auditor {
 	scanner.RedactionCallback = func(strategy string) {
 		metrics.IncrementAuditFinding(strategy)
 		a.findings.Add(1)
-		i := 4
-		for j, n := range typeNames[:4] {
+		i := 5
+		for j, n := range typeNames[:5] {
 			if n == strategy {
 				i = j
 				break
@@ -103,8 +103,9 @@ func (a *Auditor) Summary() string {
 		fmt.Sprintf("%d pattern matches", a.byType[1].Load()),
 		fmt.Sprintf("%d card numbers", a.byType[2].Load()),
 		fmt.Sprintf("%d signatures", a.byType[3].Load()),
+		fmt.Sprintf("%d sensitive-key values", a.byType[4].Load()),
 	}
-	if other := a.byType[4].Load(); other > 0 {
+	if other := a.byType[5].Load(); other > 0 {
 		parts = append(parts, fmt.Sprintf("%d other", other))
 	}
 	return fmt.Sprintf("PII-Shield audit: %d would-be redactions (%s) in %d of %d lines (%.1f%%) / %d bytes seen; nothing was changed",
