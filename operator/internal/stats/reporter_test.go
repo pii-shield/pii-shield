@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -16,14 +18,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	corev1alpha1 "github.com/pii-shield/pii-shield/operator/api/v1alpha1"
 	"github.com/pii-shield/pii-shield/operator/internal/remoterules"
 )
 
 const (
-	testNS   = "apps"
-	testMode = "file"
+	testNS      = "apps"
+	testMode    = "file"
+	testPolicy  = "central"
+	testReceive = "https://x.test/report"
 )
 
 // fakePods serves a /metrics body per pod IP and records sent reports.
@@ -88,7 +93,7 @@ func TestReporterCountsGrowthAndSends(t *testing.T) {
 	_ = corev1alpha1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 	policy := &corev1alpha1.PiiPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "central", Namespace: testNS},
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicy, Namespace: testNS},
 		Spec: corev1alpha1.PiiPolicySpec{InjectionMode: testMode, Stats: &corev1alpha1.StatsConfig{
 			URL: "https://rules.example.test/v1/acme/payments/report", IntervalSeconds: 60, ClusterName: "prod-eu",
 			HeaderSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "stats-token"}, Key: "authorization"},
@@ -194,9 +199,9 @@ func TestReporterSendErrorsNameTheSecret(t *testing.T) {
 	_ = corev1alpha1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 	policy := &corev1alpha1.PiiPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "central", Namespace: testNS},
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicy, Namespace: testNS},
 		Spec: corev1alpha1.PiiPolicySpec{InjectionMode: testMode, AuditMode: true, Stats: &corev1alpha1.StatsConfig{
-			URL: "https://x.test/report", HeaderSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "missing"}, Key: "k"},
+			URL: testReceive, HeaderSecretRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "missing"}, Key: "k"},
 		}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(policy).WithStatusSubresource(&corev1alpha1.PiiPolicy{}).Build()
@@ -218,5 +223,162 @@ func TestInterval(t *testing.T) {
 		if got := Interval(in); got != want {
 			t.Errorf("Interval(%d) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestHTTPScrape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metrics" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte("piishield_processing_duration_seconds_count 7\n"))
+	}))
+	defer srv.Close()
+	body, err := httpScrape(context.Background(), srv.URL+"/metrics")
+	if err != nil || parse(body).lines != 7 {
+		t.Fatalf("scrape: %q %v", body, err)
+	}
+	if _, err := httpScrape(context.Background(), srv.URL+"/other"); err == nil {
+		t.Error("a 404 must fail")
+	}
+	if _, err := httpScrape(context.Background(), "http://127.0.0.1:1/metrics"); err == nil {
+		t.Error("an unreachable pod must fail")
+	}
+	if _, err := httpScrape(context.Background(), "http://%zz"); err == nil {
+		t.Error("a bad URL must fail")
+	}
+}
+
+func TestStartRunsPassesUntilStopped(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &Reporter{Client: c, APIReader: c, Period: 5 * time.Millisecond}
+	if !r.NeedLeaderElection() {
+		t.Error("the channel must run on the leader only")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	if err := r.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r.state == nil {
+		t.Error("Start never ran a pass")
+	}
+}
+
+func TestReporterSecretsAndCABundle(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = corev1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	ref := func(name, key string) *corev1.SecretKeySelector {
+		return &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: name}, Key: key}
+	}
+	policy := &corev1alpha1.PiiPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: testNS},
+		Spec: corev1alpha1.PiiPolicySpec{InjectionMode: testMode, AuditMode: true, Stats: &corev1alpha1.StatsConfig{
+			URL: testReceive, CABundleSecretRef: ref("ca", "ca.crt")}},
+	}
+	ca := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "ca", Namespace: testNS}, Data: map[string][]byte{"other": []byte("x")}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(policy, ca).WithStatusSubresource(&corev1alpha1.PiiPolicy{}).Build()
+	f := &fakePods{bodies: map[string]string{}}
+	now := time.Now()
+	r := &Reporter{Client: c, APIReader: c, Scrape: f.scrape, Send: f.send, Now: func() time.Time { return now }}
+	r.Pass(ctx)
+	now = now.Add(DefaultInterval)
+	r.Pass(ctx)
+	got := &corev1alpha1.PiiPolicy{}
+	_ = c.Get(ctx, client.ObjectKeyFromObject(policy), got)
+	if got.Status.Stats == nil || !strings.Contains(got.Status.Stats.LastError, `has no key "ca.crt"`) {
+		t.Fatalf("missing key: %+v", got.Status.Stats)
+	}
+	// With the key present the bundle reaches the sender, in audit mode.
+	ca.Data["ca.crt"] = []byte("PEM")
+	_ = c.Update(ctx, ca)
+	now = now.Add(DefaultInterval)
+	r.Pass(ctx)
+	if len(f.sentSrc) != 1 || string(f.sentSrc[0].CABundle) != "PEM" || f.sent[0].Mode != "audit" {
+		t.Errorf("sent %+v %+v", f.sentSrc, f.sent)
+	}
+}
+
+func TestReporterAuditGrowthMissingRevisionAndGonePods(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = corev1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	policy := &corev1alpha1.PiiPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicy, Namespace: testNS},
+		Spec: corev1alpha1.PiiPolicySpec{InjectionMode: testMode, AuditMode: true,
+			Stats: &corev1alpha1.StatsConfig{URL: testReceive, IntervalSeconds: 60}},
+	}
+	gone := pod("gone", "10.0.0.9", "central", true)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(policy, pod("a", "10.0.0.1", "central", true), gone).
+		WithStatusSubresource(&corev1alpha1.PiiPolicy{}).Build()
+	f := &fakePods{bodies: map[string]string{
+		// An older sidecar: no revision series.
+		"10.0.0.1": "piishield_processing_duration_seconds_count 10\npiishield_audit_findings_total{type=\"luhn\"} 1\n",
+		"10.0.0.9": "piishield_processing_duration_seconds_count 5\n",
+	}}
+	now := time.Now()
+	r := &Reporter{Client: c, APIReader: c, Scrape: f.scrape, Send: f.send, Now: func() time.Time { return now }}
+	r.Pass(ctx)
+	_ = c.Delete(ctx, gone)
+	f.bodies["10.0.0.1"] = "piishield_processing_duration_seconds_count 25\npiishield_audit_findings_total{type=\"luhn\"} 4\n"
+	now = now.Add(time.Minute)
+	r.Pass(ctx)
+	if len(f.sent) != 1 {
+		t.Fatalf("sent %d", len(f.sent))
+	}
+	rep := f.sent[0]
+	if rep.Mode != "audit" || rep.Lines != 15 || rep.AuditFindings["luhn"] != 3 || rep.Revisions[""] != 1 || rep.PodsTotal != 1 {
+		t.Errorf("report %+v", rep)
+	}
+	if st := r.state[types.NamespacedName{Namespace: testNS, Name: testPolicy}]; len(st.pods) != 1 {
+		t.Errorf("a deleted pod must be forgotten: %v", st.pods)
+	}
+}
+
+func TestReporterListErrors(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = corev1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	policy := &corev1alpha1.PiiPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicy, Namespace: testNS},
+		Spec:       corev1alpha1.PiiPolicySpec{InjectionMode: testMode, Stats: &corev1alpha1.StatsConfig{URL: testReceive}},
+	}
+	failPods := interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+		if _, ok := list.(*corev1.PodList); ok {
+			return errors.New("forbidden: pods")
+		}
+		return c.List(ctx, list, opts...)
+	}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(policy).WithStatusSubresource(&corev1alpha1.PiiPolicy{}).
+		WithInterceptorFuncs(failPods).Build()
+	r := &Reporter{Client: c, APIReader: c}
+	if r.now().IsZero() {
+		t.Error("the default clock")
+	}
+	r.Pass(ctx)
+	got := &corev1alpha1.PiiPolicy{}
+	_ = c.Get(ctx, client.ObjectKeyFromObject(policy), got)
+	if got.Status.Stats == nil || got.Status.Stats.LastError != "list pods: forbidden: pods" {
+		t.Errorf("status.stats = %+v", got.Status.Stats)
+	}
+
+	// No policies to list: the pass does nothing and keeps no state.
+	broken := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			return errors.New("down")
+		},
+	}).Build()
+	r = &Reporter{Client: broken, APIReader: broken}
+	r.Pass(ctx)
+	if len(r.state) != 0 {
+		t.Errorf("state after a failed list: %v", r.state)
 	}
 }

@@ -32,3 +32,22 @@ piishield_redaction_events_total{type="broken} 5
 		t.Errorf("empty body = %+v", empty)
 	}
 }
+
+func TestSplitSeriesEdges(t *testing.T) {
+	for _, line := range []string{
+		"name_without_value",
+		`name{a="unterminated} 1`,
+		`name{a=unquoted} 1`,
+		`name{a="x"}`,
+		`name{a="x"} not-a-number`,
+		"name not-a-number",
+	} {
+		if _, _, _, ok := splitSeries(line); ok {
+			t.Errorf("%q accepted", line)
+		}
+	}
+	name, labels, v, ok := splitSeries(`m{a="1",b="x\ny"} 2 1700000000`)
+	if !ok || name != "m" || labels["b"] != "x\ny" || v != 2 {
+		t.Errorf("with a timestamp: %s %v %v %v", name, labels, v, ok)
+	}
+}
