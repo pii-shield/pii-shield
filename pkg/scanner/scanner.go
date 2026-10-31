@@ -95,7 +95,9 @@ var (
 
 	// RedactionCallback is triggered whenever a string is redacted.
 	// The strategy is one of "entropy", "regex", "luhn", "signature" (the
-	// issuer-format detectors and PEM private-key framing lines).
+	// issuer-format detectors and PEM private-key framing lines) or "key" (a
+	// value hidden unscored because of where it sits: under a sensitive key,
+	// after an auth scheme, as the password of a URL).
 	RedactionCallback func(strategy string)
 
 	// ContextKeywords trigger lower entropy thresholds for subsequent tokens
@@ -2534,6 +2536,15 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 		return
 	}
 
+	// The caller forces a value it knows is secret from its place (under a
+	// sensitive key, after an auth scheme), and the counters report that as
+	// "key". The UUID and base64 rules below force a value by its own shape,
+	// which stays "entropy".
+	strategy := "entropy"
+	if forcedSensitive {
+		strategy = "key"
+	}
+
 	// 0. Safety Whitelists (Static - Fastest)
 	if !forcedSensitive && isSafe(content) {
 		sb.WriteString(original)
@@ -2738,7 +2749,7 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 		} else if contextSensitive {
 			entityType = "context"
 		}
-		st.redactWithHMAC(content, st.entityLabel(entityType), "entropy", sb)
+		st.redactWithHMAC(content, st.entityLabel(entityType), strategy, sb)
 		if quoteChar != 0 {
 			sb.WriteByte(quoteChar)
 		}
@@ -3406,7 +3417,7 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 		} else if label := matchSignature(pw); label != "" {
 			st.redactWithHMAC(pw, st.entityLabel(label), "signature", sb)
 		} else {
-			st.redactWithHMAC(pw, st.entityLabel("key"), "entropy", sb)
+			st.redactWithHMAC(pw, st.entityLabel("key"), "key", sb)
 		}
 		st.maskURLParameters(url[pwEnd:], sb, depth)
 		return
@@ -3530,7 +3541,7 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 				} else if st.isSensitiveKey(key) {
 					sb.WriteString(key)
 					sb.WriteRune('=')
-					st.redactWithHMAC(val, st.entityLabel("key"), "entropy", sb)
+					st.redactWithHMAC(val, st.entityLabel("key"), "key", sb)
 				} else {
 					score := st.calculateComplexity(val)
 					if score > entropyThreshold {

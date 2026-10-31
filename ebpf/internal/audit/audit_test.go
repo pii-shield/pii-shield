@@ -41,13 +41,16 @@ func TestAuditorCountsWithoutRedacting(t *testing.T) {
 	if n := testutil.ToFloat64(metrics.AuditFindingsTotal.WithLabelValues("signature")); n < 1 {
 		t.Errorf("the AWS key must be a signature finding, got %v", n)
 	}
-	for _, typ := range []string{"entropy", "regex", "luhn", "signature", "unknown"} {
+	if n := testutil.ToFloat64(metrics.AuditFindingsTotal.WithLabelValues("key")); n < 1 {
+		t.Errorf("the password must be a key finding, got %v", n)
+	}
+	for _, typ := range []string{"entropy", "regex", "luhn", "signature", "key", "unknown"} {
 		if n := testutil.ToFloat64(metrics.RedactionEventsTotal.WithLabelValues(typ)); n != 0 {
 			t.Errorf("redaction_events_total{%s} = %v in the audit agent, want 0", typ, n)
 		}
 	}
 	s := a.Summary()
-	for _, want := range []string{"PII-Shield audit:", "in 2 of 3 lines (66.7%)", "nothing was changed", "signatures"} {
+	for _, want := range []string{"PII-Shield audit:", "in 2 of 3 lines (66.7%)", "nothing was changed", "signatures", "sensitive-key values"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("summary missing %q: %s", want, s)
 		}

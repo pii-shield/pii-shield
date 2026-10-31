@@ -77,7 +77,7 @@ done
 grep -q 'piishield_audit_lines_total{result="would_redact"} 1' <<<"$metrics"
 grep -q 'piishield_audit_lines_total{result="clean"} 1' <<<"$metrics"
 grep -q 'piishield_audit_mode 1' <<<"$metrics"
-grep -Eq 'piishield_audit_findings_total\{type="(entropy|signature|regex|luhn)"\} [1-9]' <<<"$metrics"
+grep -Eq 'piishield_audit_findings_total\{type="(entropy|signature|regex|luhn|key)"\} [1-9]' <<<"$metrics"
 if grep -Eq 'piishield_redaction_events_total\{[^}]*\} [1-9]' <<<"$metrics"; then
   echo "redaction_events_total moved in audit mode" >&2
   exit 1

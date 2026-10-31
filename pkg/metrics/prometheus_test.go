@@ -15,6 +15,7 @@ func TestIncrementRedaction(t *testing.T) {
 	IncrementRedaction("regex")
 	IncrementRedaction("luhn")
 	IncrementRedaction("signature")
+	IncrementRedaction("key")
 
 	// Test invalid strategy mapping to "unknown"
 	IncrementRedaction("malicious-label")
@@ -39,6 +40,11 @@ func TestIncrementRedaction(t *testing.T) {
 		t.Errorf("Expected 1 for signature, got %v", count)
 	}
 
+	// Validate count for "key"
+	if count := testutil.ToFloat64(RedactionEventsTotal.WithLabelValues("key")); count != 1 {
+		t.Errorf("Expected 1 for key, got %v", count)
+	}
+
 	// Validate fallback count for "unknown"
 	if count := testutil.ToFloat64(RedactionEventsTotal.WithLabelValues("unknown")); count != 1 {
 		t.Errorf("Expected 1 for unknown, got %v", count)
@@ -51,6 +57,7 @@ func TestAuditCounters(t *testing.T) {
 
 	IncrementAuditFinding("signature")
 	IncrementAuditFinding("signature")
+	IncrementAuditFinding("key")
 	IncrementAuditFinding("made-up")
 	RecordAuditLine(true)
 	RecordAuditLine(false)
@@ -58,6 +65,9 @@ func TestAuditCounters(t *testing.T) {
 
 	if n := testutil.ToFloat64(AuditFindingsTotal.WithLabelValues("signature")); n != 2 {
 		t.Errorf("signature findings = %v, want 2", n)
+	}
+	if n := testutil.ToFloat64(AuditFindingsTotal.WithLabelValues("key")); n != 1 {
+		t.Errorf("key findings = %v, want 1", n)
 	}
 	if n := testutil.ToFloat64(AuditFindingsTotal.WithLabelValues("unknown")); n != 1 {
 		t.Errorf("unknown findings = %v, want 1", n)
