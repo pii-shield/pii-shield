@@ -107,17 +107,17 @@ go build -o pii-shield ./cmd/cleaner
 The scanner can run inside a Go program, for example in a `slog.Handler` that redacts each record before it is written. It needs only the standard library:
 
 ```bash
-go get github.com/pii-shield/pii-shield/v2/pkg/scanner
+go get github.com/pii-shield/pii-shield/v3/pkg/scanner
 ```
 
 ```go
-import "github.com/pii-shield/pii-shield/v2/pkg/scanner"
+import "github.com/pii-shield/pii-shield/v3/pkg/scanner"
 
 clean := scanner.ScanAndRedact(line)         // one line
 cleanText := scanner.ScanAndRedactText(text) // several lines, line endings kept
 ```
 
-The package reads the same `PII_*` environment variables as the CLI when it loads. Releases before v2.2.8 declare the module path without `/v2`, so `go get` rejects them.
+The package reads the same `PII_*` environment variables as the CLI when it loads. From v3.0.0 the module path ends in `/v3`. Releases v2.2.8 to v2.3.1 are `github.com/pii-shield/pii-shield/v2`; releases before v2.2.8 declare the path without a major version, so `go get` rejects them.
 
 ## Configuration
 See [CONFIGURATION.md](CONFIGURATION.md) for a full list of environment variables, including:

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 // countingWriter counts the writes that reach the destination.

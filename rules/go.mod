@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/jackc/pgx/v5 v5.12.0
-	github.com/pii-shield/pii-shield/v2 v2.0.0
+	github.com/pii-shield/pii-shield/v3 v3.0.0
 	golang.org/x/time v0.16.0
 	modernc.org/sqlite v1.61.0
 )
@@ -28,4 +28,4 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/pii-shield/pii-shield/v2 => ../
+replace github.com/pii-shield/pii-shield/v3 => ../

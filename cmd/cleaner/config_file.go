@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 // defaultPolicyReloadInterval is how often the sidecar looks at
