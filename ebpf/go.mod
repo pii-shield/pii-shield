@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/cilium/ebpf v0.22.0
-	github.com/pii-shield/pii-shield/v2 v2.0.0
+	github.com/pii-shield/pii-shield/v3 v3.0.0
 	github.com/prometheus/client_golang v1.25.0
 )
 
@@ -22,4 +22,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/pii-shield/pii-shield/v2 => ../
+replace github.com/pii-shield/pii-shield/v3 => ../

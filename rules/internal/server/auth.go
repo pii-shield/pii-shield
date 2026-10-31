@@ -80,6 +80,7 @@ func (s *Server) requireAccess(next http.HandlerFunc) http.HandlerFunc {
 			s.fail(w, http.StatusUnauthorized, "sign in, or send the admin token")
 			return
 		}
+		infoOf(r).actor = p.actor()
 		if p.user != nil && !safeMethod(r.Method) {
 			if msg := s.csrfProblem(r); msg != "" {
 				s.fail(w, http.StatusForbidden, msg)
@@ -317,6 +318,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Info("organization created by sign-up", "org", org.Slug, "email", email)
+		s.audit(r, email, org.ID, actOrgSignup, org.Slug, nil)
 	}
 	if err != nil {
 		s.internal(w, err)
@@ -329,6 +331,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setSessionCookie(w, session, s.cfg.SessionTTL)
 	s.log.Info("signed in", "email", email)
+	s.audit(r, email, user.OrgID, actSignIn, "", nil)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -356,6 +359,9 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, err)
 			return
 		}
+	}
+	if p.org != nil {
+		s.audit(r, "", p.org.ID, actSignOut, "", nil)
 	}
 	s.setSessionCookie(w, "", -1)
 	w.WriteHeader(http.StatusNoContent)
@@ -432,6 +438,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		mailed = false
 	}
 	s.log.Info("member invited", "org", org.Slug, "email", user.Email, "by", principalOf(r).email())
+	s.audit(r, "", org.ID, actMemberInvite, user.Email, map[string]any{"mailed": mailed})
 	s.json(w, http.StatusCreated, map[string]any{"member": user, "mailed": mailed})
 }
 

@@ -190,6 +190,8 @@ spec:
     headerSecretRef: { name: rules-token, key: authorization }   # whole Authorization header value, e.g. "Bearer …"
     caBundleSecretRef: { name: rules-ca, key: ca.crt }          # PEM bundle instead of the system roots
     # allowInsecure: true                # http:// or an unverified certificate; labs only, the status warns
+    # signature:                         # accept only files signed with one of these keys
+    #   publicKeys: ["ed25519:…"]
   sensitiveKeys: [password, token, geheim]   # a local field always wins over the source
 ```
 
@@ -219,11 +221,23 @@ How a pull works:
   edit of the policy still applies on top of it. The pull is retried after
   at most 60 s. Before the first successful pull the local policy alone is
   rendered, the same as without `remoteConfig`.
+- With `signature.publicKeys` set, the controller also pulls the signature
+  file (`signature.url`, by default the file's URL plus `.sig`, with the
+  same credentials) and accepts the file only if one of the keys signed a
+  statement that names this set (`signature.set`, by default taken from a
+  `/v1/<org>/<set>/policy.json` URL), the file's SHA-256, and a publication
+  number not lower than the last accepted one. A refused file leaves the
+  last good copy in place; a copy accepted before signatures were turned
+  on, or signed by a key no longer listed, is not kept. The rule server's
+  [signed publications](../docs/rules-server.md#signed-publications) make
+  these files; any Ed25519 tool can make them for a file on an object store.
 - `status.remote` reports the last good pull (`lastSyncTime`, `etag`,
-  `revision`, `hash`); the `RemoteSynced` condition reports the latest
-  attempt with a reason: `Synced`, `FetchFailed`, `TooLarge`,
-  `InvalidJSON`, `InvalidRegex`, `InvalidValue`, `InsecureURL`,
-  `SecretNotFound`.
+  `revision`, `hash`, and with signatures `publication` and `signedBy`);
+  the `RemoteSynced` condition reports the latest attempt with a reason:
+  `Synced`, `FetchFailed`, `TooLarge`, `InvalidJSON`, `InvalidRegex`,
+  `InvalidValue`, `InsecureURL`, `SecretNotFound`, `SignatureMissing`,
+  `SignatureInvalid`, `SignatureUntrusted`, `SignatureReplayed`,
+  `SignatureConfig`.
 - Rollback: remove `remoteConfig` from the policy; on the next reconcile
   the ConfigMap is rendered from the local policy alone and `remote.json`
   is dropped. To pin a value against the source, set it in the policy.
@@ -240,6 +254,68 @@ policy's last successful pull is older than three intervals
 (`PIIShieldRemoteRulesStale`) and on any failed pull
 (`PIIShieldRemoteRulesSyncErrors`). The runbook is in
 [docs/operational-runbooks.md](../docs/operational-runbooks.md#central-rule-repository).
+
+### Stats channel (`stats`)
+
+Off by default. With `spec.stats` set, the operator sends a summary of the
+policy's counters to a receiver every `intervalSeconds`: a rule server, or
+anything that accepts the JSON below with a `POST`.
+
+```yaml
+spec:
+  stats:
+    url: https://rules.example.internal/v1/acme/payments/report
+    intervalSeconds: 300                 # default 300, minimum 60
+    clusterName: prod-eu                 # how the receiver names this cluster
+    headerSecretRef: { name: rules-stats-token, key: authorization }   # "Bearer pss_…": a token that can only send reports
+    # caBundleSecretRef, allowInsecure: as in remoteConfig
+```
+
+How it works:
+
+- The webhook turns the sidecar's counters on (`PII_METRICS_ENABLED`, port
+  `9090`, named `pii-metrics`), as audit mode does. Pods injected before
+  `stats` was set expose nothing until they restart.
+- Every 30 s the operator (the leader replica) lists the policy's running
+  injected pods and reads `/metrics` from each, inside the cluster. It keeps
+  the last value per pod and adds the growth; a lower value means the
+  sidecar restarted. A pod's first read only sets the starting point, so an
+  operator restart never counts lines twice; a pod that lives less than
+  30 s is missed.
+- Every `intervalSeconds` it posts one report. A failed post keeps the
+  counts for the next one. Only the operator sends: the sidecars need no
+  way out of the cluster and no credential.
+- `status.stats` shows `lastReportTime`, `lastError`, `podsReporting` and
+  `podsTotal`; `piishield_operator_stats_reports_total{result}` and
+  `piishield_operator_stats_pods_reporting{namespace,policy}` are on the
+  manager's metrics endpoint.
+
+The operator needs `list` on pods for this, and its egress to the pods'
+port `9090`; a NetworkPolicy in the application namespace must allow it.
+
+The report carries counters only, never a log line, a value or a hash:
+
+```json
+{
+  "schema": "pii-shield-stats-v1",
+  "cluster": "prod-eu",
+  "policy": "payments/default",
+  "from": "2026-11-01T10:00:00Z", "to": "2026-11-01T10:05:00Z",
+  "mode": "redact",
+  "podsReporting": 2, "podsTotal": 3,
+  "revisions": { "4+2": 2 },
+  "remote": { "revision": "4", "publication": 9, "signedBy": "2ad881d4b09eea37" },
+  "lines": 1770, "errors": 0,
+  "redactions": { "entropy": 23, "regex": 4 }
+}
+```
+
+`revisions` counts the reporting pods by the rule revision they run
+(`piishield_config_revision_info` on the sidecar); `remote` is the last
+remote file the operator accepted; in audit mode `auditFindings` carries
+what would have been hidden, by detector. The rule server shows these per
+cluster on a set's Clusters tab
+([docs/rules-server.md](../docs/rules-server.md#stats-from-clusters)).
 
 ### Effective configuration precedence
 

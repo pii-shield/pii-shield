@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"github.com/pii-shield/pii-shield/rules/internal/mail"
 	"github.com/pii-shield/pii-shield/rules/internal/panel"
 	"github.com/pii-shield/pii-shield/rules/internal/policy"
+	"github.com/pii-shield/pii-shield/rules/internal/signing"
 	"github.com/pii-shield/pii-shield/rules/internal/store"
 )
 
@@ -57,6 +59,8 @@ type Config struct {
 	// InsecureCookies drops the Secure flag of the session cookie, for a
 	// server reached over plain http on localhost.
 	InsecureCookies bool
+	// AccessLog writes one log line per request (observe.go).
+	AccessLog bool
 	// SessionTTL and LoginTTL are the lifetimes of a session and of a
 	// magic link; zero means the defaults.
 	SessionTTL time.Duration
@@ -123,6 +127,8 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, error) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json", s.servePolicy)
+	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json.sig", s.serveSignature)
+	s.mux.HandleFunc("POST /v1/{org}/{set}/report", s.receiveReport)
 
 	s.mux.Handle("GET /{$}", panel.Handler())
 	s.mux.Handle("GET /app.js", panel.Handler())
@@ -147,8 +153,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/validate", admin(s.validate))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/preview", admin(s.preview))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/publish", admin(s.publish))
+	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publish/statement", admin(s.statement))
+	s.mux.HandleFunc("GET /api/orgs/{org}/audit", admin(s.listAudit))
+	s.mux.HandleFunc("GET /api/orgs/{org}/signing-keys", admin(s.listSigningKeys))
+	s.mux.HandleFunc("POST /api/orgs/{org}/signing-keys", admin(s.addSigningKey))
+	s.mux.HandleFunc("DELETE /api/orgs/{org}/signing-keys/{id}", admin(s.revokeSigningKey))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publications", admin(s.publications))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/tokens", admin(s.listTokens))
+	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/pulls", admin(s.listPulls))
+	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/clusters", admin(s.listClusters))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/tokens", admin(s.createToken))
 	s.mux.HandleFunc("DELETE /api/orgs/{org}/sets/{set}/tokens/{id}", admin(s.revokeToken))
 }
@@ -156,43 +169,20 @@ func (s *Server) routes() {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	s.mux.ServeHTTP(w, r)
+	s.observe(w, r)
 }
 
 // ---- public: policy.json ----
 
 // servePolicy answers the pull of part 3 of #36: a bearer token names the
 // set, the published version is the body, ETag is its hash, 304 on a
-// matching If-None-Match. Any token problem is 401 without detail; a token
-// used against another set's path is 404, so a token discloses nothing
-// about sets it does not own.
+// matching If-None-Match.
 func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-cache")
-	value, ok := bearer(r)
+	acc, ok := s.pullAccess(w, r)
 	if !ok {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules"`)
-		s.fail(w, http.StatusUnauthorized, "missing or malformed Authorization: Bearer <token>")
 		return
 	}
-	acc, err := s.store.Authenticate(r.Context(), value)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrTokenRevoked) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules", error="invalid_token"`)
-			s.fail(w, http.StatusUnauthorized, "invalid token")
-			return
-		}
-		s.internal(w, err)
-		return
-	}
-	if !s.limiter(acc.Token.ID).Allow() {
-		w.Header().Set("Retry-After", "1")
-		s.fail(w, http.StatusTooManyRequests, "too many pulls with this token")
-		return
-	}
-	if acc.Org.Slug != r.PathValue("org") || acc.Set.Slug != r.PathValue("set") {
-		s.fail(w, http.StatusNotFound, "no such rule set for this token")
-		return
-	}
+	s.touch(r, acc)
 	v, err := s.store.Published(r.Context(), acc.Set.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotPublished) {
@@ -205,12 +195,84 @@ func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", v.ETag)
 	w.Header().Set("X-Policy-Revision", strconv.FormatInt(v.Revision, 10))
 	if etagMatches(r.Header.Get("If-None-Match"), v.ETag) {
+		s.countPull(r, acc, true)
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
+	s.countPull(r, acc, false)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(v.Content)))
 	_, _ = w.Write(v.Content)
+}
+
+// pullAccess checks the pull token of a pull and that it belongs to the
+// set of the path.
+func (s *Server) pullAccess(w http.ResponseWriter, r *http.Request) (*store.Access, bool) {
+	return s.tokenAccess(w, r, store.KindPull)
+}
+
+// tokenAccess checks a bearer token of the kind and that it belongs to the
+// set of the path. Any token problem is 401 without detail; a token used
+// against another set's path is 404, so a token discloses nothing about
+// sets it does not own; a token of the other kind is 403.
+func (s *Server) tokenAccess(w http.ResponseWriter, r *http.Request, kind string) (*store.Access, bool) {
+	w.Header().Set("Cache-Control", "no-cache")
+	value, ok := bearer(r)
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules"`)
+		s.fail(w, http.StatusUnauthorized, "missing or malformed Authorization: Bearer <token>")
+		return nil, false
+	}
+	acc, err := s.store.Authenticate(r.Context(), value)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrTokenRevoked) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="pii-shield-rules", error="invalid_token"`)
+			s.fail(w, http.StatusUnauthorized, "invalid token")
+			return nil, false
+		}
+		s.internal(w, err)
+		return nil, false
+	}
+	if !s.limiter(acc.Token.ID).Allow() {
+		w.Header().Set("Retry-After", "1")
+		s.fail(w, http.StatusTooManyRequests, "too many pulls with this token")
+		return nil, false
+	}
+	if acc.Org.Slug != r.PathValue("org") || acc.Set.Slug != r.PathValue("set") {
+		s.fail(w, http.StatusNotFound, "no such rule set for this token")
+		return nil, false
+	}
+	infoOf(r).token = acc.Token.Prefix
+	if acc.Token.Kind != kind {
+		if kind == store.KindPull {
+			s.fail(w, http.StatusForbidden, "this token sends stats reports; it cannot read rules")
+		} else {
+			s.fail(w, http.StatusForbidden, "this token reads rules; it cannot send reports")
+		}
+		return nil, false
+	}
+	return acc, true
+}
+
+// countPull adds the pull to the token's daily count and to the metrics.
+// A failure only costs the count.
+func (s *Server) countPull(r *http.Request, acc *store.Access, notModified bool) {
+	result := "new"
+	if notModified {
+		result = "not_modified"
+	}
+	policyPullsTotal.WithLabelValues(result).Inc()
+	if err := s.store.CountPull(r.Context(), acc.Token.ID, notModified); err != nil {
+		s.log.Error("count the pull", "token", acc.Token.Prefix, "err", err)
+	}
+}
+
+// touch records the pull on the token: when and from where it was last
+// used, which the Tokens tab shows. A failure only costs that record.
+func (s *Server) touch(r *http.Request, acc *store.Access) {
+	if err := s.store.TouchToken(r.Context(), acc.Token.ID, s.clientIP(r)); err != nil {
+		s.log.Error("record the token's last use", "token", acc.Token.Prefix, "err", err)
+	}
 }
 
 func (s *Server) limiter(tokenID int64) *rate.Limiter {
@@ -289,6 +351,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.audit(r, "", org.ID, actOrgCreate, org.Slug, map[string]any{"name": org.Name})
 	s.json(w, http.StatusCreated, org)
 }
 
@@ -347,6 +410,7 @@ func (s *Server) createSet(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.audit(r, "", org.ID, actSetCreate, set.Slug, nil)
 	s.json(w, http.StatusCreated, set)
 }
 
@@ -361,6 +425,9 @@ func (s *Server) getSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokens, err := s.store.ListTokens(r.Context(), set.ID)
+	if err == nil {
+		tokens, err = s.withPullCounts(r, set.ID, tokens)
+	}
 	if err != nil {
 		s.internal(w, err)
 		return
@@ -421,6 +488,7 @@ func (s *Server) createVersion(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.audit(r, "", set.OrgID, actVersionCreate, set.Slug, map[string]any{"revision": v.Revision, "etag": v.ETag, "comment": v.Comment})
 	s.json(w, http.StatusCreated, v)
 }
 
@@ -449,8 +517,18 @@ func (s *Server) getVersion(w http.ResponseWriter, r *http.Request) {
 type publishRequest struct {
 	Revision int64  `json:"revision"`
 	Author   string `json:"author"`
+	// Publication, KeyID and Signature sign the publication: the number
+	// from GET .../publish/statement, the id of a key registered with the
+	// organization, and the base64 Ed25519 signature of the statement text.
+	Publication int64  `json:"publication"`
+	KeyID       string `json:"keyId"`
+	Signature   string `json:"signature"`
 }
 
+// publish serves a revision. Once the organization has a signing key, a
+// publication must be signed with one of its active keys: the server checks
+// the signature against the statement it builds itself from the stored
+// file, so it stores only signatures that a cluster will accept.
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	set, ok := s.set(w, r)
 	if !ok {
@@ -464,14 +542,96 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, `"revision" is required`)
 		return
 	}
+	signed := req.Signature != "" || req.KeyID != ""
+	if signed && (req.Signature == "" || req.KeyID == "" || req.Publication <= 0) {
+		s.fail(w, http.StatusBadRequest, `a signed publish needs "publication", "keyId" and "signature" together`)
+		return
+	}
+	var key ed25519.PublicKey
+	if signed {
+		k, err := s.store.ActiveSigningKey(r.Context(), set.OrgID, req.KeyID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				s.audit(r, "", set.OrgID, actPublishRefused, set.Slug, map[string]any{"revision": req.Revision, "keyId": req.KeyID, "reason": "no such active key"})
+				s.fail(w, http.StatusUnprocessableEntity, "no active signing key "+req.KeyID+" in this organization")
+				return
+			}
+			s.internal(w, err)
+			return
+		}
+		if key, err = signing.ParsePublicKey(k.PublicKey); err != nil {
+			s.internal(w, err)
+			return
+		}
+	} else {
+		has, err := s.store.HasSigningKeys(r.Context(), set.OrgID)
+		if err != nil {
+			s.internal(w, err)
+			return
+		}
+		if has {
+			s.audit(r, "", set.OrgID, actPublishRefused, set.Slug, map[string]any{"revision": req.Revision, "reason": "unsigned"})
+			s.fail(w, http.StatusUnprocessableEntity, "this organization signs its publications: sign the statement from GET "+r.URL.Path+"/statement?revision=N and send publication, keyId and signature")
+			return
+		}
+	}
 	author := authorOf(r, req.Author)
-	if err := s.store.Publish(r.Context(), set.ID, req.Revision, author); err != nil {
+	setPath := r.PathValue("org") + "/" + set.Slug
+	pub, err := s.store.Publish(r.Context(), set.ID, store.PublishRequest{
+		Revision: req.Revision, Author: author, Seq: req.Publication, KeyID: req.KeyID, Signature: req.Signature,
+		Check: func(seq int64, v *store.Version) error {
+			if !signed {
+				return nil
+			}
+			return signing.Verify(key, signing.For(setPath, seq, v.Revision, v.Content), req.Signature)
+		},
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, signing.ErrBadSignature):
+			s.audit(r, "", set.OrgID, actPublishRefused, set.Slug, map[string]any{"revision": req.Revision, "keyId": req.KeyID, "reason": "bad signature"})
+			s.fail(w, http.StatusUnprocessableEntity, "the signature does not verify with key "+req.KeyID+" for this statement")
+		case errors.Is(err, store.ErrStale):
+			s.fail(w, http.StatusConflict, err.Error())
+		default:
+			s.storeError(w, err)
+		}
+		return
+	}
+	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "publication", pub.Seq, "author", author, "key", req.KeyID)
+	detail := map[string]any{"revision": pub.Revision, "publication": pub.Seq}
+	if pub.KeyID != "" {
+		detail["keyId"] = pub.KeyID
+	}
+	s.audit(r, "", set.OrgID, actPublish, set.Slug, detail)
+	set, _ = s.store.GetSetByID(r.Context(), set.ID)
+	s.json(w, http.StatusOK, set)
+}
+
+// statement answers what a publisher signs to publish a revision now: the
+// statement with the next publication number, and its exact text.
+func (s *Server) statement(w http.ResponseWriter, r *http.Request) {
+	set, ok := s.set(w, r)
+	if !ok {
+		return
+	}
+	rev, err := strconv.ParseInt(r.URL.Query().Get("revision"), 10, 64)
+	if err != nil || rev <= 0 {
+		s.fail(w, http.StatusBadRequest, "revision must be a positive number")
+		return
+	}
+	v, err := s.store.GetVersion(r.Context(), set.ID, rev)
+	if err != nil {
 		s.storeError(w, err)
 		return
 	}
-	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "author", author)
-	set, _ = s.store.GetSetByID(r.Context(), set.ID)
-	s.json(w, http.StatusOK, set)
+	seq, err := s.store.NextPublication(r.Context(), set.ID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	st := signing.For(r.PathValue("org")+"/"+set.Slug, seq, v.Revision, v.Content)
+	s.json(w, http.StatusOK, map[string]any{"statement": st, "text": st.Text()})
 }
 
 func (s *Server) publications(w http.ResponseWriter, r *http.Request) {
@@ -493,6 +653,9 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokens, err := s.store.ListTokens(r.Context(), set.ID)
+	if err == nil {
+		tokens, err = s.withPullCounts(r, set.ID, tokens)
+	}
 	if err != nil {
 		s.internal(w, err)
 		return
@@ -502,6 +665,8 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 
 type tokenRequest struct {
 	Name string `json:"name"`
+	// Kind is "pull" (the default) or "report".
+	Kind string `json:"kind"`
 }
 
 func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
@@ -517,14 +682,22 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, `"name" is required: which cluster or team holds the token`)
 		return
 	}
-	tok, value, err := s.store.CreateToken(r.Context(), set.ID, req.Name)
+	tok, value, err := s.store.CreateToken(r.Context(), set.ID, req.Name, req.Kind)
+	if errors.Is(err, store.ErrInvalidKind) {
+		s.fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
 	s.log.Info("token issued", "org", r.PathValue("org"), "set", set.Slug, "token", tok.Prefix, "name", req.Name)
-	s.json(w, http.StatusCreated, map[string]any{"token": tok, "value": value,
-		"note": "the value is shown once; put it whole, as 'Bearer " + store.TokenPrefix + "…', into the Secret named by remoteConfig.headerSecretRef"})
+	s.audit(r, "", set.OrgID, actTokenCreate, set.Slug, map[string]any{"name": tok.Name, "prefix": tok.Prefix, "kind": tok.Kind})
+	note := "the value is shown once; put it whole, as 'Bearer " + store.TokenPrefix + "…', into the Secret named by remoteConfig.headerSecretRef"
+	if tok.Kind == store.KindReport {
+		note = "the value is shown once; put it whole, as 'Bearer " + store.ReportTokenPrefix + "…', into the Secret named by stats.headerSecretRef; it can only send reports"
+	}
+	s.json(w, http.StatusCreated, map[string]any{"token": tok, "value": value, "note": note})
 }
 
 func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
@@ -542,6 +715,7 @@ func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("token revoked", "org", r.PathValue("org"), "set", set.Slug, "id", id)
+	s.audit(r, "", set.OrgID, actTokenRevoke, set.Slug, map[string]any{"tokenId": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

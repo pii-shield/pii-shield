@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 
 	"github.com/pii-shield/pii-shield/rules/internal/policy"
 	"github.com/pii-shield/pii-shield/rules/internal/store"

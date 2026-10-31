@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 // defaultPolicyReloadInterval is how often the sidecar looks at
@@ -89,6 +89,8 @@ func (r *policyReloader) check() bool {
 	if r.metrics {
 		metrics.ConfigReloadsTotal.Inc()
 		metrics.ConfigLastReloadTimestamp.SetToCurrentTime()
+		metrics.ConfigRevisionInfo.Reset()
+		metrics.ConfigRevisionInfo.WithLabelValues(rev).Set(1)
 	}
 	log.Printf("Policy file %s loaded (revision %q)", r.path, rev)
 	return true

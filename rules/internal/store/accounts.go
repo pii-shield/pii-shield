@@ -91,14 +91,14 @@ func (s *Store) CreateUser(ctx context.Context, orgID int64, email, invitedBy st
 	if _, err := s.GetOrgByID(ctx, orgID); err != nil {
 		return nil, err
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO users (org_id, email, invited_by, created_at) VALUES (?, ?, ?, ?)`, orgID, email, invitedBy, now())
+	var id int64
+	err = s.db.QueryRowContext(ctx, `INSERT INTO users (org_id, email, invited_by, created_at) VALUES (?, ?, ?, ?) RETURNING id`, orgID, email, invitedBy, now()).Scan(&id)
 	if isUnique(err) {
 		return nil, ErrExists
 	}
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
 	return s.GetUserByID(ctx, id)
 }
 
@@ -124,7 +124,8 @@ func (s *Store) Signup(ctx context.Context, email string) (*User, *Org, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO orgs (slug, name, created_at) VALUES (?, ?, ?)`, slug, email, now())
+		var orgID int64
+		err = tx.QueryRowContext(ctx, `INSERT INTO orgs (slug, name, created_at) VALUES (?, ?, ?) RETURNING id`, slug, email, now()).Scan(&orgID)
 		if isUnique(err) {
 			_ = tx.Rollback()
 			continue
@@ -133,8 +134,8 @@ func (s *Store) Signup(ctx context.Context, email string) (*User, *Org, error) {
 			_ = tx.Rollback()
 			return nil, nil, err
 		}
-		orgID, _ := res.LastInsertId()
-		res, err = tx.ExecContext(ctx, `INSERT INTO users (org_id, email, created_at) VALUES (?, ?, ?)`, orgID, email, now())
+		var userID int64
+		err = tx.QueryRowContext(ctx, `INSERT INTO users (org_id, email, created_at) VALUES (?, ?, ?) RETURNING id`, orgID, email, now()).Scan(&userID)
 		if isUnique(err) {
 			_ = tx.Rollback()
 			return nil, nil, ErrExists
@@ -143,7 +144,6 @@ func (s *Store) Signup(ctx context.Context, email string) (*User, *Org, error) {
 			_ = tx.Rollback()
 			return nil, nil, err
 		}
-		userID, _ := res.LastInsertId()
 		if err := tx.Commit(); err != nil {
 			return nil, nil, err
 		}

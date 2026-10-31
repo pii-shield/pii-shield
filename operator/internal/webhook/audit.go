@@ -26,9 +26,15 @@ const (
 // auditEnv is the sidecar environment audit mode adds on top of scannerEnv
 // (which carries PII_MODE itself).
 func auditEnv() []corev1.EnvVar {
+	return append(metricsEnv(), corev1.EnvVar{Name: "PII_STATS_LOG_INTERVAL", Value: auditStatsInterval})
+}
+
+// metricsEnv turns the sidecar's counters on, on AuditMetricsPort. Audit
+// mode needs them, and so does the stats channel (spec.stats), whose
+// operator reads them from inside the cluster.
+func metricsEnv() []corev1.EnvVar {
 	return []corev1.EnvVar{
 		{Name: "PII_METRICS_ENABLED", Value: "true"},
 		{Name: "PII_METRICS_PORT", Value: strconv.Itoa(int(AuditMetricsPort))},
-		{Name: "PII_STATS_LOG_INTERVAL", Value: auditStatsInterval},
 	}
 }

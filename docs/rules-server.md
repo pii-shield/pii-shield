@@ -5,14 +5,14 @@ security team edits a set in the browser, sees on the real scanner what a
 draft does to pasted log lines, publishes a version, and every cluster whose
 `PiiPolicy` names the set pulls it with a read-only token, without a pod
 restart. Nothing about a cluster is sent to the server: the operator only
-asks for a file, and the server only answers `GET`. The same binary serves
-the hosted copy and a self-hosted copy inside your own perimeter; this page
-is about running your own.
+asks for a file, unless the cluster turns on the stats channel, which sends
+counters only ([Stats from clusters](#stats-from-clusters)). You run the
+server yourself, inside your own perimeter.
 
 This is the first version (milestone 3.0, issue #95). What it does not do
-yet is listed at the end; the one line to know before relying on it: the
-served file is protected by HTTPS and the token, not by a signature of its
-content.
+yet is listed at the end. Publications can be signed with a key that only
+the publisher holds, and a cluster can be told to accept nothing else; see
+[Signed publications](#signed-publications).
 
 ## First steps
 
@@ -38,7 +38,7 @@ own is the next section.
    On the **Versions** tab press **Publish** next to that version. Only the
    published version reaches clusters.
 6. **Get the token.** On the **Tokens** tab type a name for the cluster
-   (`prod-eu`) and press **Issue**. Copy the long string that starts with
+   (`prod-eu`), leave the kind at **reads rules** and press **Issue**. Copy the long string that starts with
    `psr_` now: it is shown once. It is the key that lets that cluster, and
    only it, read this set.
 7. **Give the token to the cluster.** In the namespace where your
@@ -73,7 +73,8 @@ and press **Revoke** next to the old one; it stops working at once.
 The image is `ghcr.io/pii-shield/pii-shield-rules` (the same tags as the
 other images, from the 3.0 release on; `latest` follows the newest release).
 It is a distroless image with one static binary, running as user 65532, and
-it keeps one SQLite file in `/data`.
+it keeps one SQLite file in `/data`, or uses Postgres (see
+[Several instances](#several-instances)).
 
 ```bash
 docker run -d --name pii-shield-rules \
@@ -112,13 +113,15 @@ Every flag has an environment variable; the flag wins when both are set.
 | Flag | Env | Default | What it does |
 | --- | --- | --- | --- |
 | `--listen` | `RULES_LISTEN` | `:8080` | Address to listen on. |
-| `--db` | `RULES_DB` | `rules.db` (`/data/rules.db` in the image) | The SQLite file, WAL mode. |
+| `--db` | `RULES_DB` | `rules.db` (`/data/rules.db` in the image) | The SQLite file, WAL mode; or a `postgres://` URL, which several server processes can share. The log shows the URL with its password masked. |
 | `--single-tenant` | `RULES_SINGLE_TENANT=true` | off | One organization `default`, no sign-in; for a server behind your own access control. |
 | `--policy-rate` | | `1` | `policy.json` pulls allowed per token per second (burst 10). |
 | `--base-url` | `RULES_BASE_URL` | required with SMTP; otherwise `http://localhost:<port>` from `--listen` | Public address of the server (`https://rules.example.com`), the only source of the sign-in links. They are never built from the request's `Host` header, which a client chooses: a forged `Host` would otherwise mail a real sign-in token inside a link to another site. With `RULES_SMTP_ADDR` set and no base URL the server refuses to start. |
 | `--signup` | `RULES_SIGNUP=open\|invite` | `open` | `open`: a new address creates its own organization by signing in. `invite`: only invited addresses can sign in. |
 | `--trust-proxy` | `RULES_TRUST_PROXY=true` | off | Read the client address from `X-Forwarded-For`. Only behind a proxy you control, because the rate limits key on that address. |
 | `--insecure-cookies` | `RULES_INSECURE_COOKIES=true` | off | Session cookie without `Secure`, for plain http on localhost. |
+| `--metrics-listen` | `RULES_METRICS_LISTEN` | off | Address of a separate listener for Prometheus `/metrics`, such as `127.0.0.1:9091`. Keep it off the public address. |
+| `--access-log` | `RULES_ACCESS_LOG=false` turns it off | on | One log line per request: method, path, route, status, time, client address, and the token prefix or the caller. Health checks are not logged. |
 | | `RULES_ADMIN_TOKEN` | unset | A token that opens every organization to `curl` (`Authorization: Bearer …`). Optional once people sign in through the panel. |
 | | `RULES_SMTP_ADDR` | unset | `host:port` of the mail server for the sign-in links. Port 465 is TLS at once; any other port starts clear and upgrades with STARTTLS, which is required when a password is set, so a password never crosses the wire in clear. |
 | | `RULES_SMTP_USER`, `RULES_SMTP_PASSWORD` | unset | SMTP credentials (PLAIN). |
@@ -131,7 +134,11 @@ enough for a server other people sign in to.
 
 ### In front of it
 
-Put TLS in front of the server, a reverse proxy or an ingress, and pass the
+[`deploy/rules-server`](../deploy/rules-server/) is a ready setup for one
+machine with Docker Compose: the server, Caddy for HTTPS, and Litestream
+copying the database to a bucket, with a restore on an empty disk.
+
+Otherwise, put TLS in front of the server, a reverse proxy or an ingress, and pass the
 client address on (`--trust-proxy`) and set the public address (`--base-url`). The operator
 refuses an `http://` source unless the policy sets `allowInsecure`, and the
 session cookie carries `Secure`, so a plain-http server works only on
@@ -139,9 +146,34 @@ localhost with `--insecure-cookies`.
 
 The database is one file in WAL mode. Back it up with SQLite's own copy
 (`sqlite3 /data/rules.db ".backup /backup/rules.db"`) or with Litestream;
-copying the file while the server runs can miss the write-ahead log. There
-is one process and one file; a second instance on the same file is not
-supported.
+copying the file while the server runs can miss the write-ahead log. A
+SQLite file serves one process; a second instance on the same file is not
+supported. For more than one, use Postgres.
+
+### Several instances
+
+Point every instance at the same Postgres database and put them behind one
+load balancer:
+
+```bash
+docker run -d -p 127.0.0.1:8080:8080 \
+  -e RULES_DB='postgres://rules:…@db.internal:5432/rules?sslmode=require' \
+  -e RULES_BASE_URL=https://rules.example.com -e RULES_SMTP_ADDR=… \
+  ghcr.io/pii-shield/pii-shield-rules:2.3.1
+```
+
+The first instance creates the tables; one that starts at the same time
+waits for it. Everything the instances share is in the database: rule
+sets, versions, publications, tokens, signing keys, the activity log,
+reports, sign-in links and sessions, so a link mailed by one instance
+signs in through another, and a session works on any. Versions and
+publications of one set are numbered one after the other even when two
+instances write at once. The database user needs the right to create tables
+the first time. Postgres 14 or later.
+
+What stays per instance: the rate limits on sign-in and on pulls. With
+`N` instances behind a balancer a client gets up to `N` times the limit.
+Back up the database with your usual Postgres tools.
 
 ## Organizations, sets, versions, tokens
 
@@ -149,8 +181,9 @@ An organization owns rule sets; a rule set is a line of versions. A version
 is immutable: the rule set as JSON, a number from 1, an author, a time and
 a comment. One version of a set is published, and that is the file the
 clusters get. Rolling back is publishing an older version. A token belongs
-to a set, is read-only, and its value is shown once at creation; the server
-stores a hash. Revoking a token is immediate.
+to a set and does one job: a pull token (`psr_…`) reads the set's rules, a
+report token (`pss_…`) sends the set's stats reports. Its value is shown
+once at creation; the server stores a hash. Revoking a token is immediate.
 
 The rule set is the SDK `init_config` JSON, the same file the sidecar reads
 from `PII_CONFIG_FILE` and the operator renders into the policy ConfigMap:
@@ -172,7 +205,8 @@ button; a preview of the draft or of the published version on pasted log
 lines, run on the real scanner with a preview salt, so the markers show
 what will be hidden while the hashes match no cluster; versions with
 publish, roll back, a diff of two versions and the publish history; tokens;
-the `PiiPolicy` snippet that connects a cluster; and members.
+the `PiiPolicy` snippet that connects a cluster; members; signing keys; and
+the activity log; and the clusters' reports.
 
 Sign-in is by magic link; there are no passwords. You enter your address,
 a link arrives by mail, and the page it opens has one button that signs you
@@ -186,8 +220,173 @@ sees nothing of the others. The session is a cookie (`HttpOnly`, `Secure`,
 something must carry the `X-Requested-With` header and an `Origin` or
 `Referer` of this host, which a cross-site form cannot send. Sign-in
 requests are limited per client address and per e-mail address, link
-attempts per client address; the limits live in the process's memory and
-start over with it.
+attempts per client address; the limits live in the process's memory,
+start over with it, and are counted per instance.
+
+## Watching the server
+
+**Pulls.** Each token counts its `policy.json` pulls per UTC day, new files
+(`200`) and unchanged ones (`304`) apart, kept 90 days. The Tokens tab shows
+today's pulls and the last seven days' next to the last pull's time and
+address; `GET /api/orgs/{org}/sets/{set}/pulls?days=30` gives the daily
+counts per token. A cluster pulls every `intervalSeconds` (300 by default),
+so a day's pulls divided by 288 is about how many clusters use the token.
+
+**Metrics.** With `--metrics-listen` the server serves Prometheus metrics on
+that address: `piishield_rules_requests_total{route, code}`,
+`piishield_rules_request_duration_seconds{route}`,
+`piishield_rules_policy_pulls_total{result="new"|"not_modified"}`,
+`piishield_rules_reports_received_total`, and the Go runtime and process
+series. The route is the pattern (`GET /v1/{org}/{set}/policy.json`), never
+an organization, a set or a token, so the series stay few.
+
+**Access log.** On by default: one JSON line per request with the method,
+path, route pattern, status, milliseconds, client address, and the token's
+prefix or the caller (an address, `admin token`). No header, cookie, query
+string or body is written, and no token value. `RULES_ACCESS_LOG=false`
+turns it off; health checks are never logged.
+
+## Activity log
+
+Every change in an organization is an entry in its activity log: who made
+it (an address, `admin token`, or `single-tenant, no sign-in`), what it
+was, which object, when, and from which client address. The entries are
+sign-up, sign-in and sign-out, invitations, new rule sets and versions,
+publications (with the publication number and the signing key), refused
+publications (unsigned, a bad signature, an unknown key), tokens issued and
+revoked, signing keys added and revoked. No secret is written: a token
+appears by its prefix only.
+
+The log is append-only: the database refuses to change or delete an entry,
+so it holds against a bug in the server too. It is kept for the life of the
+database; back it up with the rest.
+
+Pulls by clusters are not entries, since a cluster pulls every few minutes.
+Each token keeps the time and client address of its last pull instead
+(written at most once a minute), and the set's Tokens tab shows it, so a
+token that a cluster no longer uses, or one used from an unexpected
+address, stands out.
+
+The **Activity** page shows the log, newest first. The API is
+`GET /api/orgs/{org}/audit?limit=100&before=<id>`; the answer's `next` is
+the `before` of the following page.
+
+## Stats from clusters
+
+A cluster can send back what its sidecars counted, so the set's
+**Clusters** tab shows, per cluster: when it last reported, how many pods
+report, which rule revision they run and whether the cluster has taken the
+latest publication, how many lines went through, and how many values were
+hidden by detector type (or, in audit mode, would have been). Counters
+only: never a log line, a value or a hash.
+
+It is off until a cluster turns it on:
+
+1. On the **Tokens** tab issue a token of kind **sends stats reports**. It
+   starts with `pss_` and can only send reports for this set; it cannot
+   read the rules, and a pull token cannot send reports.
+2. Put it into a Secret as the whole header value (`Bearer pss_…`) and add
+   a `stats` block to the policy (the **Connect a cluster** tab shows it
+   with this set's address):
+
+   ```yaml
+   spec:
+     stats:
+       url: https://rules.example.internal/v1/acme/payments/report
+       clusterName: prod-eu
+       headerSecretRef: { name: rules-stats-token, key: authorization }
+   ```
+
+3. Restart the application pods once, so their sidecars open the counters
+   to the operator. The first report arrives after `intervalSeconds`
+   (default five minutes).
+
+The operator reads the counters inside the cluster and is the only one that
+sends; how it counts is in the
+[operator README](../operator/README.md#stats-channel-stats). The server
+keeps reports for 90 days. A report is not an activity log entry, but the
+report token shows its last use like any token.
+
+## Signed publications
+
+HTTPS and the token protect the way from the server to the cluster. A
+signature protects against the server itself: a server that is taken over,
+or a proxy or bucket in between, can serve any file, but it cannot sign
+one, because the key is the publisher's and never reaches the server.
+
+1. **Make a key.** On the **Signing keys** page give the key a name and
+   press **Create key**. The browser makes an Ed25519 key, keeps the private
+   half in its own storage where it cannot be copied out, and sends the
+   public half to the server. Each person, and each browser, makes its own.
+   From the first key on, the server refuses an unsigned publication in this
+   organization.
+2. **Publish as before.** The **publish** and **roll back** buttons now ask
+   the server for the statement of the next publication, sign it in the
+   browser and send the signature. The server checks it against the key and
+   the stored file before it publishes, so it never serves a signature a
+   cluster would refuse. The publish history shows which key signed what.
+3. **Tell the cluster.** Copy the keys from the bottom of the Signing keys
+   page into the policy:
+
+   ```yaml
+   spec:
+     remoteConfig:
+       url: https://rules.example.internal/v1/acme/payments/policy.json
+       headerSecretRef: { name: rules-token, key: authorization }
+       signature:
+         publicKeys:
+           - ed25519:gbR9pp6kubV6w0aRR9…   # alice, work laptop
+   ```
+
+   The operator then pulls `policy.json.sig` next to the file with the same
+   token and accepts the file only if one of these keys signed it, for this
+   set, with a publication number not lower than the last one it accepted.
+   Anything else is refused, the last good copy stays, and the
+   `RemoteSynced` condition says why (`SignatureMissing`,
+   `SignatureInvalid`, `SignatureUntrusted`, `SignatureReplayed`).
+   `status.remote.signedBy` and `status.remote.publication` say what was
+   accepted.
+
+What is signed is a short statement, not the file alone:
+
+```text
+pii-shield-policy-signature-v1
+set: acme/payments
+publication: 7
+revision: 3
+sha256: <hex SHA-256 of policy.json exactly as served>
+```
+
+The set stops one set's file from being served as another's. The
+publication number grows with every publish, a rollback included, so an old
+signed file cannot be replayed to a cluster that has seen a newer one.
+
+A script or a CI job signs with any Ed25519 tool; with OpenSSL 3 or later:
+
+```bash
+openssl genpkey -algorithm ed25519 -out signing-key.pem       # once; keep it secret
+PUB="ed25519:$(openssl pkey -in signing-key.pem -pubout -outform DER | tail -c 32 | base64)"
+curl -X POST -H "$H" $B/api/orgs/acme/signing-keys -d "{\"name\": \"ci\", \"publicKey\": \"$PUB\"}"
+# for each publish: sign the statement text exactly as the server returns it
+curl -s -H "$H" "$B/api/orgs/acme/sets/payments/publish/statement?revision=3" > st.json
+jq -j .text st.json > st.txt                                 # -j: no newline added
+SIG=$(openssl pkeyutl -sign -inkey signing-key.pem -rawin -in st.txt | base64 | tr -d '\n')
+curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/publish \
+  -d "{\"revision\": 3, \"publication\": $(jq .statement.publication st.json), \"keyId\": \"<key id from the first call>\", \"signature\": \"$SIG\"}"
+```
+
+If someone else published between the two calls, the publish answers `409`;
+ask for the statement again. A lost browser key is revoked on the Signing
+keys page and replaced by a new one; clusters keep trusting a key until it
+is removed from their `publicKeys`, so remove it there too when it may have
+leaked.
+
+What a signature does not stop: a server that is taken over can still stop
+answering, or keep serving the last signed file instead of a newer one.
+The page that does the signing also comes from the server, so a server
+that is taken over could serve a panel that signs something else the next
+time someone publishes from it; for sets where that matters, publish from
+a script with a key kept off the server's machine.
 
 ## The API
 
@@ -222,8 +421,15 @@ curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/tokens -d '{"name": "prod-eu
 | `GET`, `POST …/versions`, `GET …/versions/{rev}` | Versions; `POST` validates `content` whole and appends the next number; `422` names the scanner's reason. |
 | `POST …/validate` | The checks of a version create without storing; `200` with the effective settings after defaults, or `422`. |
 | `POST …/preview` | Up to 200 lines (`lines` or `text`) through the draft in `content`, or the published version without it; each line as `in`, `out`, `changed`. |
-| `POST …/publish`, `GET …/publications` | Publish a revision (an older one is the rollback); the publish history. |
-| `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; the value is in the `POST` answer once. |
+| `POST …/publish`, `GET …/publications` | Publish a revision (an older one is the rollback); the publish history. A signed publish adds `publication`, `keyId` and `signature`; once the organization has a signing key, it is required. |
+| `GET …/publish/statement?revision=N` | The statement of the next publication of revision `N` and its exact `text` to sign. |
+| `GET`, `POST /api/orgs/{org}/signing-keys`, `DELETE …/signing-keys/{id}` | Public signing keys; `POST` with `{"name": …, "publicKey": "ed25519:…"}`. |
+| `POST /v1/{org}/{set}/report` | With a report token: one stats report (`pii-shield-stats-v1`, at most 64 KiB); `204`. |
+| `GET …/clusters?hours=24` | Per cluster: the latest report and the sums over the last `hours` (up to 2160), with the set's published revision and latest publication. |
+| `GET /v1/{org}/{set}/policy.json.sig` | With the pull token: the statement fields, `keyId` and `signature` of the publication the set serves; `404` when it is unsigned. |
+| `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; `POST` with `{"name": …, "kind": "pull" or "report"}` (default pull); the value is in the answer once. |
+| `GET …/pulls?days=30` | The set's daily pull counts per token (`pulls`, `notModified`), up to 90 days. |
+| `GET /api/orgs/{org}/audit` | The activity log, newest first; `limit` (default 100, at most 500) and `before` page through it. |
 | `GET /healthz` | `ok`. |
 
 A rule set may be up to 256 KiB, the same limit the operator applies to a
@@ -276,19 +482,9 @@ token used and the time; that is what its log records.
 
 ## What it does not do yet
 
-- **Sign the file.** HTTPS and the token protect the channel; a server
-  that is taken over can serve any rule set to the clusters that trust it.
-  A signature of `policy.json` with a server key is the first candidate for
-  the next version.
-- **Run as more than one instance.** One process, one SQLite file. Postgres
-  comes when a second instance is needed.
-- **Report anything back.** No redaction analytics, no Slack alerting: they
-  need a channel from the agent to a server, and that channel will be
-  separate, explicitly enabled and carrying counters only.
+- **Alert.** The Clusters tab shows a cluster that is behind or reports
+  errors, but nothing sends a message about it; alert on the operator's
+  metrics in the cluster instead.
 - **Sign in any other way.** Magic link by e-mail; no passwords, no OAuth.
-- **Keep an audit trail beyond the versions.** Who published what and when
-  is in the publish history; sign-ins and token use are in the log only.
-- **Serve a hosted copy yet.** The hosted service on a pii-shield.com
-  subdomain opens by [waitlist](https://tally.so/r/PdY7Ze).
 
 The code is in [`rules/`](../rules/) with its own README for development.

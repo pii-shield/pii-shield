@@ -9,8 +9,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 // restoreScannerConfig puts the package-level scanner config back the way
@@ -132,6 +132,18 @@ func TestPolicyReloader_CountsLoadsAndRejections(t *testing.T) {
 	}
 	if n := testutil.ToFloat64(metrics.ConfigReloadsTotal) - loadsBefore; n != 1 {
 		t.Errorf("a rejected file must not count as a load, loads = %v", n)
+	}
+	// The revision series names the file in force: a rejected file leaves it.
+	if testutil.CollectAndCount(metrics.ConfigRevisionInfo) != 1 || testutil.ToFloat64(metrics.ConfigRevisionInfo.WithLabelValues("1")) != 1 {
+		t.Errorf("revision info after a rejection: %d series", testutil.CollectAndCount(metrics.ConfigRevisionInfo))
+	}
+	writePolicy(t, path, `{"revision": "2", "sensitive_keys": ["zzz"]}`)
+	bump(t, path, 4*time.Second)
+	if !r.check() {
+		t.Fatal("revision 2 must load")
+	}
+	if testutil.CollectAndCount(metrics.ConfigRevisionInfo) != 1 || testutil.ToFloat64(metrics.ConfigRevisionInfo.WithLabelValues("2")) != 1 {
+		t.Errorf("revision info must carry only revision 2: %d series", testutil.CollectAndCount(metrics.ConfigRevisionInfo))
 	}
 }
 

@@ -223,3 +223,44 @@ func TestInjectEBPFModeAddsTheAuditAgent(t *testing.T) {
 	t.Setenv("EBPF_AGENT_IMAGE", "")
 	assert.Equal(t, "ghcr.io/pii-shield/pii-shield-ebpf:latest", ebpfAgentImage())
 }
+
+// The stats channel turns the counters on without audit mode and without
+// the log summary.
+func TestStatsSidecarEnvAndPort(t *testing.T) {
+	mutator := &PodMutator{}
+	policy := &piishieldv1alpha1.PiiPolicy{Spec: piishieldv1alpha1.PiiPolicySpec{InjectionMode: "file",
+		Stats: &piishieldv1alpha1.StatsConfig{URL: "https://rules.example.test/v1/a/b/report"}}}
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}}
+	mutated, err := mutator.injectFileMode(pod, policy, "app")
+	assert.NoError(t, err)
+	sidecar := findContainer(mutated.Spec.InitContainers, "pii-shield-sidecar")
+	if !assert.NotNil(t, sidecar) {
+		return
+	}
+	for name, want := range map[string]string{"PII_METRICS_ENABLED": "true", "PII_METRICS_PORT": "9090"} {
+		got, ok := envValue(sidecar.Env, name)
+		assert.True(t, ok, "%s missing", name)
+		assert.Equal(t, want, got, name)
+	}
+	for _, name := range []string{"PII_STATS_LOG_INTERVAL", "PII_MODE"} {
+		if v, ok := envValue(sidecar.Env, name); ok && (name != "PII_MODE" || v == "audit") {
+			t.Errorf("%s=%q must not be set by stats alone", name, v)
+		}
+	}
+	if assert.Len(t, sidecar.Ports, 1) {
+		assert.Equal(t, AuditMetricsPortName, sidecar.Ports[0].Name)
+	}
+
+	// Stats with audit mode: one port, the audit extras once.
+	policy.Spec.AuditMode = true
+	mutated, _ = mutator.injectFileMode(&corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}}, policy, "app")
+	sidecar = findContainer(mutated.Spec.InitContainers, "pii-shield-sidecar")
+	assert.Len(t, sidecar.Ports, 1)
+	n := 0
+	for _, e := range sidecar.Env {
+		if e.Name == "PII_METRICS_ENABLED" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "PII_METRICS_ENABLED set once")
+}
