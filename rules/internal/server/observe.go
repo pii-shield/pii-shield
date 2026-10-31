@@ -67,7 +67,10 @@ func infoOf(r *http.Request) *reqInfo {
 	return &reqInfo{}
 }
 
-// statusRecorder remembers the status a handler wrote.
+// statusRecorder remembers the status a handler set. It only wraps
+// WriteHeader: a handler that writes a body without one answers 200, which
+// observe assumes when no status was set, and the body goes straight to the
+// real writer.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -78,13 +81,6 @@ func (s *statusRecorder) WriteHeader(code int) {
 		s.status = code
 	}
 	s.ResponseWriter.WriteHeader(code)
-}
-
-func (s *statusRecorder) Write(b []byte) (int, error) {
-	if s.status == 0 {
-		s.status = http.StatusOK
-	}
-	return s.ResponseWriter.Write(b)
 }
 
 // observe serves the request through the mux and records it: the metrics
