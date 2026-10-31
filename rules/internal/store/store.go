@@ -1,4 +1,5 @@
-// Package store keeps the rule server's data in one SQLite file: an
+// Package store keeps the rule server's data in one SQLite file, or in
+// Postgres for several server processes (db.go): an
 // organization owns rule sets, a rule set owns immutable versions and
 // read-only tokens, and points at the version it publishes. Rolling back is
 // publishing an older version, never editing one; a trigger refuses any
@@ -17,7 +18,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // database/sql driver, pure Go
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for Postgres, pure Go
+	_ "modernc.org/sqlite"             // database/sql driver, pure Go
 )
 
 // Errors callers can test for.
@@ -100,26 +102,42 @@ type Publication struct {
 	PublishedAt time.Time `json:"publishedAt"`
 }
 
-// Store is the SQLite-backed store.
+// Store is the rule server's store, on SQLite or on Postgres (db.go).
 type Store struct {
-	db *sql.DB
+	db *dbx
 }
 
-// Open opens or creates the database at path and applies the schema.
-func Open(path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+// Open opens the database and applies the schema. A postgres:// or
+// postgresql:// URL opens Postgres, which several server processes can
+// share; anything else is the path of a SQLite file for one process.
+func Open(dsn string) (*Store, error) {
+	ddl := schema + accountsSchema + signingSchema + auditSchema + reportsSchema
+	if IsPostgres(dsn) {
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return nil, err
+		}
+		db.SetMaxOpenConns(10)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := applyPostgresSchema(ctx, db, postgresSchema(ddl)); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("apply schema: %w", err)
+		}
+		return &Store{db: &dbx{DB: db, pg: true}}, nil
+	}
+	db, err := sql.Open("sqlite", "file:"+dsn+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 	// One connection: SQLite serializes writers anyway, and one connection
 	// means a transaction never waits on the pool for a second one.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + accountsSchema + signingSchema + auditSchema + reportsSchema); err != nil {
+	if _, err := db.Exec(ddl); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: &dbx{DB: db}}, nil
 }
 
 // Close closes the database.
@@ -190,8 +208,10 @@ func parseTime(s string) time.Time {
 	return t
 }
 
+// isUnique reports a unique constraint violation: SQLite's message, or
+// Postgres's SQLSTATE 23505.
 func isUnique(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	return err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "SQLSTATE 23505"))
 }
 
 // CreateOrg creates an organization.
@@ -202,14 +222,14 @@ func (s *Store) CreateOrg(ctx context.Context, slug, name string) (*Org, error) 
 	if name == "" {
 		name = slug
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO orgs (slug, name, created_at) VALUES (?, ?, ?)`, slug, name, now())
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO orgs (slug, name, created_at) VALUES (?, ?, ?) RETURNING id`, slug, name, now()).Scan(&id)
 	if isUnique(err) {
 		return nil, ErrExists
 	}
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
 	return s.GetOrgByID(ctx, id)
 }
 
@@ -328,12 +348,33 @@ func (s *Store) ListSets(ctx context.Context, orgID int64) ([]RuleSet, error) {
 // the revision the version gets, which is the next number in the set; the
 // store calls it inside the transaction so two concurrent appends cannot
 // produce the same revision.
+//
+// On Postgres two server processes can read the same next number at once;
+// the loser's insert hits the unique (set_id, revision) and is retried with
+// the following number.
 func (s *Store) CreateVersion(ctx context.Context, setID int64, author, comment string, canonical func(revision int64) (content []byte, etag string, err error)) (*Version, error) {
+	for attempt := 0; ; attempt++ {
+		v, err := s.createVersion(ctx, setID, author, comment, canonical)
+		if isUnique(err) && attempt < maxRaceRetries {
+			continue
+		}
+		return v, err
+	}
+}
+
+// maxRaceRetries bounds the retries of an insert that lost a race for the
+// next number to another server process.
+const maxRaceRetries = 5
+
+func (s *Store) createVersion(ctx context.Context, setID int64, author, comment string, canonical func(revision int64) (content []byte, etag string, err error)) (*Version, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := tx.lockSet(ctx, setID); err != nil {
+		return nil, err
+	}
 
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM rule_sets WHERE id = ?`, setID).Scan(&exists); err != nil {
@@ -350,12 +391,12 @@ func (s *Store) CreateVersion(ctx context.Context, setID int64, author, comment 
 	if err != nil {
 		return nil, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO versions (set_id, revision, content, etag, author, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		setID, revision, content, etag, author, comment, now())
+	var id int64
+	err = tx.QueryRowContext(ctx, `INSERT INTO versions (set_id, revision, content, etag, author, comment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+		setID, revision, content, etag, author, comment, now()).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -430,12 +471,28 @@ var ErrStale = errors.New("the set was published meanwhile; sign the new stateme
 
 // Publish makes the revision the one the set serves. Publishing an older
 // revision is the rollback; it is a new publication with a higher number.
+// An unsigned publication that lost the race for its number to another
+// server process is retried with the next one; a signed one is ErrStale,
+// because its signature covers the number.
 func (s *Store) Publish(ctx context.Context, setID int64, req PublishRequest) (*Publication, error) {
+	for attempt := 0; ; attempt++ {
+		p, err := s.publish(ctx, setID, req)
+		if errors.Is(err, ErrStale) && req.Seq == 0 && attempt < maxRaceRetries {
+			continue
+		}
+		return p, err
+	}
+}
+
+func (s *Store) publish(ctx context.Context, setID int64, req PublishRequest) (*Publication, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := tx.lockSet(ctx, setID); err != nil {
+		return nil, err
+	}
 	v, err := scanVersion(tx.QueryRowContext(ctx, `SELECT `+versionColumns+` FROM versions v WHERE v.set_id = ? AND v.revision = ?`, setID, req.Revision))
 	if err != nil {
 		return nil, err
@@ -568,12 +625,12 @@ func (s *Store) CreateToken(ctx context.Context, setID int64, name, kind string)
 	}
 	value := tp + hex.EncodeToString(raw)
 	prefix := value[:len(tp)+8]
-	res, err := s.db.ExecContext(ctx, `INSERT INTO tokens (set_id, name, kind, prefix, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		setID, name, kind, prefix, HashToken(value), now())
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO tokens (set_id, name, kind, prefix, hash, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+		setID, name, kind, prefix, HashToken(value), now()).Scan(&id)
 	if err != nil {
 		return nil, "", err
 	}
-	id, _ := res.LastInsertId()
 	t, err := s.getToken(ctx, id)
 	return t, value, err
 }

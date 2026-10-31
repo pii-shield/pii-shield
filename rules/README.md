@@ -7,7 +7,8 @@ restart. Nothing about a cluster is sent here; the server only answers
 `GET`. One binary serves the hosted service and a self-hosted copy inside
 your own perimeter.
 
-Status: first version (milestone 3.0, #95). The model, the SQLite store,
+Status: first version (milestone 3.0, #95). The model, the store on
+SQLite or Postgres,
 the public `policy.json` with ETag and tokens, a management API, a validate
 and a preview call that run a draft on the real scanner, a panel with a
 magic-link sign-in, and the image `ghcr.io/pii-shield/pii-shield-rules`.
@@ -23,8 +24,9 @@ RULES_ADMIN_TOKEN=$(openssl rand -hex 24) ./rules-server --listen :8080 --db rul
 ```
 
 Flags and env: `--listen` (`RULES_LISTEN`, default `:8080`), `--db`
-(`RULES_DB`, default `rules.db`, one SQLite file in WAL mode: back it up by
-copying the file or with Litestream), `--policy-rate` (pulls per token per
+(`RULES_DB`, default `rules.db`, one SQLite file in WAL mode: back it up
+with `sqlite3 .backup` or Litestream; or a `postgres://` URL that several
+processes share), `--policy-rate` (pulls per token per
 second, default 1, burst 10), `--single-tenant` (`RULES_SINGLE_TENANT=true`:
 one organization named `default`, no sign-in, for a server that sits
 behind a port-forward or your own access control), `--base-url`
@@ -194,7 +196,17 @@ set with nothing published is `404`. Pulls are rate-limited per token
 
 ```bash
 cd rules && go test -race ./...
+# the same store and server tests on Postgres: each test gets its own
+# database on this server and drops it afterwards
+RULES_TEST_POSTGRES='postgres://postgres:…@127.0.0.1:5432/postgres?sslmode=disable' go test -race ./internal/store/... ./internal/server/...
 ```
+
+The store writes its queries once, with `?` placeholders and nothing only
+one database has; `internal/store/db.go` rewrites the placeholders and the
+schema for Postgres, ids come back with `RETURNING`, and a transaction
+that numbers a set's versions or publications locks the set's row first
+(`FOR UPDATE` on Postgres; SQLite's single connection already serializes
+them).
 
 The module depends on the root module (`replace … => ../`) for
 `pkg/scanner`, so the image is built from the repository root:

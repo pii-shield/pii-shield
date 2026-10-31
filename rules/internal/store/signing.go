@@ -57,15 +57,15 @@ func scanSigningKey(row scanner) (*SigningKey, error) {
 // AddSigningKey registers a public key with the organization. keyID and
 // publicKey come from the signing package; the same key twice is ErrExists.
 func (s *Store) AddSigningKey(ctx context.Context, orgID int64, keyID, name, publicKey, createdBy string) (*SigningKey, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO signing_keys (org_id, key_id, name, public_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		orgID, keyID, name, publicKey, createdBy, now())
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO signing_keys (org_id, key_id, name, public_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+		orgID, keyID, name, publicKey, createdBy, now()).Scan(&id)
 	if isUnique(err) {
 		return nil, ErrExists
 	}
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
 	return scanSigningKey(s.db.QueryRowContext(ctx, `SELECT `+signingKeyColumns+` FROM signing_keys WHERE id = ?`, id))
 }
 

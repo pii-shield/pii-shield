@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"github.com/pii-shield/pii-shield/rules/internal/storetest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func openTest(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "rules.db"))
+	s, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

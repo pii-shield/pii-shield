@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,7 +22,7 @@ import (
 
 func main() {
 	listen := flag.String("listen", envOr("RULES_LISTEN", ":8080"), "address to listen on")
-	dbPath := flag.String("db", envOr("RULES_DB", "rules.db"), "path of the SQLite database")
+	dbPath := flag.String("db", envOr("RULES_DB", "rules.db"), "path of the SQLite database, or a postgres:// URL for several server processes")
 	singleTenant := flag.Bool("single-tenant", os.Getenv("RULES_SINGLE_TENANT") == "true", "serve one organization without a login (self-hosted, behind your own access control)")
 	policyRate := flag.Float64("policy-rate", 1, "policy.json pulls allowed per token per second (burst 10)")
 	baseURL := flag.String("base-url", os.Getenv("RULES_BASE_URL"), "public address of this server, for the links in mail; required with RULES_SMTP_ADDR")
@@ -58,7 +59,7 @@ func main() {
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
-		log.Error("open database", "path", *dbPath, "err", err)
+		log.Error("open database", "db", safeDSN(*dbPath), "err", err)
 		os.Exit(1)
 	}
 	defer func() { _ = st.Close() }()
@@ -82,7 +83,7 @@ func main() {
 		log.Error("start", "err", err)
 		os.Exit(1)
 	}
-	log.Info("rules-server listening", "addr", *listen, "db", *dbPath, "singleTenant", *singleTenant, "adminToken", adminToken != "",
+	log.Info("rules-server listening", "addr", *listen, "db", safeDSN(*dbPath), "postgres", store.IsPostgres(*dbPath), "singleTenant", *singleTenant, "adminToken", adminToken != "",
 		"signup", *signup, "smtp", os.Getenv("RULES_SMTP_ADDR") != "", "baseURL", *baseURL)
 	if err := server.ListenAndServe(ctx, *listen, srv); err != nil {
 		log.Error("serve", "err", err)
@@ -102,6 +103,19 @@ func localBaseURL(listen string) string {
 		host = "localhost"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// safeDSN is the --db value for the log: a Postgres URL without its
+// password.
+func safeDSN(dsn string) string {
+	if !store.IsPostgres(dsn) {
+		return dsn
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "postgres://(unparsable)"
+	}
+	return u.Redacted()
 }
 
 func envOr(key, def string) string {

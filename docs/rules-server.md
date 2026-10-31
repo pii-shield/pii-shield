@@ -73,7 +73,8 @@ and press **Revoke** next to the old one; it stops working at once.
 The image is `ghcr.io/pii-shield/pii-shield-rules` (the same tags as the
 other images, from the 3.0 release on; `latest` follows the newest release).
 It is a distroless image with one static binary, running as user 65532, and
-it keeps one SQLite file in `/data`.
+it keeps one SQLite file in `/data`, or uses Postgres (see
+[Several instances](#several-instances)).
 
 ```bash
 docker run -d --name pii-shield-rules \
@@ -112,7 +113,7 @@ Every flag has an environment variable; the flag wins when both are set.
 | Flag | Env | Default | What it does |
 | --- | --- | --- | --- |
 | `--listen` | `RULES_LISTEN` | `:8080` | Address to listen on. |
-| `--db` | `RULES_DB` | `rules.db` (`/data/rules.db` in the image) | The SQLite file, WAL mode. |
+| `--db` | `RULES_DB` | `rules.db` (`/data/rules.db` in the image) | The SQLite file, WAL mode; or a `postgres://` URL, which several server processes can share. The log shows the URL with its password masked. |
 | `--single-tenant` | `RULES_SINGLE_TENANT=true` | off | One organization `default`, no sign-in; for a server behind your own access control. |
 | `--policy-rate` | | `1` | `policy.json` pulls allowed per token per second (burst 10). |
 | `--base-url` | `RULES_BASE_URL` | required with SMTP; otherwise `http://localhost:<port>` from `--listen` | Public address of the server (`https://rules.example.com`), the only source of the sign-in links. They are never built from the request's `Host` header, which a client chooses: a forged `Host` would otherwise mail a real sign-in token inside a link to another site. With `RULES_SMTP_ADDR` set and no base URL the server refuses to start. |
@@ -139,9 +140,34 @@ localhost with `--insecure-cookies`.
 
 The database is one file in WAL mode. Back it up with SQLite's own copy
 (`sqlite3 /data/rules.db ".backup /backup/rules.db"`) or with Litestream;
-copying the file while the server runs can miss the write-ahead log. There
-is one process and one file; a second instance on the same file is not
-supported.
+copying the file while the server runs can miss the write-ahead log. A
+SQLite file serves one process; a second instance on the same file is not
+supported. For more than one, use Postgres.
+
+### Several instances
+
+Point every instance at the same Postgres database and put them behind one
+load balancer:
+
+```bash
+docker run -d -p 127.0.0.1:8080:8080 \
+  -e RULES_DB='postgres://rules:…@db.internal:5432/rules?sslmode=require' \
+  -e RULES_BASE_URL=https://rules.example.com -e RULES_SMTP_ADDR=… \
+  ghcr.io/pii-shield/pii-shield-rules:3.0.0
+```
+
+The first instance creates the tables; one that starts at the same time
+waits for it. Everything the instances share is in the database: rule
+sets, versions, publications, tokens, signing keys, the activity log,
+reports, sign-in links and sessions, so a link mailed by one instance
+signs in through another, and a session works on any. Versions and
+publications of one set are numbered one after the other even when two
+instances write at once. The database user needs the right to create tables
+the first time. Postgres 14 or later.
+
+What stays per instance: the rate limits on sign-in and on pulls. With
+`N` instances behind a balancer a client gets up to `N` times the limit.
+Back up the database with your usual Postgres tools.
 
 ## Organizations, sets, versions, tokens
 
@@ -188,8 +214,8 @@ sees nothing of the others. The session is a cookie (`HttpOnly`, `Secure`,
 something must carry the `X-Requested-With` header and an `Origin` or
 `Referer` of this host, which a cross-site form cannot send. Sign-in
 requests are limited per client address and per e-mail address, link
-attempts per client address; the limits live in the process's memory and
-start over with it.
+attempts per client address; the limits live in the process's memory,
+start over with it, and are counted per instance.
 
 ## Activity log
 
@@ -426,8 +452,6 @@ token used and the time; that is what its log records.
 
 ## What it does not do yet
 
-- **Run as more than one instance.** One process, one SQLite file. Postgres
-  comes when a second instance is needed.
 - **Alert.** The Clusters tab shows a cluster that is behind or reports
   errors, but nothing sends a message about it; alert on the operator's
   metrics in the cluster instead.

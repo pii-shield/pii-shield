@@ -6,19 +6,19 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/pii-shield/pii-shield/rules/internal/store"
+	"github.com/pii-shield/pii-shield/rules/internal/storetest"
 )
 
 const admin = "admin-secret"
 
 func newTestServer(t *testing.T, cfg Config) *httptest.Server {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "rules.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
