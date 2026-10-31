@@ -2869,7 +2869,8 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		key := rawToken[:idx] // Up to =
 		val := rawToken[idx+1:]
 
-		keySensitive := st.isSensitivePairKey(key) || overrideSensitivity
+		keySensitive := st.isSensitivePairKey(key) || overrideSensitivity ||
+			(isSessionKey(key) && st.isSessionTokenValue(val))
 
 		st.writeKeyHalf(key, sb)
 		sb.WriteRune('=')
@@ -3132,7 +3133,8 @@ func (st *configState) processColonPair(rawToken string, overrideSensitivity boo
 		val := rawToken[idx+1:]
 
 		key := trimQuotes(keyRaw)
-		keySensitive := st.isSensitiveKey(key) || overrideSensitivity
+		keySensitive := st.isSensitiveKey(key) || overrideSensitivity ||
+			(isSessionKey(key) && st.isSessionTokenValue(trimQuotes(val)))
 
 		// Recursively process val? Val might be empty if "key:"
 		if val == "" {
@@ -3535,6 +3537,12 @@ func (st *configState) maskURLParameters(url string, sb *strings.Builder, depth 
 						sb.WriteString(key)
 						sb.WriteRune('=')
 						st.redactWithHMAC(val, st.entityLabel("url"), "entropy", sb)
+					} else if st.isSessionTokenValue(val) && isSessionKey(key) {
+						// ?sid=abc123: a short session token stays under the
+						// threshold, and the key says what it is.
+						sb.WriteString(key)
+						sb.WriteRune('=')
+						st.redactWithHMAC(val, st.entityLabel("key"), "signature", sb)
 					} else {
 						sb.WriteString(param)
 					}
@@ -4507,14 +4515,22 @@ type segmentState struct {
 	nextValueIsSensitive bool // True if "key"="password", so next "value" is sensitive
 
 	pendingBearer bool // True if the previous token was the "Bearer" auth scheme
-	pendingBasic  bool // True if the previous token was the "Basic" auth scheme right after an auth key
-	pendingScheme bool // True if the previous token was an auth scheme word (QBox, AWS, Hawk) in the forced slot after a sensitive key
+	// True if that Bearer stood in the value slot of a sensitive key
+	// ("Authorization: Bearer", "authorization=Bearer"): the next token is
+	// the credential, whatever its length (see processAndAppend).
+	bearerAfterKey bool
+	pendingBasic   bool // True if the previous token was the "Basic" auth scheme right after an auth key
+	pendingScheme  bool // True if the previous token was an auth scheme word (QBox, AWS, Hawk) in the forced slot after a sensitive key
 	// True if the previous token was a lone "=" or ":" right after a
 	// sensitive key: the auth scheme may still follow ("Authorization = Basic").
 	sepAfterSensitiveKey bool
 	prevClean            string // the previous token without quotes and a trailing separator
 
 	pendingHashKey bool // True if the previous token was a commit/sha key ("commit": or git_sha=)
+	// True if the previous token was a session or cookie key with its
+	// separator ("sid:", "Set-Cookie:", "session_id":): the next token is
+	// hidden when it has the shape of a session token (isSessionTokenValue).
+	pendingSessionKey bool
 
 	// True after "<sensitive word> is": the next token is forced only if it
 	// has the shape of a secret (see processAndAppend).
@@ -4584,6 +4600,10 @@ var strongSecretWords = map[string]bool{"pass": true, "password": true, "passwd"
 
 // copulaWords link a sensitive word to its value in prose: "password is x".
 var copulaWords = map[string]bool{"is": true, "was": true, "are": true, "were": true}
+
+// longAuthSchemes are the auth scheme names too long for the short-word rule
+// to free in the value slot of an authorization key (see processAndAppend).
+var longAuthSchemes = map[string]bool{"bearer": true, "digest": true, "negotiate": true}
 
 // isHashKeyName reports whether a key names a commit or content hash: sha,
 // git_sha, commit, commit_id, hash, rev, revision.
@@ -4711,6 +4731,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 			state.afterMarker = false
 			state.isInValuePos = false
 			state.pendingBearer = strings.EqualFold(v, "bearer")
+			state.bearerAfterKey = state.pendingBearer
 			state.pendingBasic = strings.EqualFold(v, "basic")
 			state.pendingScheme = false
 			state.sepAfterSensitiveKey = false
@@ -4803,8 +4824,31 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	if forced && !state.isInValuePos && strings.EqualFold(prevClean, "key") && st.isIdentifierName(strings.Trim(cleanToken, "`\\'\"")) {
 		forced = false
 	}
+	// The scheme word is not the secret. Basic, AWS, QBox and NTLM are
+	// freed above as short words, but Bearer, Digest and Negotiate are six
+	// letters or more, so the key's forced slot hid the word and left the
+	// credential after it to the rules below: "Authorization: Bearer abc123"
+	// came out as "Authorization: [HIDDEN:…] abc123". Keep the word.
+	if schemeSlot && lower.in(longAuthSchemes) {
+		forced = false
+	}
+	// A token forced as the credential after a scheme word is a value even
+	// outside value position: read as a key, "Bearer test-token-1" kept its
+	// token because it holds the word token.
+	schemeCredential := false
 	if state.pendingBearer && len(cleanToken) >= minBearerCredentialLength {
-		forced = true
+		forced, schemeCredential = true, true
+	}
+	// After an authorization key the token behind Bearer is the credential
+	// at any length: the 16-character floor above protects prose ("the
+	// bearer of this note"), and there is no prose in the value slot of an
+	// authorization key. It still has to look like a secret, so "Bearer
+	// missing" and "Bearer token expired" keep their words, and a scheme
+	// parameter (WWW-Authenticate: Bearer realm="api") is a pair, not a
+	// credential.
+	if state.bearerAfterKey && len(cleanToken) >= st.config.MinSecretLength && looksLikeSecretWord(cleanToken) &&
+		!isISO8601Timestamp(cleanToken) && !isSchemeParameter(cleanToken) {
+		forced, schemeCredential = true, true
 	}
 	// "Authorization: Basic <base64>" the same way: the credential is
 	// base64 of user:password and can be short (119 of 120 random ones were
@@ -4814,7 +4858,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// A word that reads as English is not one ("auth = basic support").
 	if state.pendingBasic && len(cleanToken) >= st.config.MinSecretLength && isBase64Body(strings.TrimRight(cleanToken, "=")) && strings.Count(cleanToken, "=") <= 2 &&
 		!(isAllLetters(cleanToken) && st.calculateBigramAdjustment(lower.forBigrams()) < 0) {
-		forced = true
+		forced, schemeCredential = true, true
 	}
 	// Any other auth scheme written as "<Scheme> <credential>" after a
 	// sensitive key the same way: "accessToken: QBox <ak>:<sig>=" and
@@ -4830,7 +4874,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// after Hawk), so "Authorization: Missing header", "password: Invalid
 	// value" and "token: Expired 2026-10-23T14:15:31Z" keep their words.
 	if state.pendingScheme && len(cleanToken) >= minBearerCredentialLength && looksLikeSecretWord(cleanToken) && !isISO8601Timestamp(cleanToken) && !isSchemeParameter(cleanToken) {
-		forced = true
+		forced, schemeCredential = true, true
 	}
 	// "my password is 123456": the sensitive word's forced slot goes to "is",
 	// which the rule above frees as a short word, and the value after it
@@ -4841,6 +4885,9 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 	// incorrect" and "token is auto-generated" keep their words. Measured on
 	// the prose in the Go and Python source trees, where "the key is base32"
 	// and "api_key = api_key" were the false positives of a wider rule.
+	if state.pendingSessionKey && st.isSessionTokenValue(cleanToken) {
+		forced = true
+	}
 	if state.pendingAfterCopula {
 		core := strings.TrimRightFunc(cleanToken, func(r rune) bool { return unicode.IsPunct(r) && r != '_' })
 		if len(core) >= st.config.MinSecretLength && looksLikeSecretWord(core) {
@@ -4903,7 +4950,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 		if contextSensitive && state.bracketAfterContext && st.readsAsWords(cleanToken) {
 			contextSensitive = false
 		}
-		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos, state.isInValuePos && state.valueOfQuotedKey, override, sb, depth)
+		isKey = st.processTokenLogic(token, forced, contextSensitive, state.isInValuePos || schemeCredential, state.isInValuePos && state.valueOfQuotedKey, override, sb, depth)
 	}
 	state.bracketAfterContext = false
 	// sb is updated inside processTokenLogic
@@ -4971,6 +5018,7 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	// Remember the auth scheme for exactly one token (see the forcing above).
 	state.pendingBearer = lower.is("bearer")
+	state.bearerAfterKey = state.pendingBearer && schemeSlot
 	// "basic" is an ordinary English word; it is an auth scheme only in the
 	// value slot of an authorization key ("Authorization: Basic",
 	// "Proxy-Authorization: Basic"), so prose such as "basic
@@ -4982,8 +5030,10 @@ func (st *configState) processAndAppend(token string, sb *strings.Builder, state
 
 	if k, isPair := pairKey(trimmed); isPair && (strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "=")) {
 		state.pendingHashKey = isHashKeyName(k) && !st.isSensitiveKey(k)
+		state.pendingSessionKey = isSessionKey(k)
 	} else {
 		state.pendingHashKey = false
+		state.pendingSessionKey = false
 	}
 
 	// Check if this token is a Context Keyword (e.g. "Error", "Failed")
