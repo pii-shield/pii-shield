@@ -6,8 +6,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 func TestAuditorCountsWithoutRedacting(t *testing.T) {

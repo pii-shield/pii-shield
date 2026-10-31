@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 func TestValidateDraft(t *testing.T) {

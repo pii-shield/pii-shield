@@ -11,8 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/pii-shield/pii-shield/v2/pkg/metrics"
-	"github.com/pii-shield/pii-shield/v2/pkg/scanner"
+	"github.com/pii-shield/pii-shield/v3/pkg/metrics"
+	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
 
 // EventsTotal counts the records read from the kernel by what happened to

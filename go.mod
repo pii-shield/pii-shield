@@ -1,4 +1,4 @@
-module github.com/pii-shield/pii-shield/v2
+module github.com/pii-shield/pii-shield/v3
 
 go 1.26.9
 
