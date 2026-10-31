@@ -258,3 +258,64 @@ func TestSigningKeys(t *testing.T) {
 		t.Errorf("ListSigningKeys = %+v", keys)
 	}
 }
+
+func TestAuditLog(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	other, _ := s.CreateOrg(ctx, "other", "")
+	for i := range 5 {
+		if err := s.Record(ctx, Event{OrgID: org.ID, Actor: "alice@acme.test", Action: "publish", Target: "payments", Detail: map[string]any{"revision": i + 1}, IP: "10.0.0.1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.Record(ctx, Event{OrgID: other.ID, Actor: "eve@other.test", Action: "set.create"})
+
+	page, _ := s.Events(ctx, org.ID, 0, 3)
+	if len(page) != 3 || page[0].Detail["revision"] != float64(5) || page[0].Actor != "alice@acme.test" || page[0].IP != "10.0.0.1" {
+		t.Fatalf("first page = %+v", page)
+	}
+	rest, _ := s.Events(ctx, org.ID, page[2].ID, 3)
+	if len(rest) != 2 || rest[1].Detail["revision"] != float64(1) {
+		t.Errorf("second page = %+v", rest)
+	}
+	if mine, _ := s.Events(ctx, other.ID, 0, 10); len(mine) != 1 || mine[0].Actor != "eve@other.test" {
+		t.Errorf("another organization's log = %+v", mine)
+	}
+	// Append-only even for raw SQL.
+	if _, err := s.db.ExecContext(ctx, `UPDATE audit_events SET actor = 'x'`); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Errorf("UPDATE on the audit log: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM audit_events`); err == nil || !strings.Contains(err.Error(), "kept") {
+		t.Errorf("DELETE on the audit log: %v", err)
+	}
+}
+
+func TestTouchToken(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
+	tok, _, _ := s.CreateToken(ctx, set.ID, "prod")
+	if tok.LastUsedAt != nil {
+		t.Fatal("a new token was never used")
+	}
+	if err := s.TouchToken(ctx, tok.ID, "10.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.getToken(ctx, tok.ID)
+	if first.LastUsedAt == nil || first.LastUsedIP != "10.0.0.1" {
+		t.Fatalf("after a pull: %+v", first)
+	}
+	// Within the minute a second pull writes nothing.
+	_ = s.TouchToken(ctx, tok.ID, "10.0.0.2")
+	if again, _ := s.getToken(ctx, tok.ID); again.LastUsedIP != "10.0.0.1" || !again.LastUsedAt.Equal(*first.LastUsedAt) {
+		t.Errorf("a pull within the minute rewrote the record: %+v", again)
+	}
+	// An older record is replaced.
+	_, _ = s.db.ExecContext(ctx, `UPDATE tokens SET last_used_at = '2000-01-01T00:00:00.000000000Z' WHERE id = ?`, tok.ID)
+	_ = s.TouchToken(ctx, tok.ID, "10.0.0.3")
+	if later, _ := s.getToken(ctx, tok.ID); later.LastUsedIP != "10.0.0.3" {
+		t.Errorf("an old record must be replaced: %+v", later)
+	}
+}

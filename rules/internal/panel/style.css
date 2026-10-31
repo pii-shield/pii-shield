@@ -48,3 +48,4 @@ button:disabled { opacity: .55; cursor: default; }
 .checks label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin-right: 18px; }
 #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 14px; max-width: 90vw; }
 .secret { font: 13px/1.5 ui-monospace, Menlo, monospace; background: #fff8e1; border: 1px solid #f0d78c; padding: 10px; border-radius: 6px; word-break: break-all; }
+tr.warn td { background: #fbf0d9; }

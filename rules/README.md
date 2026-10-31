@@ -118,6 +118,12 @@ serves it to the cluster. The operator's check is
 The panel keeps its key as a non-extractable WebCrypto key in IndexedDB.
 Described for users in [docs/rules-server.md](../docs/rules-server.md#signed-publications).
 
+Activity log: `internal/store/audit.go` (append-only, triggers refuse
+`UPDATE` and `DELETE`), written by `Server.audit` after each change in
+`internal/server`; `GET /api/orgs/{org}/audit?limit=&before=`. A token keeps
+its last pull (`last_used_at`, `last_used_ip`, written at most once a
+minute) instead of an entry per pull.
+
 Other calls: `GET /api/orgs`, `GET /api/orgs/{org}/sets`,
 `GET /api/orgs/{org}/sets/{set}` (set, versions, tokens, the policy path),
 `GET .../versions`, `GET .../versions/{rev}`, `GET .../publications`

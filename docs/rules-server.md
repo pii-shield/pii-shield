@@ -172,7 +172,8 @@ button; a preview of the draft or of the published version on pasted log
 lines, run on the real scanner with a preview salt, so the markers show
 what will be hidden while the hashes match no cluster; versions with
 publish, roll back, a diff of two versions and the publish history; tokens;
-the `PiiPolicy` snippet that connects a cluster; members; and signing keys.
+the `PiiPolicy` snippet that connects a cluster; members; signing keys; and
+the activity log.
 
 Sign-in is by magic link; there are no passwords. You enter your address,
 a link arrives by mail, and the page it opens has one button that signs you
@@ -188,6 +189,31 @@ something must carry the `X-Requested-With` header and an `Origin` or
 requests are limited per client address and per e-mail address, link
 attempts per client address; the limits live in the process's memory and
 start over with it.
+
+## Activity log
+
+Every change in an organization is an entry in its activity log: who made
+it (an address, `admin token`, or `single-tenant, no sign-in`), what it
+was, which object, when, and from which client address. The entries are
+sign-up, sign-in and sign-out, invitations, new rule sets and versions,
+publications (with the publication number and the signing key), refused
+publications (unsigned, a bad signature, an unknown key), tokens issued and
+revoked, signing keys added and revoked. No secret is written: a token
+appears by its prefix only.
+
+The log is append-only: the database refuses to change or delete an entry,
+so it holds against a bug in the server too. It is kept for the life of the
+database; back it up with the rest.
+
+Pulls by clusters are not entries, since a cluster pulls every few minutes.
+Each token keeps the time and client address of its last pull instead
+(written at most once a minute), and the set's Tokens tab shows it, so a
+token that a cluster no longer uses, or one used from an unexpected
+address, stands out.
+
+The **Activity** page shows the log, newest first. The API is
+`GET /api/orgs/{org}/audit?limit=100&before=<id>`; the answer's `next` is
+the `before` of the following page.
 
 ## Signed publications
 
@@ -308,6 +334,7 @@ curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/tokens -d '{"name": "prod-eu
 | `GET`, `POST /api/orgs/{org}/signing-keys`, `DELETE …/signing-keys/{id}` | Public signing keys; `POST` with `{"name": …, "publicKey": "ed25519:…"}`. |
 | `GET /v1/{org}/{set}/policy.json.sig` | With the pull token: the statement fields, `keyId` and `signature` of the publication the set serves; `404` when it is unsigned. |
 | `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; the value is in the `POST` answer once. |
+| `GET /api/orgs/{org}/audit` | The activity log, newest first; `limit` (default 100, at most 500) and `before` page through it. |
 | `GET /healthz` | `ok`. |
 
 A rule set may be up to 256 KiB, the same limit the operator applies to a
@@ -366,8 +393,6 @@ token used and the time; that is what its log records.
   need a channel from the agent to a server, and that channel will be
   separate, explicitly enabled and carrying counters only.
 - **Sign in any other way.** Magic link by e-mail; no passwords, no OAuth.
-- **Keep an audit trail beyond the versions.** Who published what and when
-  is in the publish history; sign-ins and token use are in the log only.
 - **Serve a hosted copy yet.** The hosted service on a pii-shield.com
   subdomain opens by [waitlist](https://tally.so/r/PdY7Ze).
 

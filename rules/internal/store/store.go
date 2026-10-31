@@ -80,6 +80,10 @@ type Token struct {
 	Prefix    string     `json:"prefix"`
 	CreatedAt time.Time  `json:"createdAt"`
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
+	// LastUsedAt and LastUsedIP are the last pull with the token, recorded
+	// at most once a minute.
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	LastUsedIP string     `json:"lastUsedIp,omitempty"`
 }
 
 // Publication is one entry of a set's publish history. Seq numbers the
@@ -109,7 +113,7 @@ func Open(path string) (*Store, error) {
 	// One connection: SQLite serializes writers anyway, and one connection
 	// means a transaction never waits on the pool for a second one.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + accountsSchema + signingSchema); err != nil {
+	if _, err := db.Exec(schema + accountsSchema + signingSchema + auditSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -159,7 +163,9 @@ CREATE TABLE IF NOT EXISTS tokens (
 	prefix TEXT NOT NULL,
 	hash TEXT NOT NULL UNIQUE,
 	created_at TEXT NOT NULL,
-	revoked_at TEXT
+	revoked_at TEXT,
+	last_used_at TEXT,
+	last_used_ip TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS publications (
 	id INTEGER PRIMARY KEY,
@@ -551,13 +557,13 @@ func HashToken(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-const tokenColumns = `id, set_id, name, prefix, created_at, revoked_at`
+const tokenColumns = `id, set_id, name, prefix, created_at, revoked_at, last_used_at, last_used_ip`
 
 func scanToken(row scanner) (*Token, error) {
 	var t Token
 	var created string
-	var revoked sql.NullString
-	if err := row.Scan(&t.ID, &t.SetID, &t.Name, &t.Prefix, &created, &revoked); err != nil {
+	var revoked, used sql.NullString
+	if err := row.Scan(&t.ID, &t.SetID, &t.Name, &t.Prefix, &created, &revoked, &used, &t.LastUsedIP); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -567,6 +573,10 @@ func scanToken(row scanner) (*Token, error) {
 	if revoked.Valid {
 		at := parseTime(revoked.String)
 		t.RevokedAt = &at
+	}
+	if used.Valid {
+		at := parseTime(used.String)
+		t.LastUsedAt = &at
 	}
 	return &t, nil
 }

@@ -19,6 +19,7 @@ func (s *Server) serveSignature(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.touch(r, acc)
 	pub, err := s.store.LatestPublication(r.Context(), acc.Set.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotPublished) {
@@ -88,6 +89,7 @@ func (s *Server) addSigningKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("signing key added", "org", org.Slug, "key", k.KeyID, "name", k.Name, "by", k.CreatedBy)
+	s.audit(r, "", org.ID, actKeyAdd, k.KeyID, map[string]any{"name": k.Name})
 	s.json(w, http.StatusCreated, k)
 }
 
@@ -106,5 +108,6 @@ func (s *Server) revokeSigningKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("signing key revoked", "org", org.Slug, "id", id)
+	s.audit(r, "", org.ID, actKeyRevoke, "", map[string]any{"keyRowId": id})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -151,6 +151,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/preview", admin(s.preview))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/publish", admin(s.publish))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publish/statement", admin(s.statement))
+	s.mux.HandleFunc("GET /api/orgs/{org}/audit", admin(s.listAudit))
 	s.mux.HandleFunc("GET /api/orgs/{org}/signing-keys", admin(s.listSigningKeys))
 	s.mux.HandleFunc("POST /api/orgs/{org}/signing-keys", admin(s.addSigningKey))
 	s.mux.HandleFunc("DELETE /api/orgs/{org}/signing-keys/{id}", admin(s.revokeSigningKey))
@@ -176,6 +177,7 @@ func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.touch(r, acc)
 	v, err := s.store.Published(r.Context(), acc.Set.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotPublished) {
@@ -228,6 +230,14 @@ func (s *Server) pullAccess(w http.ResponseWriter, r *http.Request) (*store.Acce
 		return nil, false
 	}
 	return acc, true
+}
+
+// touch records the pull on the token: when and from where it was last
+// used, which the Tokens tab shows. A failure only costs that record.
+func (s *Server) touch(r *http.Request, acc *store.Access) {
+	if err := s.store.TouchToken(r.Context(), acc.Token.ID, s.clientIP(r)); err != nil {
+		s.log.Error("record the token's last use", "token", acc.Token.Prefix, "err", err)
+	}
 }
 
 func (s *Server) limiter(tokenID int64) *rate.Limiter {
@@ -306,6 +316,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.audit(r, "", org.ID, actOrgCreate, org.Slug, map[string]any{"name": org.Name})
 	s.json(w, http.StatusCreated, org)
 }
 
@@ -364,6 +375,7 @@ func (s *Server) createSet(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.audit(r, "", org.ID, actSetCreate, set.Slug, nil)
 	s.json(w, http.StatusCreated, set)
 }
 
@@ -438,6 +450,7 @@ func (s *Server) createVersion(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.audit(r, "", set.OrgID, actVersionCreate, set.Slug, map[string]any{"revision": v.Revision, "etag": v.ETag, "comment": v.Comment})
 	s.json(w, http.StatusCreated, v)
 }
 
@@ -501,6 +514,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		k, err := s.store.ActiveSigningKey(r.Context(), set.OrgID, req.KeyID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
+				s.audit(r, "", set.OrgID, actPublishRefused, set.Slug, map[string]any{"revision": req.Revision, "keyId": req.KeyID, "reason": "no such active key"})
 				s.fail(w, http.StatusUnprocessableEntity, "no active signing key "+req.KeyID+" in this organization")
 				return
 			}
@@ -518,6 +532,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if has {
+			s.audit(r, "", set.OrgID, actPublishRefused, set.Slug, map[string]any{"revision": req.Revision, "reason": "unsigned"})
 			s.fail(w, http.StatusUnprocessableEntity, "this organization signs its publications: sign the statement from GET "+r.URL.Path+"/statement?revision=N and send publication, keyId and signature")
 			return
 		}
@@ -536,6 +551,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, signing.ErrBadSignature):
+			s.audit(r, "", set.OrgID, actPublishRefused, set.Slug, map[string]any{"revision": req.Revision, "keyId": req.KeyID, "reason": "bad signature"})
 			s.fail(w, http.StatusUnprocessableEntity, "the signature does not verify with key "+req.KeyID+" for this statement")
 		case errors.Is(err, store.ErrStale):
 			s.fail(w, http.StatusConflict, err.Error())
@@ -545,6 +561,11 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("published", "org", r.PathValue("org"), "set", set.Slug, "revision", req.Revision, "publication", pub.Seq, "author", author, "key", req.KeyID)
+	detail := map[string]any{"revision": pub.Revision, "publication": pub.Seq}
+	if pub.KeyID != "" {
+		detail["keyId"] = pub.KeyID
+	}
+	s.audit(r, "", set.OrgID, actPublish, set.Slug, detail)
 	set, _ = s.store.GetSetByID(r.Context(), set.ID)
 	s.json(w, http.StatusOK, set)
 }
@@ -624,6 +645,7 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("token issued", "org", r.PathValue("org"), "set", set.Slug, "token", tok.Prefix, "name", req.Name)
+	s.audit(r, "", set.OrgID, actTokenCreate, set.Slug, map[string]any{"name": tok.Name, "prefix": tok.Prefix})
 	s.json(w, http.StatusCreated, map[string]any{"token": tok, "value": value,
 		"note": "the value is shown once; put it whole, as 'Bearer " + store.TokenPrefix + "…', into the Secret named by remoteConfig.headerSecretRef"})
 }
@@ -643,6 +665,7 @@ func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("token revoked", "org", r.PathValue("org"), "set", set.Slug, "id", id)
+	s.audit(r, "", set.OrgID, actTokenRevoke, set.Slug, map[string]any{"tokenId": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 

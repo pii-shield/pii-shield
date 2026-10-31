@@ -61,7 +61,7 @@
     nav.replaceChildren();
     const me = state.me;
     if (!me) return;
-    if (me.org || state.org) nav.append(h('a', { href: '#/' }, 'Rule sets'), h('a', { href: '#/members' }, 'Members'), h('a', { href: '#/keys' }, 'Signing keys'));
+    if (me.org || state.org) nav.append(h('a', { href: '#/' }, 'Rule sets'), h('a', { href: '#/members' }, 'Members'), h('a', { href: '#/keys' }, 'Signing keys'), h('a', { href: '#/activity' }, 'Activity'));
     if (me.mode === 'admin') nav.append(h('a', { href: '#/orgs' }, 'Organizations'));
     nav.append(h('span', { class: 'small' }, me.mode === 'session' ? me.email : me.mode === 'admin' ? 'admin token' : 'single tenant'));
     if (me.mode === 'session') nav.append(h('button', { class: 'link', onclick: async () => { await api('POST', '/auth/logout'); state.me = null; location.hash = '#/login'; route(); } }, 'Sign out'));
@@ -81,6 +81,7 @@
       if (parts[0] === 'orgs') { if (parts[1]) { state.org = parts[1]; location.hash = '#/'; return; } return renderOrgs(); }
       if (parts[0] === 'members') return renderMembers();
       if (parts[0] === 'keys') return renderKeys();
+      if (parts[0] === 'activity') return renderActivity();
       if (parts[0] === 'sets' && parts[1]) return renderSet(parts[1], parts[2] || 'editor');
       return renderSets();
     } catch (e) {
@@ -448,14 +449,55 @@
         h('pre', null, '    signature:\n      publicKeys:\n' + trusted)) : '');
   }
 
+  // ---- activity ----
+  // The organization's audit log, newest first, a page at a time.
+  function describe(e) {
+    const d = e.detail || {};
+    switch (e.action) {
+      case 'org.create': return 'created the organization';
+      case 'org.signup': return 'signed up, creating the organization';
+      case 'signin': return 'signed in';
+      case 'signout': return 'signed out';
+      case 'member.invite': return 'invited ' + e.target + (d.mailed === false ? ' (mail not sent)' : '');
+      case 'set.create': return 'created rule set ' + e.target;
+      case 'version.create': return 'saved r' + d.revision + ' of ' + e.target + (d.comment ? ': ' + d.comment : '');
+      case 'publish': return 'published r' + d.revision + ' of ' + e.target + ' as publication ' + d.publication + (d.keyId ? ', signed with ' + d.keyId : ', unsigned');
+      case 'publish.refused': return 'was refused publishing r' + d.revision + ' of ' + e.target + ': ' + d.reason + (d.keyId ? ' (key ' + d.keyId + ')' : '');
+      case 'token.create': return 'issued token ' + d.prefix + '… "' + d.name + '" for ' + e.target;
+      case 'token.revoke': return 'revoked a token of ' + e.target;
+      case 'key.add': return 'added signing key ' + e.target + ' "' + d.name + '"';
+      case 'key.revoke': return 'revoked a signing key';
+      default: return e.action + ' ' + (e.target || '');
+    }
+  }
+  async function renderActivity() {
+    const body = h('tbody');
+    const more = h('div', { class: 'actions' });
+    async function page(before) {
+      const r = await api('GET', base() + '/audit?limit=100' + (before ? '&before=' + before : ''));
+      for (const e of r.events) body.append(h('tr', { class: e.action === 'publish.refused' ? 'warn' : null },
+        h('td', { class: 'small' }, fmtDate(e.at)), h('td', null, e.actor), h('td', null, describe(e)), h('td', { class: 'small muted' }, e.ip || '')));
+      more.replaceChildren(r.next ? h('button', { onclick: () => page(r.next) }, 'Older') : '');
+      if (!body.children.length) body.append(h('tr', null, h('td', { colspan: 4, class: 'muted' }, 'Nothing yet.')));
+    }
+    app.replaceChildren(
+      h('h1', null, 'Activity', ' ', h('span', { class: 'muted small' }, orgSlug())),
+      h('div', { class: 'card' },
+        h('p', { class: 'muted small' }, 'Every change in this organization, who made it and from which address. The log cannot be edited or deleted. Pulls by clusters are not listed; each token shows its last use on the Tokens tab of its set.'),
+        h('table', null, h('thead', null, h('tr', null, h('th', null, 'When'), h('th', null, 'Who'), h('th', null, 'What'), h('th', null, 'From'))), body),
+        more));
+    await page(0);
+  }
+
   // ---- tokens ----
   async function renderTokens(ctx) {
     const name = h('input', { type: 'text', placeholder: 'prod-eu cluster' });
     const shown = h('div');
     return h('div', null,
       h('div', { class: 'card' },
-        h('table', null, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Prefix'), h('th', null, 'Created'), h('th', null, 'Status'), h('th', null, ''))),
+        h('table', null, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Prefix'), h('th', null, 'Created'), h('th', null, 'Last used'), h('th', null, 'Status'), h('th', null, ''))),
           h('tbody', null, ctx.tokens.map(t => h('tr', null, h('td', null, t.name), h('td', null, h('code', null, t.prefix + '…')), h('td', null, fmtDate(t.createdAt)),
+            h('td', null, t.lastUsedAt ? fmtDate(t.lastUsedAt) + ' from ' + t.lastUsedIp : h('span', { class: 'badge off' }, 'never')),
             h('td', null, t.revokedAt ? h('span', { class: 'badge off' }, 'revoked ' + fmtDate(t.revokedAt)) : h('span', { class: 'badge ok' }, 'active')),
             h('td', null, t.revokedAt ? null : h('button', { class: 'danger', onclick: async () => {
               if (!confirm('Revoke "' + t.name + '"? The cluster holding it keeps its last good rules and stops receiving updates.')) return;
