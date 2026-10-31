@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func openTest(t *testing.T) *Store {
@@ -160,14 +161,14 @@ func TestTokens(t *testing.T) {
 	org, _ := s.CreateOrg(ctx, "acme", "")
 	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
 
-	tok, value, err := s.CreateToken(ctx, set.ID, "prod cluster")
+	tok, value, err := s.CreateToken(ctx, set.ID, "prod cluster", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(value, TokenPrefix) || len(value) != len(TokenPrefix)+48 || tok.Prefix != value[:12] {
 		t.Errorf("token value %q, prefix %q", value, tok.Prefix)
 	}
-	if _, _, err := s.CreateToken(ctx, 999, "x"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.CreateToken(ctx, 999, "x", KindPull); !errors.Is(err, ErrNotFound) {
 		t.Errorf("token for a missing set: %v", err)
 	}
 	var stored string
@@ -296,7 +297,7 @@ func TestTouchToken(t *testing.T) {
 	s := openTest(t)
 	org, _ := s.CreateOrg(ctx, "acme", "")
 	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
-	tok, _, _ := s.CreateToken(ctx, set.ID, "prod")
+	tok, _, _ := s.CreateToken(ctx, set.ID, "prod", KindPull)
 	if tok.LastUsedAt != nil {
 		t.Fatal("a new token was never used")
 	}
@@ -317,5 +318,40 @@ func TestTouchToken(t *testing.T) {
 	_ = s.TouchToken(ctx, tok.ID, "10.0.0.3")
 	if later, _ := s.getToken(ctx, tok.ID); later.LastUsedIP != "10.0.0.3" {
 		t.Errorf("an old record must be replaced: %+v", later)
+	}
+}
+
+func TestReportsRetentionAndClusters(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
+	tok, _, _ := s.CreateToken(ctx, set.ID, "stats", KindReport)
+	if tok.Kind != KindReport || !strings.HasPrefix(tok.Prefix, ReportTokenPrefix) {
+		t.Fatalf("report token %+v", tok)
+	}
+	if _, _, err := s.CreateToken(ctx, set.ID, "x", "write"); !errors.Is(err, ErrInvalidKind) {
+		t.Errorf("unknown kind: %v", err)
+	}
+	add := func(cluster string, lines int64) {
+		t.Helper()
+		if err := s.AddReport(ctx, Report{SetID: set.ID, TokenID: tok.ID, Cluster: cluster, Policy: "apps/p", From: time.Now().Add(-time.Minute), To: time.Now(),
+			Mode: "redact", Revisions: map[string]int{"1": 1}, Lines: lines, Redactions: map[string]int64{"entropy": lines / 10}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("a", 10)
+	// A report older than the retention is dropped by the next insert.
+	_, _ = s.db.ExecContext(ctx, `UPDATE reports SET received_at = '2000-01-01T00:00:00Z'`)
+	add("a", 20)
+	add("b", 30)
+	var n int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports`).Scan(&n)
+	if n != 2 {
+		t.Errorf("reports kept = %d, want 2", n)
+	}
+	cs, err := s.Clusters(ctx, set.ID, time.Now().Add(-time.Hour))
+	if err != nil || len(cs) != 2 || cs[0].Cluster != "b" || cs[1].Lines != 20 || cs[1].Redactions["entropy"] != 2 || cs[0].TokenName != "stats" {
+		t.Errorf("Clusters = %+v %v", cs, err)
 	}
 }

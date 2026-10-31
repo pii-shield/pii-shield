@@ -126,6 +126,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json", s.servePolicy)
 	s.mux.HandleFunc("GET /v1/{org}/{set}/policy.json.sig", s.serveSignature)
+	s.mux.HandleFunc("POST /v1/{org}/{set}/report", s.receiveReport)
 
 	s.mux.Handle("GET /{$}", panel.Handler())
 	s.mux.Handle("GET /app.js", panel.Handler())
@@ -157,6 +158,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/orgs/{org}/signing-keys/{id}", admin(s.revokeSigningKey))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/publications", admin(s.publications))
 	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/tokens", admin(s.listTokens))
+	s.mux.HandleFunc("GET /api/orgs/{org}/sets/{set}/clusters", admin(s.listClusters))
 	s.mux.HandleFunc("POST /api/orgs/{org}/sets/{set}/tokens", admin(s.createToken))
 	s.mux.HandleFunc("DELETE /api/orgs/{org}/sets/{set}/tokens/{id}", admin(s.revokeToken))
 }
@@ -198,11 +200,17 @@ func (s *Server) servePolicy(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(v.Content)
 }
 
-// pullAccess checks the read-only token of a pull and that it belongs to
-// the set of the path. Any token problem is 401 without detail; a token
-// used against another set's path is 404, so a token discloses nothing
-// about sets it does not own.
+// pullAccess checks the pull token of a pull and that it belongs to the
+// set of the path.
 func (s *Server) pullAccess(w http.ResponseWriter, r *http.Request) (*store.Access, bool) {
+	return s.tokenAccess(w, r, store.KindPull)
+}
+
+// tokenAccess checks a bearer token of the kind and that it belongs to the
+// set of the path. Any token problem is 401 without detail; a token used
+// against another set's path is 404, so a token discloses nothing about
+// sets it does not own; a token of the other kind is 403.
+func (s *Server) tokenAccess(w http.ResponseWriter, r *http.Request, kind string) (*store.Access, bool) {
 	w.Header().Set("Cache-Control", "no-cache")
 	value, ok := bearer(r)
 	if !ok {
@@ -227,6 +235,14 @@ func (s *Server) pullAccess(w http.ResponseWriter, r *http.Request) (*store.Acce
 	}
 	if acc.Org.Slug != r.PathValue("org") || acc.Set.Slug != r.PathValue("set") {
 		s.fail(w, http.StatusNotFound, "no such rule set for this token")
+		return nil, false
+	}
+	if acc.Token.Kind != kind {
+		if kind == store.KindPull {
+			s.fail(w, http.StatusForbidden, "this token sends stats reports; it cannot read rules")
+		} else {
+			s.fail(w, http.StatusForbidden, "this token reads rules; it cannot send reports")
+		}
 		return nil, false
 	}
 	return acc, true
@@ -624,6 +640,8 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 
 type tokenRequest struct {
 	Name string `json:"name"`
+	// Kind is "pull" (the default) or "report".
+	Kind string `json:"kind"`
 }
 
 func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
@@ -639,15 +657,22 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, `"name" is required: which cluster or team holds the token`)
 		return
 	}
-	tok, value, err := s.store.CreateToken(r.Context(), set.ID, req.Name)
+	tok, value, err := s.store.CreateToken(r.Context(), set.ID, req.Name, req.Kind)
+	if errors.Is(err, store.ErrInvalidKind) {
+		s.fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
 	s.log.Info("token issued", "org", r.PathValue("org"), "set", set.Slug, "token", tok.Prefix, "name", req.Name)
-	s.audit(r, "", set.OrgID, actTokenCreate, set.Slug, map[string]any{"name": tok.Name, "prefix": tok.Prefix})
-	s.json(w, http.StatusCreated, map[string]any{"token": tok, "value": value,
-		"note": "the value is shown once; put it whole, as 'Bearer " + store.TokenPrefix + "…', into the Secret named by remoteConfig.headerSecretRef"})
+	s.audit(r, "", set.OrgID, actTokenCreate, set.Slug, map[string]any{"name": tok.Name, "prefix": tok.Prefix, "kind": tok.Kind})
+	note := "the value is shown once; put it whole, as 'Bearer " + store.TokenPrefix + "…', into the Secret named by remoteConfig.headerSecretRef"
+	if tok.Kind == store.KindReport {
+		note = "the value is shown once; put it whole, as 'Bearer " + store.ReportTokenPrefix + "…', into the Secret named by stats.headerSecretRef; it can only send reports"
+	}
+	s.json(w, http.StatusCreated, map[string]any{"token": tok, "value": value, "note": note})
 }
 
 func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {

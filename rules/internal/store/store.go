@@ -71,12 +71,14 @@ type Version struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// Token is a read-only credential for one rule set's policy.json. The
-// value is shown once at creation; only its hash is stored.
+// Token is a credential for one rule set: a pull token reads its
+// policy.json, a report token sends its stats reports (Kind). The value is
+// shown once at creation; only its hash is stored.
 type Token struct {
 	ID        int64      `json:"id"`
 	SetID     int64      `json:"setId"`
 	Name      string     `json:"name"`
+	Kind      string     `json:"kind"`
 	Prefix    string     `json:"prefix"`
 	CreatedAt time.Time  `json:"createdAt"`
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
@@ -113,7 +115,7 @@ func Open(path string) (*Store, error) {
 	// One connection: SQLite serializes writers anyway, and one connection
 	// means a transaction never waits on the pool for a second one.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema + accountsSchema + signingSchema + auditSchema); err != nil {
+	if _, err := db.Exec(schema + accountsSchema + signingSchema + auditSchema + reportsSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -160,6 +162,7 @@ CREATE TABLE IF NOT EXISTS tokens (
 	id INTEGER PRIMARY KEY,
 	set_id INTEGER NOT NULL REFERENCES rule_sets(id),
 	name TEXT NOT NULL,
+	kind TEXT NOT NULL DEFAULT 'pull',
 	prefix TEXT NOT NULL,
 	hash TEXT NOT NULL UNIQUE,
 	created_at TEXT NOT NULL,
@@ -526,12 +529,36 @@ func (s *Store) Publications(ctx context.Context, setID int64) ([]Publication, e
 	return out, rows.Err()
 }
 
-// TokenPrefix starts every token value, so a leaked one is recognizable.
-const TokenPrefix = "psr_"
+// Token kinds. A pull token reads the set's policy.json and its signature;
+// a report token only sends stats reports for the set. Neither can do the
+// other's job, so the credential a cluster keeps for reports can never read
+// rules, and the one that reads rules can never write.
+const (
+	KindPull   = "pull"
+	KindReport = "report"
+)
 
-// CreateToken issues a read-only token for the set and returns its value,
-// which is never stored or shown again.
-func (s *Store) CreateToken(ctx context.Context, setID int64, name string) (*Token, string, error) {
+// TokenPrefix starts every pull token value and ReportTokenPrefix every
+// report token value, so a leaked one is recognizable and its kind visible.
+const (
+	TokenPrefix       = "psr_"
+	ReportTokenPrefix = "pss_"
+)
+
+// ErrInvalidKind is returned for a token kind other than pull or report.
+var ErrInvalidKind = errors.New(`kind must be "pull" or "report"`)
+
+// CreateToken issues a token of the kind for the set and returns its
+// value, which is never stored or shown again.
+func (s *Store) CreateToken(ctx context.Context, setID int64, name, kind string) (*Token, string, error) {
+	prefixOf := map[string]string{KindPull: TokenPrefix, KindReport: ReportTokenPrefix}
+	if kind == "" {
+		kind = KindPull
+	}
+	tp, ok := prefixOf[kind]
+	if !ok {
+		return nil, "", ErrInvalidKind
+	}
 	if _, err := s.GetSetByID(ctx, setID); err != nil {
 		return nil, "", err
 	}
@@ -539,10 +566,10 @@ func (s *Store) CreateToken(ctx context.Context, setID int64, name string) (*Tok
 	if _, err := rand.Read(raw); err != nil {
 		return nil, "", err
 	}
-	value := TokenPrefix + hex.EncodeToString(raw)
-	prefix := value[:len(TokenPrefix)+8]
-	res, err := s.db.ExecContext(ctx, `INSERT INTO tokens (set_id, name, prefix, hash, created_at) VALUES (?, ?, ?, ?, ?)`,
-		setID, name, prefix, HashToken(value), now())
+	value := tp + hex.EncodeToString(raw)
+	prefix := value[:len(tp)+8]
+	res, err := s.db.ExecContext(ctx, `INSERT INTO tokens (set_id, name, kind, prefix, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		setID, name, kind, prefix, HashToken(value), now())
 	if err != nil {
 		return nil, "", err
 	}
@@ -557,13 +584,13 @@ func HashToken(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-const tokenColumns = `id, set_id, name, prefix, created_at, revoked_at, last_used_at, last_used_ip`
+const tokenColumns = `id, set_id, name, kind, prefix, created_at, revoked_at, last_used_at, last_used_ip`
 
 func scanToken(row scanner) (*Token, error) {
 	var t Token
 	var created string
 	var revoked, used sql.NullString
-	if err := row.Scan(&t.ID, &t.SetID, &t.Name, &t.Prefix, &created, &revoked, &used, &t.LastUsedIP); err != nil {
+	if err := row.Scan(&t.ID, &t.SetID, &t.Name, &t.Kind, &t.Prefix, &created, &revoked, &used, &t.LastUsedIP); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

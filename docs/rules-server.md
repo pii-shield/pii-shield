@@ -38,7 +38,7 @@ own is the next section.
    On the **Versions** tab press **Publish** next to that version. Only the
    published version reaches clusters.
 6. **Get the token.** On the **Tokens** tab type a name for the cluster
-   (`prod-eu`) and press **Issue**. Copy the long string that starts with
+   (`prod-eu`), leave the kind at **reads rules** and press **Issue**. Copy the long string that starts with
    `psr_` now: it is shown once. It is the key that lets that cluster, and
    only it, read this set.
 7. **Give the token to the cluster.** In the namespace where your
@@ -149,8 +149,9 @@ An organization owns rule sets; a rule set is a line of versions. A version
 is immutable: the rule set as JSON, a number from 1, an author, a time and
 a comment. One version of a set is published, and that is the file the
 clusters get. Rolling back is publishing an older version. A token belongs
-to a set, is read-only, and its value is shown once at creation; the server
-stores a hash. Revoking a token is immediate.
+to a set and does one job: a pull token (`psr_…`) reads the set's rules, a
+report token (`pss_…`) sends the set's stats reports. Its value is shown
+once at creation; the server stores a hash. Revoking a token is immediate.
 
 The rule set is the SDK `init_config` JSON, the same file the sidecar reads
 from `PII_CONFIG_FILE` and the operator renders into the policy ConfigMap:
@@ -173,7 +174,7 @@ lines, run on the real scanner with a preview salt, so the markers show
 what will be hidden while the hashes match no cluster; versions with
 publish, roll back, a diff of two versions and the publish history; tokens;
 the `PiiPolicy` snippet that connects a cluster; members; signing keys; and
-the activity log.
+the activity log; and the clusters' reports.
 
 Sign-in is by magic link; there are no passwords. You enter your address,
 a link arrives by mail, and the page it opens has one button that signs you
@@ -214,6 +215,42 @@ address, stands out.
 The **Activity** page shows the log, newest first. The API is
 `GET /api/orgs/{org}/audit?limit=100&before=<id>`; the answer's `next` is
 the `before` of the following page.
+
+## Stats from clusters
+
+A cluster can send back what its sidecars counted, so the set's
+**Clusters** tab shows, per cluster: when it last reported, how many pods
+report, which rule revision they run and whether the cluster has taken the
+latest publication, how many lines went through, and how many values were
+hidden by detector type (or, in audit mode, would have been). Counters
+only: never a log line, a value or a hash.
+
+It is off until a cluster turns it on:
+
+1. On the **Tokens** tab issue a token of kind **sends stats reports**. It
+   starts with `pss_` and can only send reports for this set; it cannot
+   read the rules, and a pull token cannot send reports.
+2. Put it into a Secret as the whole header value (`Bearer pss_…`) and add
+   a `stats` block to the policy (the **Connect a cluster** tab shows it
+   with this set's address):
+
+   ```yaml
+   spec:
+     stats:
+       url: https://rules.example.internal/v1/acme/payments/report
+       clusterName: prod-eu
+       headerSecretRef: { name: rules-stats-token, key: authorization }
+   ```
+
+3. Restart the application pods once, so their sidecars open the counters
+   to the operator. The first report arrives after `intervalSeconds`
+   (default five minutes).
+
+The operator reads the counters inside the cluster and is the only one that
+sends; how it counts is in the
+[operator README](../operator/README.md#stats-channel-stats). The server
+keeps reports for 90 days. A report is not an activity log entry, but the
+report token shows its last use like any token.
 
 ## Signed publications
 
@@ -332,8 +369,10 @@ curl -X POST -H "$H" $B/api/orgs/acme/sets/payments/tokens -d '{"name": "prod-eu
 | `POST …/publish`, `GET …/publications` | Publish a revision (an older one is the rollback); the publish history. A signed publish adds `publication`, `keyId` and `signature`; once the organization has a signing key, it is required. |
 | `GET …/publish/statement?revision=N` | The statement of the next publication of revision `N` and its exact `text` to sign. |
 | `GET`, `POST /api/orgs/{org}/signing-keys`, `DELETE …/signing-keys/{id}` | Public signing keys; `POST` with `{"name": …, "publicKey": "ed25519:…"}`. |
+| `POST /v1/{org}/{set}/report` | With a report token: one stats report (`pii-shield-stats-v1`, at most 64 KiB); `204`. |
+| `GET …/clusters?hours=24` | Per cluster: the latest report and the sums over the last `hours` (up to 2160), with the set's published revision and latest publication. |
 | `GET /v1/{org}/{set}/policy.json.sig` | With the pull token: the statement fields, `keyId` and `signature` of the publication the set serves; `404` when it is unsigned. |
-| `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; the value is in the `POST` answer once. |
+| `GET`, `POST …/tokens`, `DELETE …/tokens/{id}` | Tokens; `POST` with `{"name": …, "kind": "pull" or "report"}` (default pull); the value is in the answer once. |
 | `GET /api/orgs/{org}/audit` | The activity log, newest first; `limit` (default 100, at most 500) and `before` page through it. |
 | `GET /healthz` | `ok`. |
 
@@ -389,9 +428,9 @@ token used and the time; that is what its log records.
 
 - **Run as more than one instance.** One process, one SQLite file. Postgres
   comes when a second instance is needed.
-- **Report anything back.** No redaction analytics, no Slack alerting: they
-  need a channel from the agent to a server, and that channel will be
-  separate, explicitly enabled and carrying counters only.
+- **Alert.** The Clusters tab shows a cluster that is behind or reports
+  errors, but nothing sends a message about it; alert on the operator's
+  metrics in the cluster instead.
 - **Sign in any other way.** Magic link by e-mail; no passwords, no OAuth.
 - **Serve a hosted copy yet.** The hosted service on a pii-shield.com
   subdomain opens by [waitlist](https://tally.so/r/PdY7Ze).

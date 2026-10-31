@@ -124,6 +124,14 @@ Activity log: `internal/store/audit.go` (append-only, triggers refuse
 its last pull (`last_used_at`, `last_used_ip`, written at most once a
 minute) instead of an entry per pull.
 
+Stats reports: a token has a kind, `pull` (`psr_`, reads `policy.json`
+and `.sig`) or `report` (`pss_`, only `POST /v1/{org}/{set}/report`); each
+is refused on the other's path with `403`. A report is the operator's
+`pii-shield-stats-v1` JSON (`operator/internal/stats.Report`), checked and
+stored in `reports` (`internal/store/reports.go`, kept 90 days);
+`GET .../clusters?hours=` summarizes them per token, cluster and policy for
+the panel's Clusters tab.
+
 Other calls: `GET /api/orgs`, `GET /api/orgs/{org}/sets`,
 `GET /api/orgs/{org}/sets/{set}` (set, versions, tokens, the policy path),
 `GET .../versions`, `GET .../versions/{rev}`, `GET .../publications`

@@ -255,6 +255,68 @@ policy's last successful pull is older than three intervals
 (`PIIShieldRemoteRulesSyncErrors`). The runbook is in
 [docs/operational-runbooks.md](../docs/operational-runbooks.md#central-rule-repository).
 
+### Stats channel (`stats`)
+
+Off by default. With `spec.stats` set, the operator sends a summary of the
+policy's counters to a receiver every `intervalSeconds`: a rule server, or
+anything that accepts the JSON below with a `POST`.
+
+```yaml
+spec:
+  stats:
+    url: https://rules.example.internal/v1/acme/payments/report
+    intervalSeconds: 300                 # default 300, minimum 60
+    clusterName: prod-eu                 # how the receiver names this cluster
+    headerSecretRef: { name: rules-stats-token, key: authorization }   # "Bearer pss_…": a token that can only send reports
+    # caBundleSecretRef, allowInsecure: as in remoteConfig
+```
+
+How it works:
+
+- The webhook turns the sidecar's counters on (`PII_METRICS_ENABLED`, port
+  `9090`, named `pii-metrics`), as audit mode does. Pods injected before
+  `stats` was set expose nothing until they restart.
+- Every 30 s the operator (the leader replica) lists the policy's running
+  injected pods and reads `/metrics` from each, inside the cluster. It keeps
+  the last value per pod and adds the growth; a lower value means the
+  sidecar restarted. A pod's first read only sets the starting point, so an
+  operator restart never counts lines twice; a pod that lives less than
+  30 s is missed.
+- Every `intervalSeconds` it posts one report. A failed post keeps the
+  counts for the next one. Only the operator sends: the sidecars need no
+  way out of the cluster and no credential.
+- `status.stats` shows `lastReportTime`, `lastError`, `podsReporting` and
+  `podsTotal`; `piishield_operator_stats_reports_total{result}` and
+  `piishield_operator_stats_pods_reporting{namespace,policy}` are on the
+  manager's metrics endpoint.
+
+The operator needs `list` on pods for this, and its egress to the pods'
+port `9090`; a NetworkPolicy in the application namespace must allow it.
+
+The report carries counters only, never a log line, a value or a hash:
+
+```json
+{
+  "schema": "pii-shield-stats-v1",
+  "cluster": "prod-eu",
+  "policy": "payments/default",
+  "from": "2026-11-01T10:00:00Z", "to": "2026-11-01T10:05:00Z",
+  "mode": "redact",
+  "podsReporting": 2, "podsTotal": 3,
+  "revisions": { "4+2": 2 },
+  "remote": { "revision": "4", "publication": 9, "signedBy": "2ad881d4b09eea37" },
+  "lines": 1770, "errors": 0,
+  "redactions": { "entropy": 23, "regex": 4 }
+}
+```
+
+`revisions` counts the reporting pods by the rule revision they run
+(`piishield_config_revision_info` on the sidecar); `remote` is the last
+remote file the operator accepted; in audit mode `auditFindings` carries
+what would have been hidden, by detector. The rule server shows these per
+cluster on a set's Clusters tab
+([docs/rules-server.md](../docs/rules-server.md#stats-from-clusters)).
+
 ### Effective configuration precedence
 
 From most to least specific:
