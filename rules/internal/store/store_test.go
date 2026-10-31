@@ -3,15 +3,18 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"github.com/pii-shield/pii-shield/rules/internal/storetest"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func openTest(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "rules.db"))
+	s, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -102,18 +105,18 @@ func TestVersionsAreImmutableAndPublishRollsBack(t *testing.T) {
 		t.Errorf("DELETE on a version must be refused by the trigger, got %v", err)
 	}
 
-	if err := s.Publish(ctx, set.ID, 2, "alice"); err != nil {
-		t.Fatal(err)
+	if p, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 2, Author: "alice"}); err != nil || p.Seq != 1 {
+		t.Fatalf("first publish: %+v %v", p, err)
 	}
 	pub, _ := s.Published(ctx, set.ID)
 	if pub.Revision != 2 {
 		t.Errorf("published = %d", pub.Revision)
 	}
-	if err := s.Publish(ctx, set.ID, 3, ""); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 3}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("publishing a missing revision: %v", err)
 	}
 	// Rollback is publishing the older revision.
-	if err := s.Publish(ctx, set.ID, 1, "bob"); err != nil {
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 1, Author: "bob"}); err != nil {
 		t.Fatal(err)
 	}
 	pub, _ = s.Published(ctx, set.ID)
@@ -122,8 +125,28 @@ func TestVersionsAreImmutableAndPublishRollsBack(t *testing.T) {
 		t.Errorf("after rollback: published %d, set %+v", pub.Revision, got)
 	}
 	hist, _ := s.Publications(ctx, set.ID)
-	if len(hist) != 2 || hist[0].Revision != 1 || hist[0].Author != "bob" || hist[1].Revision != 2 {
+	if len(hist) != 2 || hist[0].Revision != 1 || hist[0].Author != "bob" || hist[0].Seq != 2 || hist[1].Revision != 2 || hist[1].Seq != 1 {
 		t.Errorf("publish history = %+v", hist)
+	}
+	// A publication that names a number other than the next one is stale,
+	// and a failed check leaves nothing behind.
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 2, Seq: 2}); !errors.Is(err, ErrStale) {
+		t.Errorf("stale publication number: %v", err)
+	}
+	refuse := errors.New("refused")
+	if _, err := s.Publish(ctx, set.ID, PublishRequest{Revision: 2, Seq: 3, Check: func(seq int64, v *Version) error {
+		if seq != 3 || v.Revision != 2 {
+			t.Errorf("check got seq %d, revision %d", seq, v.Revision)
+		}
+		return refuse
+	}}); !errors.Is(err, refuse) {
+		t.Errorf("failed check: %v", err)
+	}
+	if latest, _ := s.LatestPublication(ctx, set.ID); latest.Seq != 2 || latest.Revision != 1 {
+		t.Errorf("after a refused publish: %+v", latest)
+	}
+	if next, _ := s.NextPublication(ctx, set.ID); next != 3 {
+		t.Errorf("NextPublication = %d", next)
 	}
 	list, _ := s.ListVersions(ctx, set.ID)
 	if len(list) != 2 || list[0].Revision != 2 || list[0].Content != nil || list[1].Author != "alice" {
@@ -140,14 +163,14 @@ func TestTokens(t *testing.T) {
 	org, _ := s.CreateOrg(ctx, "acme", "")
 	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
 
-	tok, value, err := s.CreateToken(ctx, set.ID, "prod cluster")
+	tok, value, err := s.CreateToken(ctx, set.ID, "prod cluster", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(value, TokenPrefix) || len(value) != len(TokenPrefix)+48 || tok.Prefix != value[:12] {
 		t.Errorf("token value %q, prefix %q", value, tok.Prefix)
 	}
-	if _, _, err := s.CreateToken(ctx, 999, "x"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.CreateToken(ctx, 999, "x", KindPull); !errors.Is(err, ErrNotFound) {
 		t.Errorf("token for a missing set: %v", err)
 	}
 	var stored string
@@ -197,5 +220,191 @@ func TestOpenTwiceKeepsData(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	if got, err := s.GetOrg(ctx, "acme"); err != nil || got.ID != org.ID {
 		t.Errorf("data lost across Open: %+v, %v", got, err)
+	}
+}
+
+func TestSigningKeys(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	other, _ := s.CreateOrg(ctx, "other", "")
+	if has, _ := s.HasSigningKeys(ctx, org.ID); has {
+		t.Fatal("a new organization has no keys")
+	}
+	k, err := s.AddSigningKey(ctx, org.ID, "0011223344556677", "alice laptop", "ed25519:AAAA", "alice@acme.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddSigningKey(ctx, org.ID, "0011223344556677", "again", "ed25519:AAAA", ""); !errors.Is(err, ErrExists) {
+		t.Errorf("the same key twice: %v", err)
+	}
+	if has, _ := s.HasSigningKeys(ctx, org.ID); !has {
+		t.Error("HasSigningKeys after adding one")
+	}
+	if _, err := s.ActiveSigningKey(ctx, other.ID, k.KeyID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another organization's key: %v", err)
+	}
+	if err := s.RevokeSigningKey(ctx, other.ID, k.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("revoking through another organization: %v", err)
+	}
+	if err := s.RevokeSigningKey(ctx, org.ID, k.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActiveSigningKey(ctx, org.ID, k.KeyID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a revoked key is not active: %v", err)
+	}
+	if has, _ := s.HasSigningKeys(ctx, org.ID); has {
+		t.Error("only a revoked key left")
+	}
+	keys, _ := s.ListSigningKeys(ctx, org.ID)
+	if len(keys) != 1 || keys[0].RevokedAt == nil || keys[0].CreatedBy != "alice@acme.test" {
+		t.Errorf("ListSigningKeys = %+v", keys)
+	}
+}
+
+func TestAuditLog(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	other, _ := s.CreateOrg(ctx, "other", "")
+	for i := range 5 {
+		if err := s.Record(ctx, Event{OrgID: org.ID, Actor: "alice@acme.test", Action: "publish", Target: "payments", Detail: map[string]any{"revision": i + 1}, IP: "10.0.0.1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.Record(ctx, Event{OrgID: other.ID, Actor: "eve@other.test", Action: "set.create"})
+
+	page, _ := s.Events(ctx, org.ID, 0, 3)
+	if len(page) != 3 || page[0].Detail["revision"] != float64(5) || page[0].Actor != "alice@acme.test" || page[0].IP != "10.0.0.1" {
+		t.Fatalf("first page = %+v", page)
+	}
+	rest, _ := s.Events(ctx, org.ID, page[2].ID, 3)
+	if len(rest) != 2 || rest[1].Detail["revision"] != float64(1) {
+		t.Errorf("second page = %+v", rest)
+	}
+	if mine, _ := s.Events(ctx, other.ID, 0, 10); len(mine) != 1 || mine[0].Actor != "eve@other.test" {
+		t.Errorf("another organization's log = %+v", mine)
+	}
+	// Append-only even for raw SQL.
+	if _, err := s.db.ExecContext(ctx, `UPDATE audit_events SET actor = 'x'`); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Errorf("UPDATE on the audit log: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM audit_events`); err == nil || !strings.Contains(err.Error(), "kept") {
+		t.Errorf("DELETE on the audit log: %v", err)
+	}
+}
+
+func TestTouchToken(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
+	tok, _, _ := s.CreateToken(ctx, set.ID, "prod", KindPull)
+	if tok.LastUsedAt != nil {
+		t.Fatal("a new token was never used")
+	}
+	if err := s.TouchToken(ctx, tok.ID, "10.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.getToken(ctx, tok.ID)
+	if first.LastUsedAt == nil || first.LastUsedIP != "10.0.0.1" {
+		t.Fatalf("after a pull: %+v", first)
+	}
+	// Within the minute a second pull writes nothing.
+	_ = s.TouchToken(ctx, tok.ID, "10.0.0.2")
+	if again, _ := s.getToken(ctx, tok.ID); again.LastUsedIP != "10.0.0.1" || !again.LastUsedAt.Equal(*first.LastUsedAt) {
+		t.Errorf("a pull within the minute rewrote the record: %+v", again)
+	}
+	// An older record is replaced.
+	_, _ = s.db.ExecContext(ctx, `UPDATE tokens SET last_used_at = '2000-01-01T00:00:00.000000000Z' WHERE id = ?`, tok.ID)
+	_ = s.TouchToken(ctx, tok.ID, "10.0.0.3")
+	if later, _ := s.getToken(ctx, tok.ID); later.LastUsedIP != "10.0.0.3" {
+		t.Errorf("an old record must be replaced: %+v", later)
+	}
+}
+
+func TestReportsRetentionAndClusters(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
+	tok, _, _ := s.CreateToken(ctx, set.ID, "stats", KindReport)
+	if tok.Kind != KindReport || !strings.HasPrefix(tok.Prefix, ReportTokenPrefix) {
+		t.Fatalf("report token %+v", tok)
+	}
+	if _, _, err := s.CreateToken(ctx, set.ID, "x", "write"); !errors.Is(err, ErrInvalidKind) {
+		t.Errorf("unknown kind: %v", err)
+	}
+	add := func(cluster string, lines int64) {
+		t.Helper()
+		if err := s.AddReport(ctx, Report{SetID: set.ID, TokenID: tok.ID, Cluster: cluster, Policy: "apps/p", From: time.Now().Add(-time.Minute), To: time.Now(),
+			Mode: "redact", Revisions: map[string]int{"1": 1}, Lines: lines, Redactions: map[string]int64{"entropy": lines / 10}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("a", 10)
+	// A report older than the retention is dropped by the next insert.
+	_, _ = s.db.ExecContext(ctx, `UPDATE reports SET received_at = '2000-01-01T00:00:00Z'`)
+	add("a", 20)
+	add("b", 30)
+	var n int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports`).Scan(&n)
+	if n != 2 {
+		t.Errorf("reports kept = %d, want 2", n)
+	}
+	cs, err := s.Clusters(ctx, set.ID, time.Now().Add(-time.Hour))
+	if err != nil || len(cs) != 2 || cs[0].Cluster != "b" || cs[1].Lines != 20 || cs[1].Redactions["entropy"] != 2 || cs[0].TokenName != "stats" {
+		t.Errorf("Clusters = %+v %v", cs, err)
+	}
+}
+
+func TestPullCounts(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	org, _ := s.CreateOrg(ctx, "acme", "")
+	set, _ := s.CreateSet(ctx, org.ID, "payments", "")
+	other, _ := s.CreateSet(ctx, org.ID, "other", "")
+	a, _, _ := s.CreateToken(ctx, set.ID, "a", KindPull)
+	b, _, _ := s.CreateToken(ctx, set.ID, "b", KindPull)
+	c, _, _ := s.CreateToken(ctx, other.ID, "c", KindPull)
+	for _, nm := range []bool{false, true, true} {
+		if err := s.CountPull(ctx, a.ID, nm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.CountPull(ctx, b.ID, false)
+	_ = s.CountPull(ctx, c.ID, false)
+	// An old day is kept until the retention, then dropped by a new day's first pull.
+	_, _ = s.db.ExecContext(ctx, `INSERT INTO pull_counts (token_id, day, pulls) VALUES (?, '2000-01-01', 5), (?, ?, 7)`,
+		a.ID, a.ID, time.Now().UTC().AddDate(0, 0, -1).Format(dayLayout))
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM pull_counts WHERE token_id = ? AND day = ?`, b.ID, time.Now().UTC().Format(dayLayout))
+	_ = s.CountPull(ctx, b.ID, false) // a first pull of the day prunes only b's rows
+
+	got, err := s.Pulls(ctx, set.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]PullDay{}
+	for _, p := range got {
+		want[fmt.Sprintf("%d/%s", p.TokenID, p.Day)] = p
+	}
+	today := time.Now().UTC().Format(dayLayout)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(dayLayout)
+	if p := want[fmt.Sprintf("%d/%s", a.ID, today)]; p.Pulls != 3 || p.NotModified != 2 {
+		t.Errorf("a today = %+v", p)
+	}
+	if p := want[fmt.Sprintf("%d/%s", a.ID, yesterday)]; p.Pulls != 7 {
+		t.Errorf("a yesterday = %+v", p)
+	}
+	if p := want[fmt.Sprintf("%d/%s", b.ID, today)]; p.Pulls != 1 {
+		t.Errorf("b today = %+v", p)
+	}
+	if len(got) != 3 {
+		t.Errorf("rows = %+v (another set's token and days outside the window must not appear)", got)
+	}
+	var old int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pull_counts WHERE day = '2000-01-01'`).Scan(&old)
+	if old != 1 {
+		t.Errorf("a's old day must stay until a's own new day prunes it: %d", old)
 	}
 }

@@ -57,8 +57,7 @@ Developers often forget to mask sensitive data. Traditional regex filters in Flu
 
 
 ## Managing PII-Shield across dozens of clusters?
-A rule server keeps the rule sets in one place: a security team edits a set in the browser, sees on the real scanner what a draft does to pasted log lines, publishes a version, and every cluster whose `PiiPolicy` names the set pulls it with a read-only token, without a pod restart. Nothing about a cluster is sent to it; the operator only asks for the file. It ships as the image `ghcr.io/pii-shield/pii-shield-rules` for your own perimeter, see [docs/rules-server.md](docs/rules-server.md). A hosted copy opens by waitlist. Redaction analytics and Slack alerting are not part of it: they need a channel from the agent, which will be separate, explicitly enabled and carrying counters only.
-[![Join the Waitlist](https://img.shields.io/badge/Join_the_Waitlist-PII--Shield_Cloud-blue?style=for-the-badge)](https://tally.so/r/PdY7Ze)
+A rule server keeps the rule sets in one place: a security team edits a set in the browser, sees on the real scanner what a draft does to pasted log lines, publishes a version, and every cluster whose `PiiPolicy` names the set pulls it with a read-only token, without a pod restart. Nothing about a cluster is sent to it unless the cluster turns on the stats channel, which sends counters only. It ships as the image `ghcr.io/pii-shield/pii-shield-rules` for your own perimeter, see [docs/rules-server.md](docs/rules-server.md). Publications can be signed with keys only the publishers hold, every change goes to an activity log, and an opt-in stats channel shows per cluster which rule version runs and how many values were hidden, as counters only. It runs on SQLite, or on Postgres for several instances; [deploy/rules-server](deploy/rules-server/) runs it on one machine with HTTPS and continuous backups.
 
 ## Integrations
 

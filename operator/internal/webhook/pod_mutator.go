@@ -394,8 +394,13 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 	// Audit mode is about the numbers, so the sidecar's metrics are turned
 	// on with it (audit.go): the counters on a named port and an hourly
 	// summary in the sidecar's log.
-	if policy.Spec.AuditMode {
-		sidecar.Env = append(sidecar.Env, auditEnv()...)
+	// The stats channel needs the same counters without the log summary.
+	if policy.Spec.AuditMode || policy.Spec.Stats != nil {
+		if policy.Spec.AuditMode {
+			sidecar.Env = append(sidecar.Env, auditEnv()...)
+		} else {
+			sidecar.Env = append(sidecar.Env, metricsEnv()...)
+		}
 		sidecar.Ports = append(sidecar.Ports, corev1.ContainerPort{
 			Name:          AuditMetricsPortName,
 			ContainerPort: AuditMetricsPort,

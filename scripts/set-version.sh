@@ -38,6 +38,8 @@ FILES=(
   README.md
   docs/application-readiness.md
   docs/rules-server.md
+  deploy/rules-server/compose.yaml
+  deploy/rules-server/.env.example
   tests/deployments/docker-ghcr/README.md
 )
 
@@ -64,8 +66,9 @@ transform() {
       # Docker image tags in usage examples (thelisdeep/pii-shield:X.Y.Z,
       # ghcr.io/pii-shield/pii-shield:X.Y.Z).
       sed -E "s|(pii-shield):[0-9][0-9A-Za-z.-]*|\1:${VERSION}|g" "$file" ;;
-    */docs/rules-server.md)
-      # The rule server image tag in the docker run example.
+    */docs/rules-server.md|*/deploy/rules-server/compose.yaml|*/deploy/rules-server/.env.example)
+      # The rule server image tag: the docker run example, and the deploy
+      # kit's default RULES_IMAGE.
       sed -E "s|(pii-shield-rules):[0-9][0-9A-Za-z.-]*|\1:${VERSION}|g" "$file" ;;
     */README.md)
       sed -E \

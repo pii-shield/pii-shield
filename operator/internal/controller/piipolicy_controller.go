@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,9 +28,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	corev1alpha1 "github.com/pii-shield/pii-shield/operator/api/v1alpha1"
 	"github.com/pii-shield/pii-shield/operator/internal/policyfile"
@@ -108,6 +111,9 @@ func (r *PiiPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	oldStatus := *policy.Status.DeepCopy()
+	if policy.Spec.Stats == nil {
+		policy.Status.Stats = nil
+	}
 	meta.SetStatusCondition(&policy.Status.Conditions, condition)
 
 	rendered := metav1.Condition{
@@ -207,9 +213,18 @@ func (r *PiiPolicyReconciler) renderConfigMap(ctx context.Context, policy *corev
 			} else {
 				delete(cm.Annotations, policyfile.AnnotationRemoteETag)
 			}
+			if remote.verified.KeyID != "" {
+				cm.Annotations[policyfile.AnnotationRemoteSignedBy] = remote.verified.KeyID
+				cm.Annotations[policyfile.AnnotationRemotePublication] = strconv.FormatInt(remote.verified.Publication, 10)
+			} else {
+				delete(cm.Annotations, policyfile.AnnotationRemoteSignedBy)
+				delete(cm.Annotations, policyfile.AnnotationRemotePublication)
+			}
 		} else {
 			delete(cm.Annotations, policyfile.AnnotationRemoteHash)
 			delete(cm.Annotations, policyfile.AnnotationRemoteETag)
+			delete(cm.Annotations, policyfile.AnnotationRemoteSignedBy)
+			delete(cm.Annotations, policyfile.AnnotationRemotePublication)
 		}
 		return controllerutil.SetControllerReference(policy, cm, r.Scheme)
 	})
@@ -221,8 +236,12 @@ func (r *PiiPolicyReconciler) renderConfigMap(ctx context.Context, policy *corev
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PiiPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Spec changes only: the status is written by this reconciler and by
+	// the stats channel (status.stats), and neither write should start
+	// another reconcile and with it another pull of spec.remoteConfig. The
+	// pulls themselves run on RequeueAfter.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1alpha1.PiiPolicy{}).
+		For(&corev1alpha1.PiiPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.ConfigMap{}).
 		Named("piipolicy").
 		Complete(r)
