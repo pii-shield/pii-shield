@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+// TestThirtySixCharTokenIsNotTakenForAUUID: the UUID skip in
+// processSingleToken needs both the length and the UUID shape. A random
+// token that only has the length of a UUID is still scored and hidden.
+func TestThirtySixCharTokenIsNotTakenForAUUID(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	token := "Zq8Lw2Xn5Rt7Yb3Kd9Fh1Jm4Pv6Sc0Ga2Te8"
+	if len(token) != 36 || uuidRegex.MatchString(token) {
+		t.Fatalf("test data error: %q must be 36 characters and not a UUID", token)
+	}
+	for _, line := range []string{token, token + " issued", "issued " + token} {
+		if out := ScanAndRedact(line); strings.Contains(out, token) || !strings.Contains(out, "[HIDDEN:") {
+			t.Errorf("ScanAndRedact(%q) = %q, want the token hidden", line, out)
+		}
+	}
+}
+
 // TestFalsePositives proves that the Confidence Threshold correctly skips UUIDs and Base64 blobs
 func TestFalsePositives(t *testing.T) {
 	// Preserve global config so we don't break other tests!
