@@ -45,12 +45,16 @@ func TestLuhnBINValidation(t *testing.T) {
 		if !luhnValid(p.number) {
 			t.Fatalf("test data error: %s %s is not Luhn-valid", p.name, p.number)
 		}
-		line := "charge " + p.number + " ok"
-		if r := FindLuhnSequences(line); len(r) == 0 {
-			t.Errorf("%s: %s not matched", p.name, p.number)
-		}
-		if out := ScanAndRedact(line); strings.Contains(out, p.number) {
-			t.Errorf("%s: card left in plaintext: %q", p.name, out)
+		// In the middle of a line, at its start (no byte before the card)
+		// and as the whole line (a 13-digit card is a 13-byte line, the
+		// shortest FindLuhnSequences looks at).
+		for _, line := range []string{"charge " + p.number + " ok", p.number + " paid", p.number} {
+			if r := FindLuhnSequences(line); len(r) == 0 {
+				t.Errorf("%s: %s not matched in %q", p.name, p.number, line)
+			}
+			if out := ScanAndRedact(line); strings.Contains(out, p.number) {
+				t.Errorf("%s: card left in plaintext: %q", p.name, out)
+			}
 		}
 	}
 

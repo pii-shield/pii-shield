@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,38 @@ func TestDateOfBirthUnderKeyHidden(t *testing.T) {
 	// The words after the value are not part of it.
 	if out := ScanAndRedact(`DOB=1987-07-11 12:00:00 next`); !strings.HasSuffix(out, "] next") {
 		t.Errorf("value ran into the next word: %q", out)
+	}
+}
+
+// TestDateOfBirthAtRangeEdges: the first and last year, month and day the
+// detector accepts, both orders of day and month, and every time form it
+// extends over. The whole value, time and zone included, becomes one marker
+// and the words around it stay. Mutation testing found that a one-character
+// change to any of these bounds (1900, 2099, month 1 and 12, day 31) or to
+// the time parser left the value in plaintext with every test still passing.
+func TestDateOfBirthAtRangeEdges(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	cfg := campaignConfig()
+	cfg.EntityTypeLabels = true
+	UpdateConfig(cfg)
+
+	for _, tc := range []struct{ in, value string }{
+		{`patient dob=1900-01-01 admitted`, "1900-01-01"},
+		{`patient dob=2099-12-31 admitted`, "2099-12-31"},
+		{`patient dob=31/12/1986 admitted`, "31/12/1986"},
+		{`patient dob=12/31/1986 admitted`, "12/31/1986"},
+		{`GET /api/patient?dob=31.12.1986&ward=4`, "31.12.1986"},
+		{`patient dob=1986-12-01T10:30 admitted`, "1986-12-01T10:30"},
+		{`patient dob=1986-12-01 10:30 admitted`, "1986-12-01 10:30"},
+		{`patient dob=1986-12-01T10:30:00.123+0200 admitted`, "1986-12-01T10:30:00.123+0200"},
+		{`patient dob=1986-12-01 10:30:00+02:00 admitted`, "1986-12-01 10:30:00+02:00"},
+	} {
+		i := strings.Index(tc.in, tc.value)
+		want := regexp.MustCompile("^" + regexp.QuoteMeta(tc.in[:i]) + `\[HIDDEN:dob:[0-9a-f]+\]` + regexp.QuoteMeta(tc.in[i+len(tc.value):]) + "$")
+		if out := ScanAndRedact(tc.in); !want.MatchString(out) {
+			t.Errorf("ScanAndRedact(%q) = %q, want %q hidden whole as one dob marker", tc.in, out, tc.value)
+		}
 	}
 }
 

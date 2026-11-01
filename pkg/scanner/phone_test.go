@@ -44,6 +44,10 @@ var phoneShapes = []struct {
 	{"line end", "called +4917412345678", "+4917412345678"},
 	{"before comma", "called +4917412345678, twice", "+4917412345678"},
 	{"single quotes", "phone='+4917412345678'", "+4917412345678"},
+	// At offset 0 there is no byte before the number. Reading one, or
+	// starting the search a byte late, left the number in plaintext.
+	{"line start", "(555) 234-5678 called back", "(555) 234-5678"},
+	{"line start csv", "(555)234-5678,John,Smith", "(555)234-5678"},
 }
 
 func TestPhoneShapesHidden(t *testing.T) {
