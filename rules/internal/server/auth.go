@@ -87,6 +87,15 @@ func (s *Server) requireAccess(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
+		// An open single-tenant server has no cookie to forge, but a page
+		// in a browser on the same machine can still post to it. A browser
+		// sends Origin on every cross-site POST; a script sends none.
+		if p.open && !safeMethod(r.Method) && fromBrowser(r) {
+			if msg := s.originProblem(r); msg != "" {
+				s.fail(w, http.StatusForbidden, msg)
+				return
+			}
+		}
 		next(w, withPrincipal(r, p))
 	}
 }
@@ -118,6 +127,11 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 
 func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
+}
+
+// fromBrowser reports a request that names the page it came from.
+func fromBrowser(r *http.Request) bool {
+	return r.Header.Get("Origin") != "" || r.Header.Get("Referer") != ""
 }
 
 // csrfProblem checks that a state-changing request from a browser came
