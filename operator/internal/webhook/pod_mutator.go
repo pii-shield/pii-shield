@@ -458,9 +458,6 @@ var ruleEnvNames = map[string]bool{
 // rendered policy file. Any error, a missing ConfigMap included, answers
 // false, and the sidecar keeps its rules in env vars as before.
 func (m *PodMutator) policyFileRendered(ctx context.Context, policy *piishieldv1alpha1.PiiPolicy) bool {
-	if m.Client == nil {
-		return false
-	}
 	cm := &corev1.ConfigMap{}
 	key := client.ObjectKey{Name: policyfile.ConfigMapName(policy.Name), Namespace: policy.Namespace}
 	if err := m.Client.Get(ctx, key, cm); err != nil {
