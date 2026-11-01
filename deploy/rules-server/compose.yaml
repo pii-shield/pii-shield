@@ -13,9 +13,13 @@ name: pii-shield-rules
 services:
   # Brings the database back from the bucket when the volume is empty (a new
   # machine, a lost disk) and does nothing otherwise. The server waits for it.
+  # Litestream runs as root, so the restored files are handed to the
+  # server's user (65532) after; root-owned files would stop the server
+  # with "attempt to write a readonly database".
   restore:
     image: litestream/litestream:0.5.17@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a
-    command: ["restore", "-if-db-not-exists", "-if-replica-exists", "/data/rules.db"]
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["litestream restore -if-db-not-exists -if-replica-exists /data/rules.db && chown -R 65532:65532 /data"]
     env_file: .env
     volumes:
       - data:/data
@@ -48,8 +52,11 @@ services:
     cap_drop: [ALL]
 
   # Streams every change of the database to the bucket, a few seconds behind.
+  # As the server's user, so whatever it writes next to the database stays
+  # readable and writable by the server.
   litestream:
     image: litestream/litestream:0.5.17@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a
+    user: "65532:65532"
     command: ["replicate"]
     env_file: .env
     volumes:

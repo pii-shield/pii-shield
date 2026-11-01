@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	netmail "net/mail"
 	"net/smtp"
 	"strings"
 	"time"
@@ -47,6 +48,10 @@ type SMTP struct {
 func (m SMTP) Send(ctx context.Context, to, subject, body string) error {
 	if m.From == "" {
 		return errors.New("mail: From address is not set")
+	}
+	sender, err := envelopeFrom(m.From)
+	if err != nil {
+		return err
 	}
 	host, port, err := net.SplitHostPort(m.Addr)
 	if err != nil {
@@ -93,7 +98,7 @@ func (m SMTP) Send(ctx context.Context, to, subject, body string) error {
 			return fmt.Errorf("mail: auth: %w", err)
 		}
 	}
-	if err := c.Mail(m.From); err != nil {
+	if err := c.Mail(sender); err != nil {
 		return fmt.Errorf("mail: from: %w", err)
 	}
 	if err := c.Rcpt(to); err != nil {
@@ -110,6 +115,17 @@ func (m SMTP) Send(ctx context.Context, to, subject, body string) error {
 		return fmt.Errorf("mail: %w", err)
 	}
 	return c.Quit()
+}
+
+// envelopeFrom returns the bare address of a From value such as
+// "PII-Shield rules <rules@example.com>": MAIL FROM takes the address alone,
+// and a server answers 501 to the whole header value.
+func envelopeFrom(from string) (string, error) {
+	a, err := netmail.ParseAddress(from)
+	if err != nil {
+		return "", fmt.Errorf("mail: From address %q: %w", from, err)
+	}
+	return a.Address, nil
 }
 
 // Message formats a plain-text message with CRLF line endings. Header
