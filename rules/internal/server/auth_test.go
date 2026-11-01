@@ -341,6 +341,17 @@ func TestSingleTenantIsOpenAndAdminTokenStillWorks(t *testing.T) {
 	if code, _, _ := b.do("POST", "/api/orgs/default/sets", `{"slug": "s"}`, map[string]string{"X-Requested-With": "", "Origin": ""}); code != 201 {
 		t.Errorf("open write without browser headers: %d", code)
 	}
+	// A page on another site posts as text/plain, which needs no preflight.
+	if code, _, _ := b.do("POST", "/api/orgs/default/sets", `{"slug": "evil"}`, map[string]string{"X-Requested-With": "", "Origin": "https://evil.example", "Content-Type": "text/plain"}); code != 403 {
+		t.Errorf("open write from another site: %d", code)
+	}
+	if code, _, _ := b.do("POST", "/api/orgs/default/sets", `{"slug": "evil2"}`, map[string]string{"X-Requested-With": "", "Origin": "", "Referer": "https://evil.example/page"}); code != 403 {
+		t.Errorf("open write with a foreign Referer: %d", code)
+	}
+	// The panel itself, from this host.
+	if code, _, _ := b.do("POST", "/api/orgs/default/sets", `{"slug": "s2"}`, nil); code != 201 {
+		t.Errorf("open write from the panel: %d", code)
+	}
 	// No mailer: the sign-in is off, and says so.
 	if code, _, body := b.do("POST", "/auth/login", `{"email": "a@b.c"}`, nil); code != 503 {
 		t.Errorf("login without a mailer: %d %s", code, body)
