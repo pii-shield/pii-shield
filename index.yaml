@@ -4,6 +4,30 @@ entries:
   - annotations:
       artifacthub.io/official: "true"
     apiVersion: v2
+    appVersion: 3.0.0
+    created: "2026-11-01T09:57:30.034749074Z"
+    description: A Helm chart for deploying PII-Shield as a scratch-compatible logging
+      sidecar
+    digest: c9464cd2df3bb025d4d2cfde628691d01e7206df3cbdec36c9e62593efccb4be
+    home: https://github.com/pii-shield/pii-shield
+    keywords:
+    - security
+    - observability
+    - pii
+    - compliance
+    maintainers:
+    - email: ilya.ploskovitov@pii-shield.com
+      name: aragossa
+    name: pii-shield
+    sources:
+    - https://github.com/pii-shield/pii-shield
+    type: application
+    urls:
+    - https://github.com/pii-shield/pii-shield/releases/download/pii-shield-3.0.0/pii-shield-3.0.0.tgz
+    version: 3.0.0
+  - annotations:
+      artifacthub.io/official: "true"
+    apiVersion: v2
     appVersion: 2.3.1
     created: "2026-10-27T06:46:36.940787244Z"
     description: A Helm chart for deploying PII-Shield as a scratch-compatible logging
@@ -589,6 +613,31 @@ entries:
         - name: GitHub
           url: https://github.com/pii-shield/pii-shield
     apiVersion: v2
+    appVersion: 3.0.0
+    created: "2026-11-01T09:57:30.321743705Z"
+    description: A Kubernetes Operator for automatic PII (Personally Identifiable
+      Information) masking in application logs using native distroless sidecars.
+    digest: aa64104d7975d2dec54f80f5ca58f0664e2893e8d5feecbad2ed4065b95de2e3
+    home: https://github.com/pii-shield/pii-shield
+    maintainers:
+    - email: ilya.ploskovitov@pii-shield.com
+      name: aragossa
+    name: pii-shield-operator
+    sources:
+    - https://github.com/pii-shield/pii-shield
+    type: application
+    urls:
+    - https://github.com/pii-shield/pii-shield/releases/download/pii-shield-operator-3.0.0/pii-shield-operator-3.0.0.tgz
+    version: 3.0.0
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/links: |
+        - name: Documentation
+          url: https://github.com/pii-shield/pii-shield/tree/main/operator
+        - name: GitHub
+          url: https://github.com/pii-shield/pii-shield
+    apiVersion: v2
     appVersion: 2.3.1
     created: "2026-10-27T06:46:37.12673125Z"
     description: A Kubernetes Operator for automatic PII (Personally Identifiable
@@ -1031,4 +1080,4 @@ entries:
     urls:
     - https://github.com/pii-shield/pii-shield/releases/download/pii-shield-operator-2.0.0/pii-shield-operator-2.0.0.tgz
     version: 2.0.0
-generated: "2026-10-27T06:46:37.127003922Z"
+generated: "2026-11-01T09:57:30.322143582Z"
