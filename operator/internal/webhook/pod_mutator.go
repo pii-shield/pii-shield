@@ -118,6 +118,9 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
+	if mode != "ebpf" && m.policyFileRendered(ctx, policy) {
+		dropRuleEnv(mutatedPod)
+	}
 
 	marshaledPod, err := json.Marshal(mutatedPod)
 	if err != nil {
@@ -409,10 +412,10 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 	}
 
 	// The rules file rendered by the controller (policyfile): the sidecar
-	// reads it at start and reloads it when the ConfigMap changes, so a
-	// policy edit reaches this pod without a restart. The env vars above are
-	// still set and win over the file, so a pod injected before the
-	// ConfigMap exists, or by an older agent image, behaves as before.
+	// reads it at start and reloads it when the ConfigMap changes. The rule
+	// env vars above win over the file, so Handle drops them once the
+	// ConfigMap exists (dropRuleEnv); a pod admitted before that keeps them
+	// and runs on the rules of its admission until it restarts.
 	sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{
 		Name:      policyfile.VolumeName,
 		MountPath: policyfile.MountPath,
@@ -434,6 +437,52 @@ func policyVolume(policy *piishieldv1alpha1.PiiPolicy) corev1.Volume {
 			LocalObjectReference: corev1.LocalObjectReference{Name: policyfile.ConfigMapName(policy.Name)},
 			Optional:             ptr.To(true),
 		}},
+	}
+}
+
+// ruleEnvNames are the env vars scannerEnv writes for the rule fields that
+// the controller also renders into the policy file (policyfile.Merge). The
+// sidecar lays every set PII_* variable over the file on each reload, so
+// while these are on the pod a policy edit never reaches it.
+var ruleEnvNames = map[string]bool{
+	"PII_CONFIDENCE_THRESHOLD":   true,
+	"PII_ENTROPY_THRESHOLD":      true,
+	"PII_MIN_SECRET_LENGTH":      true,
+	"PII_SENSITIVE_KEYS":         true,
+	"PII_SENSITIVE_KEY_PATTERNS": true,
+	"PII_CUSTOM_REGEX_LIST":      true,
+	"PII_SAFE_REGEX_LIST":        true,
+}
+
+// policyFileRendered reports whether the policy's ConfigMap already holds a
+// rendered policy file. Any error, a missing ConfigMap included, answers
+// false, and the sidecar keeps its rules in env vars as before.
+func (m *PodMutator) policyFileRendered(ctx context.Context, policy *piishieldv1alpha1.PiiPolicy) bool {
+	cm := &corev1.ConfigMap{}
+	key := client.ObjectKey{Name: policyfile.ConfigMapName(policy.Name), Namespace: policy.Namespace}
+	if err := m.Client.Get(ctx, key, cm); err != nil {
+		return false
+	}
+	return cm.Data[policyfile.Key] != ""
+}
+
+// dropRuleEnv removes the rule env vars from the injected sidecar, so the
+// policy file is the only source of its rules and an edit to the policy
+// reaches the running pod. Salt, fail policy, mode and metrics stay in env.
+func dropRuleEnv(pod *corev1.Pod) {
+	for _, list := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for i := range list {
+			if list[i].Name != "pii-shield-sidecar" {
+				continue
+			}
+			env := list[i].Env[:0]
+			for _, e := range list[i].Env {
+				if !ruleEnvNames[e.Name] {
+					env = append(env, e)
+				}
+			}
+			list[i].Env = env
+		}
 	}
 }
 

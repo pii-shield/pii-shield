@@ -12,10 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	piishieldv1alpha1 "github.com/pii-shield/pii-shield/operator/api/v1alpha1"
+	"github.com/pii-shield/pii-shield/operator/internal/policyfile"
 )
 
 func TestInjectFileMode(t *testing.T) {
@@ -487,4 +489,69 @@ func TestScannerEnvSaltPrecedence(t *testing.T) {
 		assert.Len(t, env, 1)
 		assert.Equal(t, "custom-key", env[0].ValueFrom.SecretKeyRef.Key)
 	})
+}
+
+// handleWithRules admits a file-mode pod under a policy with rule fields,
+// with the policy's ConfigMap seeded when rendered is true, and returns the
+// admission patch as JSON.
+func handleWithRules(t *testing.T, rendered bool) string {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	assert.NoError(t, corev1.AddToScheme(scheme))
+	assert.NoError(t, piishieldv1alpha1.AddToScheme(scheme))
+
+	policy := &piishieldv1alpha1.PiiPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "test-ns"},
+		Spec:       scannerEnvPolicySpec("file"),
+	}
+	objs := []client.Object{policy}
+	if rendered {
+		objs = append(objs, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: policyfile.ConfigMapName("default"), Namespace: "test-ns"},
+			Data:       map[string]string{policyfile.Key: `{"sensitive_keys":["token"],"revision":"1"}`},
+		})
+	}
+	mutator := &PodMutator{
+		Client:  fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(),
+		Decoder: admission.NewDecoder(scheme),
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app",
+			Namespace: "test-ns",
+			Labels:    map[string]string{"pii-shield.io/inject": "true"},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+	}
+	raw, err := json.Marshal(pod)
+	assert.NoError(t, err)
+	resp := mutator.Handle(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Namespace: "test-ns",
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	})
+	assert.True(t, resp.Allowed)
+	patch, err := json.Marshal(resp.Patches)
+	assert.NoError(t, err)
+	return string(patch)
+}
+
+// Once the ConfigMap holds the policy file, the rules come from the file
+// alone: the sidecar lays set env vars over the file on every reload, so a
+// rule left in env would pin the value of admission time forever.
+func TestHandleDropsRuleEnvWhenPolicyFileRendered(t *testing.T) {
+	patch := handleWithRules(t, true)
+	for name := range ruleEnvNames {
+		assert.NotContains(t, patch, `"`+name+`"`)
+	}
+	assert.Contains(t, patch, `"PII_CONFIG_FILE"`)
+	assert.Contains(t, patch, `"PII_FAIL_POLICY"`)
+	assert.Contains(t, patch, `"PII_SALT"`)
+}
+
+func TestHandleKeepsRuleEnvWithoutPolicyFile(t *testing.T) {
+	patch := handleWithRules(t, false)
+	assert.Contains(t, patch, `"PII_SENSITIVE_KEYS"`)
+	assert.Contains(t, patch, `"PII_CONFIG_FILE"`)
 }

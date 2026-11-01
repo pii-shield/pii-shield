@@ -86,10 +86,15 @@ ConfigMap refresh — without a restart.
 
 What stays as it was:
 
-- The env vars in the table above are still set on the sidecar and win over
-  the file. A pod admitted before the ConfigMap exists (the volume is
-  mounted `optional`), or running an agent image older than the file
-  support, behaves exactly as before.
+- Once the ConfigMap exists, the webhook no longer sets the rule env vars
+  (`PII_ENTROPY_THRESHOLD`, `PII_CONFIDENCE_THRESHOLD`,
+  `PII_MIN_SECRET_LENGTH`, `PII_SENSITIVE_KEYS`,
+  `PII_SENSITIVE_KEY_PATTERNS`, `PII_CUSTOM_REGEX_LIST`,
+  `PII_SAFE_REGEX_LIST`) on the sidecar: a set variable wins over the file,
+  so it would keep the value the pod was admitted with. A pod admitted
+  before the ConfigMap exists (the volume is mounted `optional`) still gets
+  them and runs on those rules until it restarts. A pod admitted by an
+  older operator has them too: restart it once after the upgrade.
 - The salt never goes through the ConfigMap: it comes from `salt` or
   `saltSecretKeyRef` as a Secret reference, and the sidecar keeps the salt it
   started with across reloads. `failPolicy`, `injectionMode`, `logPath` and
