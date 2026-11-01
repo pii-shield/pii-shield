@@ -33,6 +33,21 @@ func TestSMTPRefusesWithoutFromOrAddress(t *testing.T) {
 	}
 }
 
+func TestEnvelopeFromTakesTheBareAddress(t *testing.T) {
+	for in, want := range map[string]string{
+		"PII-Shield rules <rules@example.com>": "rules@example.com",
+		"rules@example.com":                    "rules@example.com",
+		"<rules@example.com>":                  "rules@example.com",
+	} {
+		if got, err := envelopeFrom(in); err != nil || got != want {
+			t.Errorf("envelopeFrom(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := envelopeFrom("not an address"); err == nil {
+		t.Error("envelopeFrom accepted a value with no address")
+	}
+}
+
 func TestLogMailerWritesTheBody(t *testing.T) {
 	var sb strings.Builder
 	l := Log{Logger: slog.New(slog.NewTextHandler(&sb, nil))}
