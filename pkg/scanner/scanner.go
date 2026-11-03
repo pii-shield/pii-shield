@@ -2156,8 +2156,22 @@ func (st *configState) processTokenLogic(rawToken string, forcedSensitive bool, 
 
 	// CRITICAL FIX: If we know we are in a Value position (e.g. after :),
 	// do NOT treat this as a key, even if it looks like one.
-	if !isValuePos {
-		if st.isSensitiveKey(trimmed) || overrideSensitivity {
+	//
+	// The token after a bare sensitive word in prose ("password
+	// Wintermonkey73", "token Hockey99") arrives forced, and was read as a
+	// key of its own when a sensitive word sat inside it (monKEY, TOKENizer,
+	// AUTHority, byPASS): the value was written out as is and the word after
+	// it was forced instead, so a password made of a word with "key" in it
+	// passed on every line, while Kaffee1977 next to it was hidden. A token
+	// that carries the word only inside a longer run of letters is not a
+	// key name; one with the word as a whole component (api_key, apiKey7,
+	// Key2, x-api-key) or a trailing separator (Authorization:) still is.
+	// The rule is for the forced slot in prose only: in value position the
+	// token is never a key, and an all-letter word there was freed already.
+	if !isValuePos && (overrideSensitivity || st.isSensitiveKey(trimmed)) {
+		valueInProse := forcedSensitive && !overrideSensitivity && !isAllLetters(trimmed) &&
+			!hasTrailingSeparator(trimmed) && st.sensitiveWordOnlyInside(trimmed)
+		if !valueInProse {
 			sb.WriteString(rawToken)
 			return true
 		}
@@ -3395,6 +3409,86 @@ func isWordsName(k string) bool {
 	}
 	return sep && k[0] >= 'a' && k[0] <= 'z'
 }
+
+// hasTrailingSeparator reports whether tok ends in the ':' or '=' that
+// makes it a key with its value in the next token.
+func hasTrailingSeparator(tok string) bool {
+	return tok != "" && (tok[len(tok)-1] == ':' || tok[len(tok)-1] == '=')
+}
+
+// sensitiveWordOnlyInside reports whether every sensitive word that token
+// holds sits inside a longer run of letters (monKEY, TOKENizer, AUTHority,
+// byPASS, SECRETariat) and none stands as a component of its own. A key name
+// carries the word as a whole component: alone, next to a separator or a
+// digit, or at a camelCase boundary (api_key, apiKey7, Key2, tokenAuth). A
+// match of the user's key patterns counts as a whole component, and a token
+// with no sensitive word in it is not "inside" anything.
+func (st *configState) sensitiveWordOnlyInside(token string) bool {
+	// A token with a field-name separator is a name (passport_number,
+	// -inkey, signing-key.pem): on a docs corpus, a false bare key such as
+	// "passport" or "Signing" forced the field name after it, which this
+	// rule then hid. A value with a separator in it stays as it was.
+	if len(token) > 128 || strings.ContainsAny(token, "_-.") ||
+		(st.sensitiveRegex != nil && st.sensitiveRegex.MatchString(token)) {
+		return false
+	}
+	var buf [128]byte
+	low := buf[:len(token)]
+	for i := 0; i < len(token); i++ {
+		low[i] = lowerASCIIByte(token[i])
+	}
+	found := false
+	for _, sk := range st.config.SensitiveKeys {
+		if sk == "" {
+			continue
+		}
+		for from := 0; from < len(low); {
+			i := bytes.Index(low[from:], []byte(sk))
+			if i < 0 {
+				break
+			}
+			i += from
+			j := i + len(sk)
+			found = true
+			if isComponentStart(token, i) && isComponentEnd(token, j) {
+				return false
+			}
+			from = i + 1
+		}
+	}
+	return found
+}
+
+// isComponentStart reports whether a component of a name can start at i:
+// the token starts there, the byte before is not a letter, a lowercase
+// letter meets a capital (apiKey), or the word is not ASCII (密码), which
+// the Latin boundaries do not describe.
+func isComponentStart(token string, i int) bool {
+	if i == 0 || !isASCIILetter(token[i-1]) || token[i] >= 0x80 {
+		return true
+	}
+	return isASCIILower(token[i-1]) && isASCIIUpper(token[i])
+}
+
+// isComponentEnd reports whether a component of a name can end at j (the
+// index after its last byte): the token ends there, the byte at j is not a
+// letter, a lowercase letter meets a capital (keyVault), or the word is not
+// ASCII. A plural (keys, tokens, KEYS) ends one byte later.
+func isComponentEnd(token string, j int) bool {
+	if j >= len(token) || !isASCIILetter(token[j]) || token[j-1] >= 0x80 {
+		return true
+	}
+	if isASCIILower(token[j-1]) && isASCIIUpper(token[j]) {
+		return true
+	}
+	if token[j] != 's' && token[j] != 'S' {
+		return false
+	}
+	return j+1 >= len(token) || !isASCIILetter(token[j+1]) || (isASCIILower(token[j]) && isASCIIUpper(token[j+1]))
+}
+
+func isASCIILower(c byte) bool { return c >= 'a' && c <= 'z' }
+func isASCIIUpper(c byte) bool { return c >= 'A' && c <= 'Z' }
 
 // indexWhitespace returns the index of the first space or tab in s, or -1.
 // Two IndexByte calls beat strings.IndexAny on the hot path, and the common
