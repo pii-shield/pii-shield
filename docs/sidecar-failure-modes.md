@@ -22,7 +22,7 @@ For production compliance rollouts, prefer `PII_FAIL_POLICY=closed` after valida
 Expected behavior:
 
 - Kubernetes restarts the sidecar according to pod restart behavior.
-- Lines written while the sidecar is down may be missed unless the application log file still contains them and the sidecar reopens from a readable position.
+- The sidecar keeps no read offset. A restarted sidecar reads the application log file from its first line again, so nothing written while it was down is lost, and every line it had already emitted is emitted a second time (`TestWatchFileSidecarRestartReplaysFromStart`). Deduplicate downstream on the log line and timestamp, or rotate the file before a planned restart, to keep the duplicates out.
 - Downstream log volume may drop while the sidecar is unavailable.
 
 Required production controls:
@@ -98,8 +98,10 @@ Required production controls:
 
 Expected behavior:
 
-- File mode uses tailing with reopen enabled.
-- The sidecar is expected to continue after common file rotation patterns.
+- File mode tails the file by polling it every 250 ms and reopens it when it is renamed, removed or truncated. Polling was chosen over inotify/kqueue after a rename rotation was missed in 2 of 8 runs with the notifier on macOS (`TestWatchFileRotationRename` under the race detector); with polling it is followed every time, and the sidecar does not consume an inotify watch on the node.
+- Rotation by rename (logrotate's default: the file is moved away and the application opens a new one under the old name) is followed, and every line of both files is sanitized (`TestWatchFileRotationRename`).
+- Rotation by copy and truncate (logrotate's `copytruncate`: the file is cut to zero in place) is followed: the sidecar notices the cut and reads the new lines from the start of the file (`TestWatchFileRotationTruncate`). A truncate that is immediately refilled past the sidecar's last read offset within one poll interval cannot be told from ordinary growth and would be read from that offset; keep rotations and bursts apart.
+- An application restart that removes and recreates the file is followed the same way (`TestWatchFileAppRestartRecreate`).
 - Rotation behavior still depends on how the application and runtime rotate files.
 
 Required production controls:
@@ -115,6 +117,7 @@ Expected behavior:
 - PII-Shield does not own the application log file lifecycle.
 - Disk pressure can affect the application, shared volume, and sidecar together.
 - Missing or truncated source logs can lead to missing sanitized output.
+- When the reader of the sidecar's stdout goes away (the runtime's log pipe), the next write ends the sidecar process instead of leaving it running with nowhere to put sanitized lines, so the kubelet restarts it (`TestWatchFileDownstreamClosed`). A full disk under the shared volume is not simulated in the test suite: it needs a mounted size-limited filesystem.
 
 Required production controls:
 
@@ -142,8 +145,8 @@ Minimum test coverage for production-hardening:
 
 - [x] fail-open buffer overflow behavior;
 - [x] fail-closed buffer overflow behavior;
-- [ ] file rotation behavior;
-- [ ] sidecar restart behavior;
-- [ ] application restart behavior;
-- [ ] disk pressure behavior;
-- [ ] downstream collector bypass checks.
+- [x] file rotation behavior (`TestWatchFileRotationRename`, `TestWatchFileRotationTruncate` in `cmd/cleaner/failure_modes_test.go`);
+- [x] sidecar restart behavior (`TestWatchFileSidecarRestartReplaysFromStart`: replays from the first line, no loss, duplicates);
+- [x] application restart behavior (`TestWatchFileAppRestartRecreate`);
+- [ ] disk pressure behavior: only the closed-stdout half (`TestWatchFileDownstreamClosed`); a full shared volume is not simulated;
+- [x] downstream collector bypass checks (`assert_app_container_silent` in `tests/deployments/shared/scripts/common.sh`, run on every replay pod of the operator paths: the application container's own log stream must carry no access-log line, so a collector reading container streams sees sanitized lines only).

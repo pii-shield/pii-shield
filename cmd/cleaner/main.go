@@ -162,10 +162,20 @@ func main() {
 			return
 		}
 
+		// Poll the file (every 250 ms, the library's interval) instead of
+		// relying on inotify/kqueue: with the notifier a rotation by rename
+		// (the file moved away and recreated under the same name) was missed
+		// in 2 of 8 runs of TestWatchFileRotationRename under the race
+		// detector, the sidecar staying on the old file; with polling it is
+		// followed every time, and no inotify watch is consumed on the node.
+		// ReOpen follows a rename, a removal and a truncation; nothing keeps
+		// a read offset, so a restarted sidecar reads the file from its first
+		// line again (see docs/sidecar-failure-modes.md).
 		t, err := tail.TailFile(watchFile, tail.Config{
 			Follow:    true,
 			ReOpen:    true,
 			MustExist: true,
+			Poll:      true,
 			Logger:    tail.DiscardingLogger,
 		})
 		if err != nil {

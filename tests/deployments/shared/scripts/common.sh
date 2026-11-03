@@ -61,6 +61,26 @@ assert_sanitized_file() {
   fi
 }
 
+# assert_app_container_silent fails when the application container's own log
+# stream carries an access-log line. In file mode the application writes to
+# the shared volume and only the sidecar writes to a container stream, so a
+# collector that reads container streams must see sanitized lines only; a
+# raw line on the app container means the log collector can bypass the
+# sidecar. The replay app's own "replay complete" marker is allowed.
+assert_app_container_silent() {
+  local pod="$1"
+  local namespace="${2:-default}"
+  local container="${3:-app}"
+  local raw
+  raw="$(kubectl logs "${pod}" -n "${namespace}" -c "${container}" 2>/dev/null | grep -c -E ' HTTP/[0-9.]+" [0-9]{3} ' || true)"
+  echo "${pod}/${container}: raw access-log lines on the container stream=${raw}"
+  if [[ "${raw}" -ne 0 ]]; then
+    echo "FAIL: ${pod}/${container} writes raw log lines to its own stream; a collector reading container logs bypasses the sidecar" >&2
+    kubectl logs "${pod}" -n "${namespace}" -c "${container}" --tail=5 >&2 || true
+    exit 1
+  fi
+}
+
 helm_update_pii_shield_repo() {
   helm repo add pii-shield https://pii-shield.github.io/pii-shield/ >/dev/null
   helm repo update pii-shield
@@ -439,6 +459,7 @@ collect_operator_replay_logs() {
     local out="${output_dir}/${pod}.sanitized.log"
     kubectl logs "${pod}" -n "${namespace}" -c pii-shield-sidecar > "${out}"
     assert_sanitized_file "${out}"
+    assert_app_container_silent "${pod}" "${namespace}"
   done
 
   ls -lh "${output_dir}"
