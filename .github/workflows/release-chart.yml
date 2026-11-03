@@ -33,7 +33,7 @@ jobs:
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
 
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f
+        uses: helm/chart-releaser-action@df287104677278f869ca5480bd260358397cc3f9
         with:
           skip_existing: true
         env:
