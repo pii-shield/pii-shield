@@ -93,9 +93,19 @@ func main() {
 	}
 	out := newOutputWriter(os.Stdout, flushInterval)
 
-	// finalize runs on every shutdown path: write out the buffered lines, emit
-	// a last stats summary (if enabled) and drain the metrics server.
+	// sink is where the read loops send lines and stream markers: out itself,
+	// or the workers in front of it when PII_WORKERS is above 1 (set below,
+	// before any line is read).
+	var sink io.Writer = out
+	var shard *parallelSanitizer
+
+	// finalize runs on every shutdown path: write out the lines still with
+	// the workers and the buffered ones, emit a last stats summary (if
+	// enabled) and drain the metrics server.
 	finalize := func() {
+		if shard != nil {
+			shard.Close()
+		}
 		_ = out.Close()
 		if stats != nil {
 			log.Print(stats.summary())
@@ -120,6 +130,24 @@ func main() {
 	failPolicy := os.Getenv("PII_FAIL_POLICY")
 	if failPolicy == "" {
 		failPolicy = "open" // Start with fail-open by default
+	}
+
+	// Line sharding (proof of concept, parallel.go): PII_WORKERS above 1
+	// sanitizes lines on that many goroutines and keeps the output in input
+	// order. Unset, every line is sanitized by the reader as before.
+	workers, ok := parseWorkers(os.Getenv("PII_WORKERS"))
+	if !ok {
+		log.Printf("Invalid PII_WORKERS %q, using 1", os.Getenv("PII_WORKERS"))
+	}
+	if workers > 1 && scanner.AdaptiveThresholdEnabled() {
+		// The adaptive baseline is learned from the first lines in the
+		// order they are scanned, which the workers do not keep.
+		log.Print("PII_WORKERS ignored: the adaptive threshold needs lines scanned in order")
+		workers = 1
+	}
+	if workers > 1 {
+		shard = newParallelSanitizer(out, workers, metricsEnabled, failPolicy)
+		sink = shard
 	}
 
 	var watchFile string
@@ -158,7 +186,7 @@ func main() {
 				finalize()
 				os.Exit(0)
 			}()
-			readFIFO(watchFile, metricsEnabled, failPolicy, out, nil)
+			readFIFO(watchFile, metricsEnabled, failPolicy, sink, nil)
 			return
 		}
 
@@ -183,7 +211,7 @@ func main() {
 			if line.Err != nil {
 				continue
 			}
-			processLine(line.Text, metricsEnabled, failPolicy, out)
+			processLine(line.Text, metricsEnabled, failPolicy, sink)
 		}
 		finalize()
 	} else {
@@ -199,7 +227,7 @@ func main() {
 		}()
 
 		for reader.Scan() {
-			processLine(reader.Text(), metricsEnabled, failPolicy, out)
+			processLine(reader.Text(), metricsEnabled, failPolicy, sink)
 		}
 
 		if err := reader.Err(); err != nil {
@@ -207,7 +235,7 @@ func main() {
 				metrics.ErrorsTotal.Inc()
 			}
 			if err == bufio.ErrTooLong {
-				writeMarker(out, overflowMarker(failPolicy))
+				writeMarker(sink, overflowMarker(failPolicy))
 			}
 			fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
 			finalize()
@@ -335,54 +363,70 @@ func streamPipeOnce(path string, metricsEnabled bool, failPolicy string, out io.
 }
 
 func processLine(text string, metricsEnabled bool, failPolicy string, out io.Writer) {
-	// Functional wrapper to catch panics per-line
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				if metricsEnabled {
-					metrics.ErrorsTotal.Inc()
-				}
-				// Apply Blast Radius Control Policy. Audit mode never
-				// drops: its promise is an unchanged stream.
-				if failPolicy == "closed" && !auditMode {
-					writeMarker(out, "[PII_SHIELD_DROP: FATAL_ERROR]")
-				} else {
-					// Fail-Open: keep the flow alive
-					_, _ = fmt.Fprintln(out, text)
-				}
-			}
-		}()
+	// With PII_WORKERS above 1 the line goes to the workers, which write
+	// it out in input order (parallel.go).
+	if p, ok := out.(*parallelSanitizer); ok {
+		p.submit(text)
+		return
+	}
+	line, marker := sanitizeLine(text, metricsEnabled, failPolicy)
+	if marker {
+		writeMarker(out, line)
+		return
+	}
+	// Write back to Stdout for Fluentd/Logstash
+	_, _ = fmt.Fprintln(out, line)
+}
 
-		var start time.Time
+// sanitizeLine runs one line through the scanner and returns what is written
+// out for it. marker is true when that is a stream marker in place of the
+// line. It writes nothing itself, so the workers of a parallelSanitizer can
+// call it on several lines at once.
+func sanitizeLine(text string, metricsEnabled bool, failPolicy string) (line string, marker bool) {
+	// Catch panics per line
+	defer func() {
+		if r := recover(); r != nil {
+			if metricsEnabled {
+				metrics.ErrorsTotal.Inc()
+			}
+			// Apply Blast Radius Control Policy. Audit mode never
+			// drops: its promise is an unchanged stream.
+			if failPolicy == "closed" && !auditMode {
+				line, marker = "[PII_SHIELD_DROP: FATAL_ERROR]", true
+			} else {
+				// Fail-Open: keep the flow alive
+				line, marker = text, false
+			}
+		}
+	}()
+
+	var start time.Time
+	if metricsEnabled {
+		start = time.Now()
+		metrics.ProcessedBytesTotal.Add(float64(len(text)))
+	}
+	if stats != nil {
+		stats.recordLine(len(text))
+	}
+
+	// Core logic
+	cleaned := scanner.ScanAndRedact(text)
+
+	if metricsEnabled {
+		metrics.ProcessingDuration.Observe(time.Since(start).Seconds())
+	}
+
+	if auditMode {
+		// Count what would have changed and write the original line.
+		wouldRedact := cleaned != text
 		if metricsEnabled {
-			start = time.Now()
-			metrics.ProcessedBytesTotal.Add(float64(len(text)))
+			metrics.RecordAuditLine(wouldRedact)
 		}
 		if stats != nil {
-			stats.recordLine(len(text))
+			stats.recordAuditLine(wouldRedact)
 		}
+		return text, false
+	}
 
-		// Core logic
-		cleaned := scanner.ScanAndRedact(text)
-
-		if metricsEnabled {
-			metrics.ProcessingDuration.Observe(time.Since(start).Seconds())
-		}
-
-		if auditMode {
-			// Count what would have changed and write the original line.
-			wouldRedact := cleaned != text
-			if metricsEnabled {
-				metrics.RecordAuditLine(wouldRedact)
-			}
-			if stats != nil {
-				stats.recordAuditLine(wouldRedact)
-			}
-			_, _ = fmt.Fprintln(out, text)
-			return
-		}
-
-		// Write back to Stdout for Fluentd/Logstash
-		_, _ = fmt.Fprintln(out, cleaned)
-	}()
+	return cleaned, false
 }
