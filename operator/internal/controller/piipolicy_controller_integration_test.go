@@ -145,6 +145,31 @@ var _ = Describe("PiiPolicy Controller integration", func() {
 			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "mode %q: expected Invalid, got %v", mode, err)
 		}
 	})
+
+	// A rule name is written into every marker of the rule, and the sidecar
+	// rejects a policy file whose rule name holds a line break. The schema
+	// refuses it first, so such a policy never renders a file pods reject.
+	It("rejects a rule name with a line break at admission", func() {
+		for _, bad := range []string{"tx\nid", "tx\r"} {
+			for _, spec := range []corev1alpha1.PiiPolicySpec{
+				{InjectionMode: "file", CustomRegexList: []corev1alpha1.RegexRule{{Name: bad, Pattern: "^TX-[0-9]+$"}}},
+				{InjectionMode: "file", SafeRegexList: []corev1alpha1.RegexRule{{Name: bad, Pattern: "^TX-[0-9]+$"}}},
+			} {
+				resource := &corev1alpha1.PiiPolicy{
+					ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+					Spec:       spec,
+				}
+				err := k8sClient.Create(ctx, resource)
+				Expect(apierrors.IsInvalid(err)).To(BeTrue(), "name %q: expected Invalid, got %v", bad, err)
+			}
+		}
+		ok := &corev1alpha1.PiiPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: "default"},
+			Spec: corev1alpha1.PiiPolicySpec{InjectionMode: "file",
+				CustomRegexList: []corev1alpha1.RegexRule{{Name: "tx id", Pattern: "^TX-[0-9]+$"}, {Pattern: "^ORD-[0-9]+$"}}},
+		}
+		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
+	})
 })
 
 var _ = Describe("PiiPolicy rendered ConfigMap", func() {

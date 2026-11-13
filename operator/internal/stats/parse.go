@@ -3,6 +3,7 @@ package stats
 import (
 	"bufio"
 	"bytes"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -42,7 +43,10 @@ func parse(body []byte) sample {
 			continue
 		}
 		name, labels, value, ok := splitSeries(line)
-		if !ok {
+		// Every series read here is a counter or a 0/1 flag. NaN, an infinity
+		// or a negative number is not a reading of either, and one NaN added
+		// to a running total would turn the whole report window into NaN.
+		if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 			continue
 		}
 		switch name {

@@ -72,6 +72,8 @@ func TestParsePolicyJSON_RejectsWhole(t *testing.T) {
 		"bad custom regex":        `{"custom_regexes": [{"pattern": "ok"}, {"pattern": "["}]}`,
 		"empty custom pattern":    `{"custom_regexes": [{"regex": "^TX$", "name": "typo"}]}`,
 		"bad safe regex":          `{"safe_regexes": [{"pattern": "(?P<"}]}`,
+		"line feed in a name":     `{"custom_regexes": [{"pattern": "^TX-\\d+$", "name": "tx\nid"}]}`,
+		"carriage return in name": `{"safe_regexes": [{"pattern": "^build-\\d+$", "name": "build\r"}]}`,
 		"negative entropy":        `{"entropy_threshold": -1}`,
 		"negative confidence":     `{"confidence_score": -0.5}`,
 		"min length out of range": `{"min_secret_length": 100000}`,

@@ -91,6 +91,14 @@
     "expected": "line one\npassword=[HIDDEN:afbea4]\r\n4532015112.830366\n"
   },
   {
+    "name": "single_line_trailing_carriage_return_kept_outside_the_marker",
+    "config": {
+      "salt": "parity-golden-salt-0123456789abc"
+    },
+    "input": "password=SuperSecretValue123\r",
+    "expected": "password=[HIDDEN:afbea4]\r"
+  },
+  {
     "name": "invalid_rule_does_not_drop_the_list",
     "config": {
       "salt": "parity-golden-salt-0123456789abc",

@@ -70,8 +70,11 @@ jobs:
         # 1.27.4, so build the linter with the repo's own toolchain.
         install-mode: goinstall
 
+    # Every fuzz target of the three modules, 15 s each: the scanner, the
+    # parsers of rule sets that arrive from outside (policy file, SDK config,
+    # rule server upload), the operator's signature check and metrics reader.
     - name: Run Fuzz Checks (Sanity)
-      run: go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner
+      run: FUZZTIME=15s scripts/fuzz-sanity.sh
 
     - name: Run Tests (Race & Coverage)
       run: go test -race -coverprofile=coverage.out ./...

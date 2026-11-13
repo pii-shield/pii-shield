@@ -300,8 +300,19 @@ func (e *SkippedRegexRulesError) Error() string {
 	return fmt.Sprintf("%s: skipped %d invalid rule(s): %s", e.List, len(e.Skipped), strings.Join(parts, "; "))
 }
 
+// checkRuleName rejects a rule name that holds a line break. The name is
+// written into every marker of the rule ([HIDDEN:<name>:<hash>]), so a line
+// break in it would split each redacted line in two and break the one line
+// in, one line out contract every consumer of the output relies on.
+func checkRuleName(name string) error {
+	if strings.ContainsAny(name, "\r\n") {
+		return fmt.Errorf("name %q holds a line break", name)
+	}
+	return nil
+}
+
 // compileRegexRules compiles raw pattern/name pairs into runtime rules. A rule
-// that does not compile is skipped, reported on stderr and returned inside a
+// whose name holds a line break or whose pattern does not compile is skipped, reported on stderr and returned inside a
 // *SkippedRegexRulesError; the rest of the list is still returned as compiled
 // rules. Before this (B14) the first bad pattern made the whole list vanish on
 // the SDK/WASM path — silently, because init_config discards the error — so one
@@ -313,6 +324,15 @@ func compileRegexRules(list string, raw []CustomRegexConfig) ([]CustomRegexRule,
 	valid := make([]CustomRegexConfig, 0, len(raw))
 	var skipped *SkippedRegexRulesError
 	for _, r := range raw {
+		if err := checkRuleName(r.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: %s: skipping rule %q: %v\n", list, r.Pattern, err)
+			if skipped == nil {
+				skipped = &SkippedRegexRulesError{List: list}
+			}
+			skipped.Skipped = append(skipped.Skipped, r)
+			skipped.Errs = append(skipped.Errs, fmt.Errorf("rule %q: %w", r.Pattern, err))
+			continue
+		}
 		compiled, err := regexp.Compile(r.Pattern)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: %s: skipping invalid regex %q: %v\n", list, r.Pattern, err)
@@ -1404,7 +1424,8 @@ func (st *configState) ScanAndRedact(logLine string) string {
 // defeats structural safe rules such as isPlainDecimal and swallows the
 // newline inside the redaction marker, changing the line count (#184). Line
 // endings ("\n" and "\r\n") are preserved, so the output has exactly as
-// many lines as the input — the same contract the CLI gives stdin.
+// many lines as the input — the same contract the CLI gives stdin. A "\r"
+// that ends the text is kept as well, after the last line and not inside it.
 func ScanAndRedactText(text string) string {
 	return cfgState().ScanAndRedactText(text)
 }
@@ -1412,7 +1433,11 @@ func ScanAndRedactText(text string) string {
 // ScanAndRedactText is the multi-line counterpart of ScanAndRedact; Scanner
 // embeds *configState, so it is promoted as (*Scanner).ScanAndRedactText.
 func (st *configState) ScanAndRedactText(text string) string {
-	if strings.IndexByte(text, '\n') == -1 {
+	// The fast path is a text of one line with no "\r" to split off. A lone
+	// line that ends in "\r" goes through the loop like the last line of a
+	// longer text, so the same value gets the same tag either way and the
+	// "\r" stays outside the marker.
+	if strings.IndexByte(text, '\n') == -1 && !strings.HasSuffix(text, "\r") {
 		return st.ScanAndRedact(text)
 	}
 	var sb strings.Builder

@@ -23,7 +23,9 @@ import (
 
 // RegexRule is a named regular expression passed to the scanner.
 type RegexRule struct {
-	// Name identifies the rule in redaction output and metrics
+	// Name identifies the rule in redaction output and metrics. It is written
+	// into every marker of the rule, so it must not hold a line break.
+	// +kubebuilder:validation:Pattern=`^[^\r\n]*$`
 	// +optional
 	Name string `json:"name,omitempty"`
 

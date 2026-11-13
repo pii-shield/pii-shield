@@ -180,13 +180,20 @@ func Parse(b []byte) (doc Document, ignored []string, err error) {
 	return doc, ignored, nil
 }
 
-// checkRules rejects a rule with an empty or invalid pattern. An empty
+// checkRules rejects a rule with an empty or invalid pattern, or with a line
+// break in its name. An empty
 // pattern matches every token, so a misspelled key ("regex" for "pattern")
 // must not slip through as a rule that hides the whole line.
 func checkRules(field string, rules []Rule) error {
 	for i, r := range rules {
 		if r.Pattern == "" {
 			return invalid(ReasonInvalidRegex, "%s[%d]: empty pattern", field, i)
+		}
+		// The name goes into every marker of the rule; a line break in it
+		// would split each redacted line. The sidecar rejects the file for
+		// it, so it is rejected here first.
+		if strings.ContainsAny(r.Name, "\r\n") {
+			return invalid(ReasonInvalidValue, "%s[%d]: name %q holds a line break", field, i, r.Name)
 		}
 		if _, err := regexp.Compile(r.Pattern); err != nil {
 			return invalid(ReasonInvalidRegex, "%s[%d]: invalid regex %q: %w", field, i, r.Pattern, err)

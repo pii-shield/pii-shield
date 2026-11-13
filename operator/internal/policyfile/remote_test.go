@@ -65,6 +65,8 @@ func TestParseRejectsBadFilesWhole(t *testing.T) {
 		"min length high":    {`{"min_secret_length": 1025}`, ReasonInvalidValue},
 		"empty key":          {`{"sensitive_keys": ["a", " "]}`, ReasonInvalidValue},
 		"bad key pattern":    {`{"sensitive_key_patterns": ["("]}`, ReasonInvalidRegex},
+		"line feed in name":  {`{"custom_regexes": [{"pattern": "^TX$", "name": "tx\nid"}]}`, ReasonInvalidValue},
+		"CR in a safe name":  {`{"safe_regexes": [{"pattern": "^TX$", "name": "tx\r"}]}`, ReasonInvalidValue},
 		"bad custom":         {`{"custom_regexes": [{"pattern": "("}]}`, ReasonInvalidRegex},
 		"empty custom":       {`{"custom_regexes": [{"regex": "x"}]}`, ReasonInvalidRegex},
 		"bad safe":           {`{"safe_regexes": [{"pattern": "["}]}`, ReasonInvalidRegex},
