@@ -82,3 +82,54 @@ func TestTokenKeysStillForced(t *testing.T) {
 		t.Errorf("a listed key did not force its value: %s", out)
 	}
 }
+
+// TestTokenWordBeforePluralTokens covers a key that has the singular "token"
+// ahead of the plural (token_budget_tokens): the singular has no descriptor
+// right after it, so the key is judged by the plural rule alone. Counter
+// words around it keep the value readable; any other word keeps it forced.
+func TestTokenWordBeforePluralTokens(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	for _, in := range []string{
+		`{"token_budget_tokens": 2048}`,
+		`{"per_token_input_tokens":812}`,
+		`token_cache_read_tokens=40`,
+	} {
+		if out := ScanAndRedact(in); out != in {
+			t.Errorf("a counter key with both forms of the word forced its value:\n in:  %s\n out: %s", in, out)
+		}
+	}
+
+	for _, in := range []string{
+		`{"refresh_token_tokens":"hunter"}`,
+		`{"token_secret_tokens":"hunter"}`,
+		`{"token_tokens":"hunter"}`,
+	} {
+		if out := ScanAndRedact(in); strings.Contains(out, "hunter") {
+			t.Errorf("value under a token key leaked:\n in:  %s\n out: %s", in, out)
+		}
+	}
+}
+
+// TestTokenDescriptorKeyNamesNoSecret pins keyNamesSecret on the same keys:
+// one that describes tokens does not name a secret, although it carries the
+// strong word "token", while a key that holds a token still does.
+func TestTokenDescriptorKeyNamesNoSecret(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+	UpdateConfig(campaignConfig())
+
+	st := cfgState()
+	for k, want := range map[string]bool{
+		"prompt_tokens": false, "max_tokens": false, "totalTokenCount": false,
+		"token_type": false, "token_expires_in": false, "token_budget_tokens": false,
+		"access_token": true, "csrfToken": true,
+		"secret_token_type": true, "token_value": true,
+	} {
+		if got := st.keyNamesSecret(k); got != want {
+			t.Errorf("keyNamesSecret(%q) = %v, want %v", k, got, want)
+		}
+	}
+}
