@@ -13,7 +13,7 @@
 # the BPF, PERFMON and SYS_RESOURCE capabilities, which a non-root user
 # does not keep across exec, and the operator grants exactly those and
 # drops the rest (no privileged flag, no hostPath).
-FROM --platform=$BUILDPLATFORM golang:1.27.3 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
