@@ -2,7 +2,7 @@ module github.com/pii-shield/pii-shield/operator
 
 go 1.26.9
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/onsi/ginkgo/v2 v2.33.1
