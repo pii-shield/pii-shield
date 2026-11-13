@@ -1404,7 +1404,8 @@ func (st *configState) ScanAndRedact(logLine string) string {
 // defeats structural safe rules such as isPlainDecimal and swallows the
 // newline inside the redaction marker, changing the line count (#184). Line
 // endings ("\n" and "\r\n") are preserved, so the output has exactly as
-// many lines as the input — the same contract the CLI gives stdin.
+// many lines as the input — the same contract the CLI gives stdin. A "\r"
+// that ends the text is kept as well, after the last line and not inside it.
 func ScanAndRedactText(text string) string {
 	return cfgState().ScanAndRedactText(text)
 }
@@ -1412,7 +1413,11 @@ func ScanAndRedactText(text string) string {
 // ScanAndRedactText is the multi-line counterpart of ScanAndRedact; Scanner
 // embeds *configState, so it is promoted as (*Scanner).ScanAndRedactText.
 func (st *configState) ScanAndRedactText(text string) string {
-	if strings.IndexByte(text, '\n') == -1 {
+	// The fast path is a text of one line with no "\r" to split off. A lone
+	// line that ends in "\r" goes through the loop like the last line of a
+	// longer text, so the same value gets the same tag either way and the
+	// "\r" stays outside the marker.
+	if strings.IndexByte(text, '\n') == -1 && !strings.HasSuffix(text, "\r") {
 		return st.ScanAndRedact(text)
 	}
 	var sb strings.Builder

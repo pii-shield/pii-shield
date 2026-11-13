@@ -120,23 +120,16 @@ func FuzzScanText(f *testing.F) {
 		}
 
 		// A line scanned as part of a text is scanned alone: the result must
-		// not depend on its neighbours. A "\r" before "\n" belongs to the
-		// line ending and is put back after the scan. The last line has no
-		// "\n": its trailing "\r" is split off when the text has other
-		// lines and scanned with the line when it has none, so both results
-		// are accepted there.
+		// not depend on its neighbours. A "\r" that ends a line belongs to
+		// the line ending and is put back after the scan.
 		inLines := strings.Split(input, "\n")
 		outLines := strings.Split(output, "\n")
 		for i := range min(len(inLines), len(outLines)) {
-			line := inLines[i]
-			want := ScanAndRedact(line)
+			line, ending := inLines[i], ""
 			if bare, ok := strings.CutSuffix(line, "\r"); ok {
-				split := ScanAndRedact(bare) + "\r"
-				if i < len(inLines)-1 || outLines[i] == split {
-					want = split
-				}
+				line, ending = bare, "\r"
 			}
-			if outLines[i] != want {
+			if want := ScanAndRedact(line) + ending; outLines[i] != want {
 				t.Errorf("line %d differs from the same line scanned alone.\nLine:  %q\nText:  %q\nAlone: %q", i, line, outLines[i], want)
 			}
 		}
