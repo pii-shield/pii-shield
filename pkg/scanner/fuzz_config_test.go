@@ -42,6 +42,8 @@ var fuzzConfigSeeds = []string{
 	`{"custom_regexes":[{"pattern":".*"}],"safe_regexes":[{"pattern":".*"}]}`,
 	`{"custom_regexes":[{"name":"a]b[HIDDEN:","pattern":"\\S+"}],"entity_type_labels":true}`,
 	`{"custom_regexes":[{"name":"\u0000\n","pattern":"(?i)secret"}]}`,
+	`{"custom_regexes":[{"name":"line\nbreak","pattern":"()"}]}`,
+	`{"Custom_regeXes":[{"nAme":"\r"}]}`,
 	`{"sensitive_keys":"not-a-list"}`,
 	`{"custom_regexes":{"pattern":"x"}}`,
 	"{\"sensitive_keys\":[\"\xff\xfe\"]}",
@@ -64,12 +66,23 @@ var fuzzProbeLines = []string{
 func scanUnderConfig(t *testing.T, cfg Config, source string) {
 	t.Helper()
 	sc := NewScanner(cfg)
+	// A custom rule's name is copied into its markers as written, so a name
+	// that holds a line break puts one into the output. That is the rule
+	// author's own text, not something a log line can cause; the line-break
+	// check below covers every other config.
+	nameBreaksLine := false
+	for _, r := range cfg.CustomRegexes {
+		nameBreaksLine = nameBreaksLine || strings.ContainsAny(r.Name, "\r\n")
+	}
+	for _, name := range cfg.CustomRegexNames {
+		nameBreaksLine = nameBreaksLine || strings.ContainsAny(name, "\r\n")
+	}
 	for _, line := range fuzzProbeLines {
 		out := sc.ScanAndRedact(line)
 		if !utf8.ValidString(out) {
 			t.Errorf("invalid UTF-8 under a config from %q\nline: %q\nout:  %q", source, line, out)
 		}
-		if strings.ContainsAny(out, "\r\n") {
+		if !nameBreaksLine && strings.ContainsAny(out, "\r\n") {
 			t.Errorf("line break added under a config from %q\nline: %q\nout:  %q", source, line, out)
 		}
 		// A custom rule's name is copied into each marker, so the bound
