@@ -617,6 +617,15 @@ func UpdateConfig(cfg Config) {
 	activeConfig.Store(buildConfigState(cfg))
 }
 
+// AdaptiveThresholdEnabled reports whether the package-level configuration
+// has the adaptive entropy threshold on. That mode learns its baseline from
+// the first lines in the order they are scanned, so a caller that scans
+// lines on several goroutines (the CLI with PII_WORKERS) uses this to fall
+// back to one line at a time.
+func AdaptiveThresholdEnabled() bool {
+	return cfgState().config.AdaptiveThreshold
+}
+
 // Scanner is an instance-based redactor built from its own immutable Config
 // snapshot. Unlike the package-level ScanAndRedact/UpdateConfig pair (which
 // share one process-wide configuration), a Scanner's configuration is fixed
