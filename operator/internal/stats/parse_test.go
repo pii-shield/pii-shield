@@ -51,3 +51,31 @@ func TestSplitSeriesEdges(t *testing.T) {
 		t.Errorf("with a timestamp: %s %v %v %v", name, labels, v, ok)
 	}
 }
+
+// A pod can shape what its /metrics port answers. A value that is no counter
+// reading (NaN, an infinity, a negative number, an overflow that parses as
+// +Inf) is skipped like any other line the reader does not understand, and
+// the good lines beside it still count. Found by FuzzParse.
+func TestParseSkipsValuesThatAreNotCounts(t *testing.T) {
+	body := "piishield_processing_duration_seconds_count 100\n" +
+		"piishield_processing_duration_seconds_count NaN\n" +
+		"piishield_processing_duration_seconds_count +Inf\n" +
+		"piishield_processing_duration_seconds_count -Inf\n" +
+		"piishield_processing_duration_seconds_count -5\n" +
+		"piishield_processing_duration_seconds_count 1e999\n" +
+		"piishield_errors_total NaN\n" +
+		"piishield_redaction_events_total{type=\"entropy\"} 7\n" +
+		"piishield_redaction_events_total{type=\"entropy\"} -Inf\n" +
+		"piishield_redaction_events_total{type=\"signature\"} NaN\n" +
+		"piishield_audit_findings_total{type=\"custom\"} -1\n"
+	s := parse([]byte(body))
+	if s.lines != 100 || s.errors != 0 {
+		t.Errorf("lines = %v, errors = %v; want 100 and 0", s.lines, s.errors)
+	}
+	if len(s.redactions) != 1 || s.redactions["entropy"] != 7 {
+		t.Errorf("redactions = %v; want only entropy: 7", s.redactions)
+	}
+	if len(s.auditFindings) != 0 {
+		t.Errorf("auditFindings = %v; want none", s.auditFindings)
+	}
+}
