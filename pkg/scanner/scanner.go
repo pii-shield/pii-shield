@@ -3243,7 +3243,12 @@ func (st *configState) isSensitiveKey(key string) bool {
 		if len(key) > 15 && st.calculateComplexity(key) > st.config.EntropyThreshold && !st.isWordsSecretName(k) {
 			return false
 		}
-		return true
+		// A key that describes tokens (prompt_tokens, token_type) holds no
+		// token; only the user's own pattern below can still make it
+		// sensitive.
+		if !st.isTokenDescriptorKey(key, k) {
+			return true
+		}
 	}
 
 	// The short forms of "password": PW:maple248, db_pw=..., dbPwd: ...,
@@ -3272,6 +3277,96 @@ func (st *configState) isSensitiveKey(key string) bool {
 	return false
 }
 
+// tokenCounterWords are the words that stand next to the plural "tokens" in
+// the usage counters and limits of a language-model API (prompt_tokens,
+// cache_read_input_tokens, max_tokens_to_sample, tokens_per_second). The list
+// is closed on purpose: refresh_tokens, api_tokens and device_tokens hold
+// credentials, and any word that is not here keeps the key sensitive.
+var tokenCounterWords = map[string]bool{
+	"prompt": true, "completion": true, "total": true, "max": true, "min": true,
+	"input": true, "output": true, "in": true, "out": true, "cached": true,
+	"cache": true, "read": true, "write": true, "creation": true, "reasoning": true,
+	"thinking": true, "thoughts": true, "candidates": true, "used": true, "usage": true,
+	"count": true, "num": true, "number": true, "per": true, "second": true,
+	"minute": true, "limit": true, "remaining": true, "budget": true, "context": true,
+	"new": true, "generated": true, "audio": true, "text": true, "image": true,
+	"accepted": true, "rejected": true, "prediction": true, "details": true,
+	"estimated": true, "billed": true, "billable": true, "eval": true, "tool": true,
+	"system": true, "request": true, "response": true, "to": true, "sample": true,
+}
+
+// tokenDescriptorWords are the words that, right after "token", say something
+// about a token instead of naming one (token_type, tokenCount, token_status).
+// token_id, token_name and token_value are left out: an id is half of some
+// credentials, and the other two hold the token itself often enough.
+var tokenDescriptorWords = map[string]bool{
+	"type": true, "count": true, "counts": true, "limit": true, "limits": true,
+	"usage": true, "status": true, "state": true, "expired": true, "valid": true,
+	"ttl": true, "length": true, "budget": true, "lifetime": true, "expiry": true,
+	"expires": true, "expiration": true, "details": true,
+}
+
+// isTokenDescriptorKey reports whether a key that matched the sensitive word
+// "token" describes tokens instead of holding one. lk is the lowercased key.
+// Two shapes qualify. The plural with nothing but counter words around it:
+// prompt_tokens, max_tokens, cache_read_input_tokens, the counters every
+// language-model answer carries. And the singular followed by a descriptor to
+// the end of the key: token_type, totalTokenCount, token_expires_in. The value
+// of such a key is not forced; it is still scored like any other value, so a
+// real token under max_tokens is hidden by its own entropy.
+//
+// A key the user listed in PII_SENSITIVE_KEYS stays sensitive, a bare "tokens"
+// stays sensitive ({"tokens": ["…"]} is a list of them), and so does any key
+// with another sensitive word in it (secret_token_type, password_tokens).
+func (st *configState) isTokenDescriptorKey(key, lk string) bool {
+	if !strings.Contains(lk, "token") {
+		return false
+	}
+	for _, sk := range st.config.SensitiveKeys {
+		if lk == sk {
+			return false
+		}
+	}
+	var parts [maxKeyWords]string
+	words := parts[:splitKeyWords(key, &parts)]
+	plural, descriptor := false, false
+	for i, w := range words {
+		switch w {
+		case "tokens":
+			plural = true
+		case "token":
+			tail := words[i+1:]
+			switch {
+			case len(tail) == 1 && tokenDescriptorWords[tail[0]]:
+				descriptor = true
+			case len(tail) == 2 && tail[0] == "expires" && (tail[1] == "in" || tail[1] == "at"):
+				descriptor = true
+			case len(tail) > 0 && tail[len(tail)-1] == "tokens":
+				// token … tokens: judged by the plural rule.
+			default:
+				return false
+			}
+		}
+	}
+	if !plural && !descriptor {
+		return false
+	}
+	others := 0
+	for _, w := range words {
+		if w == "token" || w == "tokens" {
+			continue
+		}
+		others++
+		if plural && !descriptor && !tokenCounterWords[w] && !tokenDescriptorWords[w] {
+			return false
+		}
+		if found, _ := st.keyMatcher.find(w); found {
+			return false
+		}
+	}
+	return others > 0
+}
+
 // keyNamesSecret reports whether a key names a secret outright rather than
 // containing a sensitive word inside another word. It does when the whole key
 // is a sensitive-key entry other than a lone weak word (password, cvv; not
@@ -3295,6 +3390,9 @@ func (st *configState) keyNamesSecret(key string) bool {
 	}
 	if strings.Contains(lk, "pw") && looksLikeFieldName(key) && hasPasswordAbbrevComponent(key) {
 		return true
+	}
+	if st.isTokenDescriptorKey(key, lk) {
+		return false
 	}
 	var words []string
 	var cur strings.Builder
