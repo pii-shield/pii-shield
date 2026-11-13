@@ -56,7 +56,7 @@ func TestParseTrustedKeys(t *testing.T) {
 
 const testSet = "acme/payments"
 
-func signedFile(t *testing.T, priv ed25519.PrivateKey, set string, publication, revision int64, body []byte) []byte {
+func signedFile(t testing.TB, priv ed25519.PrivateKey, set string, publication, revision int64, body []byte) []byte {
 	t.Helper()
 	sum := sha256.Sum256(body)
 	text := fmt.Sprintf("%s\nset: %s\npublication: %d\nrevision: %d\nsha256: %s\n", statementHeader, set, publication, revision, hex.EncodeToString(sum[:]))
