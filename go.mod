@@ -2,7 +2,7 @@ module github.com/pii-shield/pii-shield/v3
 
 go 1.26.9
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/nxadm/tail v1.4.11
