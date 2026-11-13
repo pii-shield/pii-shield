@@ -643,6 +643,70 @@ func CalculateComplexity(token string) float64 {
 	return cfgState().calculateComplexity(token)
 }
 
+// sentenceEndWord returns the word in front of the '.', '!' or '?' that ends
+// token, or "" when token is not a word followed by up to three of them. The
+// punctuation is one more distinct character and a second character class,
+// worth 0.7 on a word of seven letters, and that alone carried Tuesday. and
+// Friday! over the threshold.
+//
+// A word here is letters only, written the way words are (lowercase,
+// Capitalised, CAPITALS, or a camelCase name that reads as words, GitHub),
+// and reading like one: its letter pairs average above
+// sentenceWordMinBigramAvg.
+// The second half matters. A password of random letters at the end of a
+// sentence (Your temporary password is kXqWzRtP.) is too short to pass the
+// threshold on its own and was hidden only thanks to the full stop; such a run
+// fails the shape or the pairs and keeps being scored whole. So does a token
+// with a digit or a symbol anywhere in it (Welcome1!, hunter2.), where the
+// last character may be part of the password. A word in another script has no
+// pairs in the English table and is taken by its shape.
+func (st *configState) sentenceEndWord(token string) string {
+	end := len(token)
+	for end > 0 && len(token)-end < 3 && (token[end-1] == '.' || token[end-1] == '!' || token[end-1] == '?') {
+		end--
+	}
+	if end == len(token) || end < 2 {
+		return ""
+	}
+	word := token[:end]
+	ascii, upper, lower, innerUpper := true, 0, 0, false
+	for i, r := range word {
+		switch {
+		case !unicode.IsLetter(r):
+			return ""
+		case unicode.IsUpper(r):
+			upper++
+			innerUpper = innerUpper || i > 0
+		default:
+			lower++
+		}
+		ascii = ascii && r < 0x80
+	}
+	if innerUpper && lower > 0 && (!ascii || !st.isCamelWordCompound(word)) {
+		return ""
+	}
+	if !ascii {
+		return word
+	}
+	sum := 0.0
+	for i := 1; i < len(word); i++ {
+		sum += st.letterBigram(word[i-1], word[i])
+	}
+	if sum/float64(len(word)-1) <= sentenceWordMinBigramAvg {
+		return ""
+	}
+	return word
+}
+
+// sentenceWordMinBigramAvg is the letter-pair average a word must exceed for
+// sentenceEndWord to leave the punctuation after it out of the score. It is
+// stricter than compoundMinBigramAvg because one word is all the evidence
+// there is. Measured at -6.2: 93% of the lowercase dictionary words of 4 to 10
+// letters (/usr/share/dict/words) and of a list of everyday words are above it, against 9.8% of
+// random lowercase runs of 8 letters, 5.9% of 12 and 3.6% of 16 (at -6.5:
+// 98% of words, but 31%, 28% and 25% of the random runs).
+const sentenceWordMinBigramAvg = -6.2
+
 // calculateComplexity is CalculateComplexity's config-aware implementation,
 // callable on any configState (the global snapshot or a Scanner's own) so a
 // Scanner instance's bigram/entropy config is honored instead of silently
@@ -2711,6 +2775,14 @@ func (st *configState) processSingleToken(content, original string, forcedSensit
 
 	// 4. Complexity Score
 	score := st.calculateComplexity(content)
+	// A word that closes a sentence (Tuesday. Friday! Thursday?) is scored
+	// without the punctuation. Nothing but the verdict changes: a word that
+	// is hidden anyway keeps the punctuation inside the marker, as before.
+	if !forcedSensitive && !contextSensitive {
+		if word := st.sentenceEndWord(content); word != "" {
+			score = st.calculateComplexity(word)
+		}
+	}
 	threshold := cfg.EntropyThreshold
 	if forcedSensitive {
 		threshold = 1.0
