@@ -300,8 +300,19 @@ func (e *SkippedRegexRulesError) Error() string {
 	return fmt.Sprintf("%s: skipped %d invalid rule(s): %s", e.List, len(e.Skipped), strings.Join(parts, "; "))
 }
 
+// checkRuleName rejects a rule name that holds a line break. The name is
+// written into every marker of the rule ([HIDDEN:<name>:<hash>]), so a line
+// break in it would split each redacted line in two and break the one line
+// in, one line out contract every consumer of the output relies on.
+func checkRuleName(name string) error {
+	if strings.ContainsAny(name, "\r\n") {
+		return fmt.Errorf("name %q holds a line break", name)
+	}
+	return nil
+}
+
 // compileRegexRules compiles raw pattern/name pairs into runtime rules. A rule
-// that does not compile is skipped, reported on stderr and returned inside a
+// whose name holds a line break or whose pattern does not compile is skipped, reported on stderr and returned inside a
 // *SkippedRegexRulesError; the rest of the list is still returned as compiled
 // rules. Before this (B14) the first bad pattern made the whole list vanish on
 // the SDK/WASM path — silently, because init_config discards the error — so one
@@ -313,6 +324,15 @@ func compileRegexRules(list string, raw []CustomRegexConfig) ([]CustomRegexRule,
 	valid := make([]CustomRegexConfig, 0, len(raw))
 	var skipped *SkippedRegexRulesError
 	for _, r := range raw {
+		if err := checkRuleName(r.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: %s: skipping rule %q: %v\n", list, r.Pattern, err)
+			if skipped == nil {
+				skipped = &SkippedRegexRulesError{List: list}
+			}
+			skipped.Skipped = append(skipped.Skipped, r)
+			skipped.Errs = append(skipped.Errs, fmt.Errorf("rule %q: %w", r.Pattern, err))
+			continue
+		}
 		compiled, err := regexp.Compile(r.Pattern)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: %s: skipping invalid regex %q: %v\n", list, r.Pattern, err)

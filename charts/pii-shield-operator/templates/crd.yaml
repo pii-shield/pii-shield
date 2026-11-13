@@ -66,8 +66,10 @@ spec:
                     scanner.
                   properties:
                     name:
-                      description: Name identifies the rule in redaction output and
-                        metrics
+                      description: |-
+                        Name identifies the rule in redaction output and metrics. It is written
+                        into every marker of the rule, so it must not hold a line break.
+                      pattern: ^[^\r\n]*$
                       type: string
                     pattern:
                       description: Pattern is an RE2 regular expression
@@ -302,8 +304,10 @@ spec:
                     scanner.
                   properties:
                     name:
-                      description: Name identifies the rule in redaction output and
-                        metrics
+                      description: |-
+                        Name identifies the rule in redaction output and metrics. It is written
+                        into every marker of the rule, so it must not hold a line break.
+                      pattern: ^[^\r\n]*$
                       type: string
                     pattern:
                       description: Pattern is an RE2 regular expression

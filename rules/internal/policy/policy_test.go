@@ -33,6 +33,7 @@ func TestCanonicalRejectsWhatTheSidecarRejects(t *testing.T) {
 		"null":          `null`,
 		"trailing data": `{} {}`,
 		"bad regex":     `{"custom_regexes": [{"pattern": "("}]}`,
+		"name break":    `{"custom_regexes": [{"pattern": "^TX$", "name": "tx\nid"}]}`,
 		"empty pattern": `{"safe_regexes": [{"regex": "x"}]}`,
 		"negative":      `{"entropy_threshold": -1}`,
 		"min length":    `{"min_secret_length": 0, "sensitive_keys": [""]}`,
