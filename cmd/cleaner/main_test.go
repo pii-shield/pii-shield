@@ -1002,3 +1002,39 @@ func runMainWithLongLine(t *testing.T, failPolicy string) (string, string, int) 
 
 	return stdout.String(), stderr.String(), exitCode
 }
+
+// The longest line the CLI accepts is 10 MiB; past it the fail policy decides
+// between a warning marker and a drop marker (the two overflow tests above).
+// This pins the other side of that limit: a line well over the 1 MiB starting
+// buffer and under the limit is scanned and written out whole, its secret
+// hidden, with no overflow marker and a clean exit.
+func TestMainLongLineUnderTheLimitIsScanned(t *testing.T) {
+	const secret = "Wintermonkey73"
+	if os.Getenv("TEST_MAIN_LINE_UNDER_LIMIT") == "1" {
+		main()
+		os.Exit(0)
+	}
+
+	for _, policy := range []string{"open", "closed"} {
+		cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+		cmd.Env = append(os.Environ(), "TEST_MAIN_LINE_UNDER_LIMIT=1", "PII_FAIL_POLICY="+policy, "PII_METRICS_ENABLED=false")
+		// 3 MiB of plain words, then a secret at the very end of the line.
+		words := strings.Repeat("plain words here ", 3*1024*1024/17)
+		cmd.Stdin = strings.NewReader(words + "password=" + secret + "\n")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("fail policy %s: the CLI failed on a 3 MiB line: %v\n%.300s", policy, err, stderr.String())
+		}
+		out := stdout.String()
+		if strings.Contains(out, "BUFFER_OVERFLOW") {
+			t.Errorf("fail policy %s: a 3 MiB line was treated as an overflow", policy)
+		}
+		if strings.Contains(out, secret) {
+			t.Errorf("fail policy %s: the secret at the end of a 3 MiB line was written out", policy)
+		}
+		if !strings.HasPrefix(out, words) || strings.Count(out, "\n") != 1 {
+			t.Errorf("fail policy %s: the line did not come back whole: %d bytes out, %d line breaks", policy, len(out), strings.Count(out, "\n"))
+		}
+	}
+}
