@@ -37,6 +37,8 @@ func FuzzParse(f *testing.F) {
 		`{"sensitive_key_patterns":["("]}`,
 		`{"custom_regexes":[{"pattern":"("}]}`,
 		`{"custom_regexes":[{"regex":"x"}]}`,
+		`{"custom_regexes":[{"name":"line\nbreak","pattern":"^TX$"}]}`,
+		`{"safe_regexes":[{"name":"\r","pattern":"^TX$"}]}`,
 		`{"safe_regexes":[{"pattern":""}]}`,
 		`{"sensitive_keys":"not-a-list"}`,
 		"{\"sensitive_keys\":[\"\xff\xfe\"]}",
@@ -80,6 +82,9 @@ func FuzzParse(f *testing.F) {
 		}
 		for _, rules := range [][]Rule{doc.CustomRegexes, doc.SafeRegexes} {
 			for _, r := range rules {
+				if strings.ContainsAny(r.Name, "\r\n") {
+					t.Errorf("rule name %q with a line break accepted from %q", r.Name, data)
+				}
 				if r.Pattern == "" {
 					t.Errorf("empty pattern accepted from %q", data)
 				} else if _, err := regexp.Compile(r.Pattern); err != nil {

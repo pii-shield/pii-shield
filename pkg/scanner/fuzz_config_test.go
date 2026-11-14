@@ -66,23 +66,12 @@ var fuzzProbeLines = []string{
 func scanUnderConfig(t *testing.T, cfg Config, source string) {
 	t.Helper()
 	sc := NewScanner(cfg)
-	// A custom rule's name is copied into its markers as written, so a name
-	// that holds a line break puts one into the output. That is the rule
-	// author's own text, not something a log line can cause; the line-break
-	// check below covers every other config.
-	nameBreaksLine := false
-	for _, r := range cfg.CustomRegexes {
-		nameBreaksLine = nameBreaksLine || strings.ContainsAny(r.Name, "\r\n")
-	}
-	for _, name := range cfg.CustomRegexNames {
-		nameBreaksLine = nameBreaksLine || strings.ContainsAny(name, "\r\n")
-	}
 	for _, line := range fuzzProbeLines {
 		out := sc.ScanAndRedact(line)
 		if !utf8.ValidString(out) {
 			t.Errorf("invalid UTF-8 under a config from %q\nline: %q\nout:  %q", source, line, out)
 		}
-		if !nameBreaksLine && strings.ContainsAny(out, "\r\n") {
+		if strings.ContainsAny(out, "\r\n") {
 			t.Errorf("line break added under a config from %q\nline: %q\nout:  %q", source, line, out)
 		}
 		// A custom rule's name is copied into each marker, so the bound

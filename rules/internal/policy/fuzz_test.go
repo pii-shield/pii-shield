@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
@@ -31,6 +32,8 @@ func FuzzCanonical(f *testing.F) {
 		`{"salt":""}`,
 		`{"salt":null,"fail_policy":null}`,
 		`{"Salt":"case"}`,
+		`{"revi\u017fion":"mine","REVISION":"x"}`,
+		`{"\u017falt":"abc"}`,
 		`{"salt":["list"]}`,
 		`{"fail_policy":"closed"}`,
 		`{"custom_regexes": [{"pattern": "("}]}`,
@@ -82,10 +85,18 @@ func FuzzCanonical(f *testing.F) {
 		if err := json.Unmarshal(doc.Content, &served); err != nil {
 			t.Fatalf("served content is not a JSON object: %v", err)
 		}
-		for _, k := range []string{"salt", "fail_policy"} {
-			if _, ok := served[k]; ok {
+		// The sidecar matches keys in any letter case, so the check does too.
+		revisions := 0
+		for k := range served {
+			if strings.EqualFold(k, "salt") || strings.EqualFold(k, "fail_policy") {
 				t.Errorf("%s is served to clusters: %s", k, doc.Content)
 			}
+			if strings.EqualFold(k, "revision") {
+				revisions++
+			}
+		}
+		if revisions != 1 {
+			t.Errorf("%d revision keys are served: %s", revisions, doc.Content)
 		}
 
 		again, err := Canonical(doc.Content, revision)

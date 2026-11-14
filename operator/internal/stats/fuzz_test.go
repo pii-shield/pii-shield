@@ -54,6 +54,22 @@ func FuzzParse(f *testing.F) {
 			}
 		}
 
+		// Totals feed sums and int64 conversions in the report: each must be
+		// a finite number that is not negative.
+		count := func(name string, v float64) {
+			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+				t.Errorf("%s = %v from %q", name, v, body)
+			}
+		}
+		count("lines", s.lines)
+		count("errors", s.errors)
+		for k, v := range s.redactions {
+			count("redactions["+k+"]", v)
+		}
+		for k, v := range s.auditFindings {
+			count("auditFindings["+k+"]", v)
+		}
+
 		again := parse(body)
 		if !sameSample(s, again) {
 			t.Errorf("two reads of %q differ:\n%+v\n%+v", body, s, again)
