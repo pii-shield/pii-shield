@@ -17,6 +17,10 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
     - name: Verify version files match VERSION
       run: scripts/set-version.sh --check
+    # Every test script, deployment path and operator test target is in
+    # docs/testing.md, and every script the docs name exists.
+    - name: Verify the testing documentation matches the tree
+      run: scripts/check-test-docs.sh
 
   test:
     name: Test, Lint & Fuzz
