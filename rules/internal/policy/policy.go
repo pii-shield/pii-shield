@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/pii-shield/pii-shield/v3/pkg/scanner"
 )
@@ -54,11 +55,20 @@ func Canonical(content []byte, revision int64) (Document, error) {
 	if raw == nil {
 		return Document{}, errors.New("invalid json: the rule set must be an object, not null")
 	}
-	for _, k := range []string{"salt", "fail_policy"} {
-		if v, ok := raw[k]; ok && v != nil && v != "" {
-			return Document{}, fmt.Errorf("%s is not a rule and cannot be served; it comes from the pod spec", k)
+	// The sidecar reads the file with encoding/json, which matches a key to
+	// a field whatever its letter case, so "Salt" is a salt and "REVISION"
+	// would compete with the revision written below. strings.EqualFold folds
+	// the same way.
+	for k, v := range raw {
+		switch {
+		case strings.EqualFold(k, "salt"), strings.EqualFold(k, "fail_policy"):
+			if v != nil && v != "" {
+				return Document{}, fmt.Errorf("%s is not a rule and cannot be served; it comes from the pod spec", strings.ToLower(k))
+			}
+			delete(raw, k)
+		case strings.EqualFold(k, "revision"):
+			delete(raw, k)
 		}
-		delete(raw, k)
 	}
 	raw["revision"] = strconv.FormatInt(revision, 10)
 
