@@ -97,3 +97,31 @@ func TestScanAndRedactText_PackageLevelUsesGlobalConfig(t *testing.T) {
 		t.Fatalf("expected redaction with trailing newline kept, got %q", got)
 	}
 }
+
+// A line that ends in "\r" with no "\n" after it (the last line of a CRLF
+// text cut before its "\n", or a single line handed over with its "\r") used
+// to be scanned together with the "\r" when it was the whole text and without
+// it when other lines came first. The value then got two different tags and
+// the "\r" vanished into the marker. Found by FuzzScanText.
+func TestScanAndRedactText_TrailingCarriageReturn(t *testing.T) {
+	oldCfg := activeCfg()
+	defer UpdateConfig(oldCfg)
+
+	const line = "token=abc123def456"
+	want := ScanAndRedact(line)
+	if !strings.Contains(want, "[HIDDEN:") || strings.Contains(want, "abc123def456") {
+		t.Fatalf("the probe value is not hidden: %q", want)
+	}
+
+	for _, tc := range []struct{ name, in, want string }{
+		{"the whole text", line + "\r", want + "\r"},
+		{"after another line", "first\n" + line + "\r", "first\n" + want + "\r"},
+		{"before a line break", line + "\r\n", want + "\r\n"},
+		{"only a carriage return", "\r", "\r"},
+		{"two carriage returns", line + "\r\r", ScanAndRedact(line+"\r") + "\r"},
+	} {
+		if got := ScanAndRedactText(tc.in); got != tc.want {
+			t.Errorf("%s: ScanAndRedactText(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}

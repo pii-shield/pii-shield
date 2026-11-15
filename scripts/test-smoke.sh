@@ -332,18 +332,86 @@ if [[ "$GAPS" -gt "$KNOWN_GAP_MAX" ]]; then
 fi
 
 # ==============================================================================
-# PHASE 3: JSON Integrity Verification (jq)
+# PHASE 3: JSON Preservation
 # ==============================================================================
-echo -e "\n${BLUE}▶️  PHASE 3: JSON Integrity Check${NC}"
-grep "^{" "$OUTPUT_FILE" > json_output.log
-if ! jq . < json_output.log > /dev/null 2>&1; then
-    echo -e "${RED}❌ JSON Integrity Check FAILED. Output contained invalid JSON.${NC}"
-    head -n 5 json_output.log
-    FAILURES=$((FAILURES + 1))
+# Every input line that is JSON must come back as JSON of the same shape: the
+# same keys at every level, the same type for every value, and each value
+# either untouched or replaced by a marker. The lines are paired by position,
+# so a JSON line that came back as something else is counted, not skipped
+# (the earlier check looked only at output lines that still began with "{").
+echo -e "\n${BLUE}▶️  PHASE 3: JSON Preservation Check${NC}"
+if python3 - "$INPUT_FILE" "$OUTPUT_FILE" <<'PYEOF'
+import json, sys
+
+class Num(str):
+    """A JSON number, kept as written and told apart from a JSON string."""
+
+def load(raw):
+    return json.loads(raw.decode("utf-8"), parse_float=Num, parse_int=Num)
+
+def diff(path, a, b, out):
+    """Appends what changed between a and b besides values becoming markers."""
+    hidden = 0
+    if isinstance(a, dict):
+        if not isinstance(b, dict):
+            out.append(f"{path}: object became {type(b).__name__}"); return 0
+        for k in a:
+            if k not in b:
+                out.append(f"{path}: key {k!r} is gone")
+            else:
+                hidden += diff(f"{path}.{k}", a[k], b[k], out)
+        for k in b:
+            if k not in a:
+                out.append(f"{path}: key {k!r} appeared")
+    elif isinstance(a, list):
+        if not isinstance(b, list) or len(a) != len(b):
+            out.append(f"{path}: array of {len(a)} changed its length or type"); return 0
+        for i, (x, y) in enumerate(zip(a, b)):
+            hidden += diff(f"{path}[{i}]", x, y, out)
+    elif a != b or type(a) is not type(b):
+        # A value may only turn into a marker. A string keeps its type and
+        # carries the marker somewhere in it; a hidden number becomes a
+        # marker in quotes and nothing else, the one type change allowed.
+        if type(b) is str and type(a) is str and "[HIDDEN:" in b:
+            hidden += 1
+        elif type(b) is str and type(a) is not str and b.startswith("[HIDDEN:") and b.endswith("]"):
+            hidden += 1
+        else:
+            out.append(f"{path}: {type(a).__name__} {a!r} became {type(b).__name__} {b!r}")
+    return hidden
+
+with open(sys.argv[1], "rb") as f: ins = f.read().split(b"\n")
+with open(sys.argv[2], "rb") as f: outs = f.read().split(b"\n")
+json_lines = hidden = bad = 0
+for n, (i, o) in enumerate(zip(ins, outs), 1):
+    if not i.startswith(b"{"):
+        continue
+    try:
+        a = load(i)
+    except ValueError:
+        continue  # not JSON on the way in: nothing to preserve
+    json_lines += 1
+    problems = []
+    try:
+        hidden += diff("$", a, load(o), problems)
+    except ValueError as e:
+        problems.append(f"output is not JSON: {e}")
+    if problems:
+        bad += 1
+        if bad <= 5:
+            print(f"   line {n}: " + "; ".join(problems[:3]))
+            print(f"     in:  {i[:300].decode('utf-8', 'replace')}")
+            print(f"     out: {o[:300].decode('utf-8', 'replace')}")
+print(f"   JSON lines: {json_lines}, values hidden: {hidden}, lines that changed shape: {bad}")
+# A corpus with no JSON in it, or with nothing hidden, is not testing this.
+sys.exit(0 if bad == 0 and json_lines > 0 and hidden > 0 else 1)
+PYEOF
+then
+    echo -e "${GREEN}✅ JSON Preservation Check PASSED. Every JSON line kept its keys, types and untouched values.${NC}"
 else
-    echo -e "${GREEN}✅ JSON Integrity Check PASSED. All JSON lines valid.${NC}"
+    echo -e "${RED}❌ JSON Preservation Check FAILED.${NC}"
+    FAILURES=$((FAILURES + 1))
 fi
-rm -f json_output.log
 
 # ==============================================================================
 # SUMMARY
