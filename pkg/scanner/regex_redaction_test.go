@@ -1,7 +1,9 @@
 package scanner
 
 import (
+	"errors"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -173,5 +175,45 @@ func TestScanner_SafeRegexWhitelist(t *testing.T) {
 				t.Errorf("ScanAndRedact() = %v, want %v", got, tt.expectedOutput)
 			}
 		})
+	}
+}
+
+// A custom rule's name is written into every marker of the rule. A name with
+// a line break in it used to split each redacted line in two, which breaks
+// the one line in, one line out contract. Such a rule is now skipped like a
+// rule whose pattern does not compile: the others in the list still apply.
+// Found by FuzzParsePolicyJSON and FuzzConfigFromSDKJSON.
+func TestCustomRegexNameWithLineBreakIsSkipped(t *testing.T) {
+	for _, name := range []string{"tx\nid", "tx\rid", "\n", "tx\r\n"} {
+		cfg := DefaultConfig()
+		cfg.Salt = []byte("rule-name-test-salt-0123456789ab")
+		err := cfg.ApplyCustomRegexes([]CustomRegexConfig{
+			{Pattern: `^TX-\d+$`, Name: name},
+			{Pattern: `^ORD-\d+$`, Name: "order"},
+		})
+		if _, ok := errors.AsType[*SkippedRegexRulesError](err); !ok {
+			t.Fatalf("name %q: want a SkippedRegexRulesError, got %v", name, err)
+		}
+		if len(cfg.CustomRegexes) != 1 || cfg.CustomRegexes[0].Name != "order" {
+			t.Fatalf("name %q: rules kept = %+v, want only the order rule", name, cfg.CustomRegexes)
+		}
+
+		out := NewScanner(cfg).ScanAndRedact("paid TX-12345 for ORD-67890")
+		if strings.ContainsAny(out, "\r\n") {
+			t.Errorf("name %q: a line break reached the output: %q", name, out)
+		}
+		if !strings.Contains(out, "[HIDDEN:order:") || strings.Contains(out, "ORD-67890") {
+			t.Errorf("name %q: the valid rule did not apply: %q", name, out)
+		}
+
+		if err := cfg.ApplySafeRegexes([]CustomRegexConfig{{Pattern: `^build-\d+$`, Name: name}}); err == nil || len(cfg.SafeRegexes) != 0 {
+			t.Errorf("name %q: a safe rule with a line break in its name was kept: %v", name, err)
+		}
+	}
+
+	// A tab or a space is not a line break and stays allowed.
+	cfg := DefaultConfig()
+	if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Pattern: `^TX-\d+$`, Name: "tx id\t1"}}); err != nil || len(cfg.CustomRegexes) != 1 {
+		t.Errorf("a name with a space and a tab must be accepted: %v", err)
 	}
 }
