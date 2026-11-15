@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -57,6 +58,21 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	if pod.Labels["pii-shield.io/inject"] != "true" {
 		return admission.Allowed("Skipping pod: no inject label")
+	}
+
+	// Only a new pod is mutated. The webhook is registered for updates too,
+	// and a pod's containers and volumes cannot change after it is created:
+	// injecting again on an update produced a pod the API server refuses
+	// (duplicate volumes, a second sidecar), so every later change to an
+	// injected pod, a label or an annotation included, failed. A pod that
+	// started without a sidecar stays without one until it is recreated.
+	if req.Operation == admissionv1.Update {
+		resp := admission.Allowed("Skipping pod update: the sidecar is injected when the pod is created")
+		if !hasInjectedContainer(pod) {
+			resp.Warnings = append(resp.Warnings,
+				"PII-Shield: this pod carries the pii-shield.io/inject label but has no sidecar, and one cannot be added to a running pod; its logs are NOT redacted until the pod is recreated")
+		}
+		return resp
 	}
 
 	policyName := pod.Annotations["pii-shield.io/policy"]
@@ -142,6 +158,23 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			policyName))
 	}
 	return resp
+}
+
+// injectedContainerName is the name every injection mode gives its container.
+const injectedContainerName = "pii-shield-sidecar"
+
+// hasInjectedContainer reports whether the pod already carries the sidecar
+// (or the eBPF agent, which uses the same name), as a native sidecar in
+// initContainers or as a plain container.
+func hasInjectedContainer(pod *corev1.Pod) bool {
+	for _, list := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for i := range list {
+			if list[i].Name == injectedContainerName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (m *PodMutator) getTargetContainerIndex(pod *corev1.Pod, targetName string) int {
@@ -310,7 +343,7 @@ func (m *PodMutator) injectEBPFMode(pod *corev1.Pod, policy *piishieldv1alpha1.P
 	podCopy.Spec.ShareProcessNamespace = ptr.To(true)
 
 	agent := corev1.Container{
-		Name:            "pii-shield-sidecar",
+		Name:            injectedContainerName,
 		Image:           ebpfAgentImage(),
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/pii-shield-ebpf"},
@@ -371,7 +404,7 @@ func (m *PodMutator) buildSidecar(mode string, policy *piishieldv1alpha1.PiiPoli
 	}
 
 	sidecar := corev1.Container{
-		Name:            "pii-shield-sidecar",
+		Name:            injectedContainerName,
 		Image:           agentImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/pii-shield"},

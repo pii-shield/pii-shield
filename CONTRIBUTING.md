@@ -38,8 +38,15 @@ go build -o bin/operator ./operator/main.go
 ## Testing
 Before making a PR, please run tests to make sure you didn't break the pipeline:
 ```bash
-# Run unit and fuzzing tests
-go test ./... -v -fuzz=Fuzz
+# Run unit tests
+go test ./...
+
+# Run every fuzz target for 15 seconds each (scanner, rule-set parsers,
+# the operator's signature check and metrics reader)
+./scripts/fuzz-sanity.sh
+
+# Or one target for longer, by a part of its name
+FUZZTIME=5m ./scripts/fuzz-sanity.sh FuzzScanner
 
 # Run stress and smoke tests against the frozen corpus (deterministic)
 ./scripts/test-smoke.sh
@@ -48,7 +55,13 @@ go test ./... -v -fuzz=Fuzz
 ./scripts/test-smoke.sh --fuzz
 ```
 
-The default run scores the corpus committed under `scripts/testdata/`, so the
+`go test -fuzz` takes one target per run, which is why the script exists: it
+finds every `FuzzXxx` function in the root, `operator` and `rules` modules and
+runs them in turn, so a new target needs no change to the script or to CI. If
+a run fails, Go writes the input to `testdata/fuzz/<Target>/` next to the
+test; commit that file together with the fix.
+
+The default smoke run scores the corpus committed under `scripts/testdata/`, so the
 same code always produces the same numbers and a red run means a real change.
 `--regenerate` rebuilds that corpus; review the diff and re-run the smoke test
 before committing it.
