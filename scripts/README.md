@@ -8,6 +8,7 @@ is the index of what lives in this folder.
 | Script | What it runs | Needs |
 | --- | --- | --- |
 | `test-unit.sh` | Unit tests of the root module, the operator and the rule server | Go |
+| `fuzz-sanity.sh [name-filter]` | Every Go fuzz target of the root, operator and rule server modules, `FUZZTIME` each (default 15 s) | Go |
 | `test-operator-integration.sh` | Operator integration tests against envtest (local kube-apiserver) | Go, envtest |
 | `test-smoke.sh [--fuzz \| --regenerate]` | Scanner tests and benchmarks, then the container image end to end on the frozen corpus, scored for false positives and false negatives | Go, Docker, python3, jq, openssl |
 | `test-deployments.sh [group\|path ...]` | Deployment test matrix (`tests/deployments/*`); groups: `local`, `published`, `cluster`, `cluster-published`, `all` | Docker; kind for cluster groups |

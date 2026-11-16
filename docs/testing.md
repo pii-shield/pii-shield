@@ -23,7 +23,7 @@ Times are from an M-series laptop with a warm build cache.
 | Command | What it proves | Needs | Time |
 | --- | --- | --- | --- |
 | `scripts/test-unit.sh` | Unit tests of the root module, the operator and the rule server | Go | 20 s |
-| `go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner` | The scanner does not crash, emit invalid UTF-8 or blow up the output on random input | Go | 20 s |
+| `scripts/fuzz-sanity.sh` | Every fuzz target of the three modules, 15 s each: the scanner, the rule-set parsers and the operator's parsers do not crash or break their output on random input | Go | 4 min |
 | `scripts/test-operator-integration.sh` | The controller against a real kube-apiserver: CRD schema, status, rendered ConfigMap, remote rules | Go; envtest binaries are downloaded on first run | 15 s |
 | `scripts/verify-helm-runtime.sh` | The standalone chart renders the container wiring the sidecar needs | Helm | 1 s |
 | `scripts/test-smoke.sh` | The container image end to end on a frozen 1000-line corpus: zero false positives, zero false negatives, valid JSON | Docker, python3, jq, openssl | 2 min |
@@ -55,13 +55,17 @@ intended change (review the diff before committing it):
 ### Fuzzing
 
 ```bash
-go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner   # the CI sanity run
-go test -fuzz=FuzzScanner -fuzztime=10m ./pkg/scanner   # before merging a change to the tokenizer
+scripts/fuzz-sanity.sh                            # the CI sanity run: every target, 15 s each
+FUZZTIME=10m scripts/fuzz-sanity.sh FuzzScanner   # one target for longer, before merging a change to the tokenizer
+go test -fuzz=FuzzScanner -fuzztime=10m ./pkg/scanner   # the same without the script
 ```
 
-`go test -fuzz` takes one target in one package per run. When a run fails, Go
-writes the input to `pkg/scanner/testdata/fuzz/FuzzScanner/`; commit that file
-with the fix so it stays a regression test.
+`go test -fuzz` takes one target in one package per run, so the script finds
+the `Fuzz…` functions in the root, `operator` and `rules` modules and runs them
+one after another; a new target is picked up without editing anything. The
+optional argument keeps only the targets whose name contains it. When a run
+fails, Go writes the input to `testdata/fuzz/<Target>/` next to the test;
+commit that file with the fix so it stays a regression test.
 
 ### Smoke test
 
@@ -192,7 +196,7 @@ sanitized output lands.
 | Version consistency | `scripts/set-version.sh --check` |
 | Test documentation is current | `scripts/check-test-docs.sh` |
 | Lint | `golangci-lint run` at the root, `make -C operator lint` |
-| Fuzz sanity | `go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner` |
+| Fuzz sanity | `FUZZTIME=15s scripts/fuzz-sanity.sh` |
 | Tests with the race detector and the 70% coverage floor | `go test -race -coverprofile=coverage.out ./...` |
 | Operator unit and envtest suites | `cd operator && go test -race ./... && make test-integration` |
 | Rule server tests, SQLite and Postgres | see Rule server above |
