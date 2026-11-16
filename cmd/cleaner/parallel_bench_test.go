@@ -19,7 +19,7 @@ func BenchmarkLinePipeline(b *testing.B) {
 
 	for _, workers := range []int{1, 2, 4, 8} {
 		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
-			var out io.Writer = io.Discard
+			out := io.Discard
 			if workers > 1 {
 				p := newParallelSanitizer(io.Discard, workers, false, "open")
 				defer p.Close()
