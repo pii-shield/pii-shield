@@ -6,13 +6,13 @@ Follow these steps to locally test the features of PII-Shield Sidecar and SDKs.
 
 Test the Observability Layer locally without setting up an entire Kubernetes cluster.
 
-1. Build and run the sidecar mapping the metrics port:
+1. Build and run the sidecar mapping the metrics port. The process exits when its input ends and takes the metrics server with it, so the `sleep` keeps the input open for a minute while you scrape:
    ```bash
    export PII_METRICS_ENABLED=true
    export PII_METRICS_PORT=9090
-   echo '{"user": "aragossa", "token": "abc123secretXYZ", "cc": "4111111111111111"}' | go run ./cmd/cleaner
+   (echo '{"user": "lena", "token": "abc123secretXYZ", "cc": "4111111111111111"}'; sleep 60) | go run ./cmd/cleaner
    ```
-2. Once the log is processed, open a separate terminal and fetch the RED (Rate, Errors, Duration) metrics exposed:
+2. While it runs, open a separate terminal and fetch the RED (Rate, Errors, Duration) metrics exposed:
    ```bash
    curl -s http://localhost:9090/metrics | grep pii
    ```
@@ -32,8 +32,13 @@ Test the architectural safeguards to ensure the Sidecar acts as a robust pipe wh
    ```bash
    export PII_FAIL_POLICY=open
    ```
-2. Trigger an Out-Of-Memory limit or an artificial buffer overflow by feeding an abnormally large flat string without newlines (greater than the 10MB bufio limit).
-3. The sidecar should catch the `bufio.ErrTooLong` or `panic`, log a warning, and output the original data seamlessly without breaking the pipeline.
+2. Feed it one line longer than the 10 MiB line limit:
+   ```bash
+   python3 -c "import sys; sys.stdout.write('A' * (10*1024*1024 + 1) + '\n')" | go run ./cmd/cleaner | cut -c1-80
+   ```
+3. The oversized line is not written out, because it could not be scanned. In its place the sidecar prints `[PII_SHIELD_WARN: BUFFER_OVERFLOW, STREAM_BROKEN]`, reports `Error reading standard input: bufio.Scanner: token too long` on stderr and exits with status 1. "Open" means the reader is told the stream broke and can decide what to do; it does not mean unscanned data passes through.
+
+   A line that makes the scanner itself fail (a panic while scanning) is the other case: under `open` that one line is written out unchanged and the stream continues.
 
 ## 3. Triggering Fail-Closed Policy
 
@@ -43,8 +48,8 @@ For extremely strict environments, dropping the log is preferred over leaking.
    ```bash
    export PII_FAIL_POLICY=closed
    ```
-2. Pass the exact same large invalid payload. 
-3. The sidecar should swallow the broken string and instead print `[PII_SHIELD_DROP: FATAL_ERROR]`.
+2. Pass the same oversized line as in section 2.
+3. The sidecar drops the line and prints `[PII_SHIELD_DROP: BUFFER_OVERFLOW]` in its place, with the same stderr message and exit status 1. `[PII_SHIELD_DROP: FATAL_ERROR]` is the marker for the other case, a line the scanner failed on: under `closed` that line is replaced by the marker and the stream continues.
 
 ## 4. Run SDK Local Environments
 
@@ -67,3 +72,5 @@ You can compile the WebAssembly kernel and directly interact with Python or Node
    pip install wasmtime
    python test.py
    ```
+
+For the automated tests (unit, fuzz, smoke, operator, deployment matrix), see [docs/testing.md](docs/testing.md).

@@ -7,7 +7,7 @@ Welcome! Please read this short guide before you start.
 1. Open an issue for bugs, feature requests, or larger design changes.
 2. Fork the repository and create a branch for your change.
 3. Make the change and add or update tests when behavior changes.
-4. Run the relevant local tests described below.
+4. Run the relevant local tests described below; [docs/testing.md](docs/testing.md) lists every test command, what it proves and what it needs.
 5. Open a pull request against `main`.
 6. Wait for required GitHub Actions checks to pass and address review feedback before merge.
 
@@ -23,16 +23,17 @@ Acceptable contributions should:
 ## Prerequisites
 You will need the following tools:
 - **Go** (version 1.26+, matching `go.mod`)
-- **Minikube** or **Kind**
-- **Helm**
+- **Docker**, for the smoke test and the deployment tests
+- **Minikube** or **Kind**, and **Helm**, only for the tests that run in a cluster
 
 ## Local Setup
 Run these commands to build the project locally and check for errors:
 ```bash
-go mod tidy
-go build -o bin/operator ./operator/main.go
-# Or use the build script:
-./build.sh
+# The CLI (the scanner as a stdin filter and sidecar)
+./build.sh                       # same as: go build -o pii-shield ./cmd/cleaner
+
+# The operator is a Go module of its own
+(cd operator && go build -o bin/manager ./cmd)
 ```
 
 ## Testing

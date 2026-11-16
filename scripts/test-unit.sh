@@ -12,4 +12,7 @@ go test -v ./...
 echo "Running operator unit tests..."
 (cd "${ROOT_DIR}/operator" && go test ./api/... ./internal/...)
 
+echo "Running rule server unit tests..."
+(cd "${ROOT_DIR}/rules" && go test ./...)
+
 echo "All unit tests passed!"
