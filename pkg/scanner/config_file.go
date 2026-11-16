@@ -114,13 +114,17 @@ func ParsePolicyJSON(b []byte) (Config, string, error) {
 	return cfg, pf.Revision, nil
 }
 
-// checkRegexRules rejects a rule with an empty or invalid pattern. An empty
-// pattern matches every token, so a misspelled key ("regex" for "pattern")
-// must not slip through as a rule that hides the whole line.
+// checkRegexRules rejects a rule with an empty or invalid pattern, or with a
+// line break in its name (see checkRuleName). An empty pattern matches every
+// token, so a misspelled key ("regex" for "pattern") must not slip through as
+// a rule that hides the whole line.
 func checkRegexRules(field string, rules []CustomRegexConfig) error {
 	for i, r := range rules {
 		if r.Pattern == "" {
 			return fmt.Errorf("%s[%d]: empty pattern", field, i)
+		}
+		if err := checkRuleName(r.Name); err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
 		}
 		if _, err := regexp.Compile(r.Pattern); err != nil {
 			return fmt.Errorf("%s[%d]: invalid regex %q: %w", field, i, r.Pattern, err)

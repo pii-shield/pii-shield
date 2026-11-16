@@ -10,7 +10,7 @@
 # (the binary has no cgo: modernc.org/sqlite is pure Go), so a multi-arch
 # build does not emulate the Go toolchain. The module and build caches are
 # BuildKit cache mounts, so a rebuild downloads and compiles only what changed.
-FROM --platform=$BUILDPLATFORM golang:1.27.3 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 

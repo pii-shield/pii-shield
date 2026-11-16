@@ -7,7 +7,7 @@ Welcome! Please read this short guide before you start.
 1. Open an issue for bugs, feature requests, or larger design changes.
 2. Fork the repository and create a branch for your change.
 3. Make the change and add or update tests when behavior changes.
-4. Run the relevant local tests described below.
+4. Run the relevant local tests described below; [docs/testing.md](docs/testing.md) lists every test command, what it proves and what it needs.
 5. Open a pull request against `main`.
 6. Wait for required GitHub Actions checks to pass and address review feedback before merge.
 
@@ -23,23 +23,31 @@ Acceptable contributions should:
 ## Prerequisites
 You will need the following tools:
 - **Go** (version 1.26+, matching `go.mod`)
-- **Minikube** or **Kind**
-- **Helm**
+- **Docker**, for the smoke test and the deployment tests
+- **Minikube** or **Kind**, and **Helm**, only for the tests that run in a cluster
 
 ## Local Setup
 Run these commands to build the project locally and check for errors:
 ```bash
-go mod tidy
-go build -o bin/operator ./operator/main.go
-# Or use the build script:
-./build.sh
+# The CLI (the scanner as a stdin filter and sidecar)
+./build.sh                       # same as: go build -o pii-shield ./cmd/cleaner
+
+# The operator is a Go module of its own
+(cd operator && go build -o bin/manager ./cmd)
 ```
 
 ## Testing
 Before making a PR, please run tests to make sure you didn't break the pipeline:
 ```bash
-# Run unit and fuzzing tests
-go test ./... -v -fuzz=Fuzz
+# Run unit tests
+go test ./...
+
+# Run every fuzz target for 15 seconds each (scanner, rule-set parsers,
+# the operator's signature check and metrics reader)
+./scripts/fuzz-sanity.sh
+
+# Or one target for longer, by a part of its name
+FUZZTIME=5m ./scripts/fuzz-sanity.sh FuzzScanner
 
 # Run stress and smoke tests against the frozen corpus (deterministic)
 ./scripts/test-smoke.sh
@@ -48,7 +56,13 @@ go test ./... -v -fuzz=Fuzz
 ./scripts/test-smoke.sh --fuzz
 ```
 
-The default run scores the corpus committed under `scripts/testdata/`, so the
+`go test -fuzz` takes one target per run, which is why the script exists: it
+finds every `FuzzXxx` function in the root, `operator` and `rules` modules and
+runs them in turn, so a new target needs no change to the script or to CI. If
+a run fails, Go writes the input to `testdata/fuzz/<Target>/` next to the
+test; commit that file together with the fix.
+
+The default smoke run scores the corpus committed under `scripts/testdata/`, so the
 same code always produces the same numbers and a red run means a real change.
 `--regenerate` rebuilds that corpus; review the diff and re-run the smoke test
 before committing it.

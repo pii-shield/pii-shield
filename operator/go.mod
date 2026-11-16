@@ -2,10 +2,10 @@ module github.com/pii-shield/pii-shield/operator
 
 go 1.26.9
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
-	github.com/onsi/ginkgo/v2 v2.33.1
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/stretchr/testify v1.12.1

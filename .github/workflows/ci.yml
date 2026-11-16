@@ -17,6 +17,10 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
     - name: Verify version files match VERSION
       run: scripts/set-version.sh --check
+    # Every test script, deployment path and operator test target is in
+    # docs/testing.md, and every script the docs name exists.
+    - name: Verify the testing documentation matches the tree
+      run: scripts/check-test-docs.sh
 
   test:
     name: Test, Lint & Fuzz
@@ -55,7 +59,7 @@ jobs:
       run: go mod verify
 
     - name: Run actionlint
-      uses: reviewdog/action-actionlint@619a81ec64ff8c0211cd6146eb2b21e8f1d7f440
+      uses: reviewdog/action-actionlint@7abf25e1607ec65838b73d0484ff31f8e9499d80
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
@@ -67,11 +71,14 @@ jobs:
         only-new-issues: false
         # v2.14.0 is the first release whose x/tools can read Go 1.27 export data.
         # Released binaries are built with Go 1.26 and refuse a go.mod targeting
-        # 1.27.3, so build the linter with the repo's own toolchain.
+        # 1.27.4, so build the linter with the repo's own toolchain.
         install-mode: goinstall
 
+    # Every fuzz target of the three modules, 15 s each: the scanner, the
+    # parsers of rule sets that arrive from outside (policy file, SDK config,
+    # rule server upload), the operator's signature check and metrics reader.
     - name: Run Fuzz Checks (Sanity)
-      run: go test -fuzz=FuzzScanner -fuzztime=15s ./pkg/scanner
+      run: FUZZTIME=15s scripts/fuzz-sanity.sh
 
     - name: Run Tests (Race & Coverage)
       run: go test -race -coverprofile=coverage.out ./...

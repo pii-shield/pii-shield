@@ -32,7 +32,8 @@
 #
 # The OVERLAY files are copied from the working tree into the base checkout
 # before it is built, so a benchmark added after the base ref (such as
-# BenchmarkAccessLog) is measured on both sides with the same code.
+# BenchmarkAccessLog or BenchmarkJSONLines) is measured on both sides with the
+# same code.
 #
 # Environment:
 #   BASE_REF       git ref to compare against (default origin/main)
@@ -40,7 +41,7 @@
 #   THRESHOLD_PCT  allowed slowdown in percent (default 10)
 #   WARN_PCT       slowdown in percent that warns without failing (default 5)
 #   LABEL          what BASE_REF is, for the messages (default "base")
-#   BENCH          benchmark regexp (default the three end-to-end benchmarks)
+#   BENCH          benchmark regexp (default the four end-to-end benchmarks)
 #   BENCHTIME      -test.benchtime per run (default 1s)
 #   OVERLAY        test files copied into the base checkout, space-separated
 #   REPORT         markdown file to append the verdict and table to (optional)
@@ -57,9 +58,9 @@ COUNT="${COUNT:-10}"
 THRESHOLD_PCT="${THRESHOLD_PCT:-10}"
 WARN_PCT="${WARN_PCT:-5}"
 LABEL="${LABEL:-base}"
-BENCH="${BENCH:-^(BenchmarkScanAndRedact|BenchmarkThroughput|BenchmarkAccessLog)$}"
+BENCH="${BENCH:-^(BenchmarkScanAndRedact|BenchmarkThroughput|BenchmarkAccessLog|BenchmarkJSONLines)$}"
 BENCHTIME="${BENCHTIME:-1s}"
-OVERLAY="${OVERLAY:-pkg/scanner/accesslog_bench_test.go}"
+OVERLAY="${OVERLAY:-pkg/scanner/accesslog_bench_test.go pkg/scanner/jsonlines_bench_test.go}"
 # Pinned so the gate does not change under us; bump deliberately.
 BENCHSTAT="${BENCHSTAT:-golang.org/x/perf/cmd/benchstat@v0.0.0-20260908200009-22c9c6c9d4da}"
 

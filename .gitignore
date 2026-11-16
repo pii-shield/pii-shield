@@ -91,3 +91,4 @@ notes/*
 !docs/sidecar-failure-modes.md
 !docs/operator-stabilization.md
 !docs/poc-line-sharding.md
+!docs/testing.md
