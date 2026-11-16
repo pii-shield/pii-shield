@@ -90,3 +90,4 @@ notes/*
 !docs/operational-runbooks.md
 !docs/sidecar-failure-modes.md
 !docs/operator-stabilization.md
+!docs/testing.md
