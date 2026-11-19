@@ -1556,10 +1556,20 @@ func (st *configState) scanLine(logLine string, sb *strings.Builder, depth int) 
 	// The marker is framing, not data: emit it verbatim and score the rest of
 	// the line on its own (#192). At most two, for combined diffs (diff --cc).
 	// Output stays byte-for-byte, so line counts and patch validity hold.
+	//
+	// The exception is a '+' that opens an international phone number: a
+	// signature that ends with "+447700900123" on its own line lost the '+'
+	// and the rest was a bare digit run, which no detector and no ^\+44 rule
+	// sees. The last '+' stays with the line when a phone starts there, so
+	// "+447700900123" is hidden as the same phone it is mid-line, and a diff
+	// line that adds or removes one ("++44...", "-+44...") keeps its marker.
 	if depth == 0 {
 		n := 0
 		for n < 2 && n < len(logLine) && (logLine[n] == '+' || logLine[n] == '-') {
 			n++
+		}
+		if n > 0 && logLine[n-1] == '+' && startsWithInternationalPhone(logLine[n-1:]) {
+			n--
 		}
 		if n > 0 && n < len(logLine) {
 			sb.WriteString(logLine[:n])

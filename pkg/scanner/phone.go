@@ -189,6 +189,14 @@ const (
 	maxPhoneGroups    = 6  // groups after the country code
 )
 
+// startsWithInternationalPhone reports whether s opens with a '+' that
+// findShapedNumbers would carve as an international phone, so the diff-marker
+// strip in scanLine leaves that '+' with the number.
+func startsWithInternationalPhone(s string) bool {
+	end := matchInternationalPhone(s, 0)
+	return end > 0 && !phoneGluedAfter(s, end)
+}
+
 // matchInternationalPhone matches '+', a 1-3 digit country code and the
 // national number at line[i:], and returns the end index or 0.
 func matchInternationalPhone(line string, i int) int {
