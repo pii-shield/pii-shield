@@ -193,16 +193,54 @@ func TestPhoneKeepsStructure(t *testing.T) {
 }
 
 // A '+' at the start of a line is a diff marker (#192) and is emitted as
-// framing, so a phone written first on a line loses its '+' and is not a
-// phone; that is the price of keeping patches valid, recorded here so the
-// gap is not mistaken for a detector bug.
-func TestPhoneAtLineStartIsDiffMarker(t *testing.T) {
+// framing, but not when it opens an international phone: an email signature
+// that ends with the number on its own line used to pass it through, because
+// the '+' was stripped and the rest scored as a bare digit run. The number now
+// gets the same marker it gets mid-line, and a diff line that adds or removes
+// such a line keeps its own marker. All numbers here are made up.
+func TestPhoneAtLineStart(t *testing.T) {
 	withEntityLabels(t, nil)
-	if out := ScanAndRedact("+4917412345678 called"); out != "+4917412345678 called" {
-		t.Errorf("unexpected change: %q", out)
+	for _, num := range []string{"+447700900123", "+972521112233", "+4917412345678"} {
+		mid := ScanAndRedact("x " + num)
+		if !strings.HasPrefix(mid, "x [HIDDEN:phone:") {
+			t.Fatalf("phone after a word must be hidden: %q", mid)
+		}
+		marker := strings.TrimPrefix(mid, "x ")
+		for _, tc := range []struct{ line, want string }{
+			{num, marker},
+			{num + " called", marker + " called"},
+			{"+" + num, "+" + marker},
+			{"-" + num, "-" + marker},
+		} {
+			if out := ScanAndRedact(tc.line); out != tc.want {
+				t.Errorf("ScanAndRedact(%q) = %q, want %q", tc.line, out, tc.want)
+			}
+		}
+		text := "Thanks,\nDan\n" + num + "\n"
+		if out := ScanAndRedactText(text); out != "Thanks,\nDan\n"+marker+"\n" {
+			t.Errorf("signature line leaked: %q", out)
+		}
 	}
-	if out := ScanAndRedact("x +4917412345678 called"); !strings.Contains(out, "[HIDDEN:phone:") {
-		t.Errorf("phone after a word must be hidden: %q", out)
+	// Not a phone after the '+': the marker is still framing (#192).
+	for _, line := range []string{"+1234567", "+4917412345678abc", "+447700900123.5", "++Traceback"} {
+		if out := ScanAndRedact(line); strings.Contains(out, "[HIDDEN:phone:") {
+			t.Errorf("ScanAndRedact(%q) = %q, want no phone marker", line, out)
+		}
+	}
+}
+
+// An operator's own rule anchored on the '+' sees a phone written first on a
+// line, as it does after a space.
+func TestPhoneAtLineStartCustomRule(t *testing.T) {
+	withEntityLabels(t, func(cfg *Config) {
+		if err := cfg.ApplyCustomRegexes([]CustomRegexConfig{{Name: "uk_mobile", Pattern: `^\+447\d{9}$`}}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, line := range []string{"+447700900123", " +447700900123"} {
+		if out := ScanAndRedact(line); !strings.Contains(out, "[HIDDEN:uk_mobile:") {
+			t.Errorf("ScanAndRedact(%q) = %q, want the custom rule's marker", line, out)
+		}
 	}
 }
 
