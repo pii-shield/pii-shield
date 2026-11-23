@@ -74,9 +74,17 @@ func TestGluedDiffMarkerIsPreservedInOutput(t *testing.T) {
 // so the change is explicit rather than incidental.
 func TestSignedBareIntegersAreNotRedacted(t *testing.T) {
 	s := newMarkerScanner(t)
-	for _, in := range []string{"-123456789", "-123456789012", "+123456789012", "123456789", "123456789012"} {
+	for _, in := range []string{"-123456789", "-123456789012", "+1234567", "123456789", "123456789012"} {
 		if got := s.ScanAndRedact(in); got != in {
 			t.Errorf("ScanAndRedact(%q) = %q, want unchanged", in, got)
+		}
+	}
+	// A '+' and 8 to 15 digits has the shape of an international phone and is
+	// hidden the same way at the start of a line as after a space: the number
+	// on its own line at the end of an email signature used to pass through.
+	for _, in := range []string{"+123456789012", "+447700900123"} {
+		if got, mid := s.ScanAndRedact(in), s.ScanAndRedact(" "+in); got != strings.TrimPrefix(mid, " ") || got == in {
+			t.Errorf("ScanAndRedact(%q) = %q, want the marker of %q (%q)", in, got, " "+in, mid)
 		}
 	}
 }
