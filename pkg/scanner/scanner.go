@@ -2388,6 +2388,34 @@ func isPaddedBase64Blob(s string) bool {
 	return len(s)-len(body) <= 2 && strings.IndexByte(body, '=') == -1
 }
 
+// isPaddedKeyMaterial reports whether s has the shape of an encoded key that
+// is too short for isPaddedBase64Blob: a padded base64 token (standard or
+// URL-safe alphabet) of whole 4-character groups, at least 24 characters (16
+// bytes, a 128-bit key), whose body mixes upper case, lower case and digits.
+// A Fernet key (44 characters, URL-safe) is the everyday case. Split on its
+// padding, the body went out as a "key"; a body with a '-' or '_' then looked
+// like a field name and was written verbatim, so the key passed in about 3 of
+// 4 lines. Field names do not end in '=' with a length that is a multiple of
+// four and mixed case plus digits, so they keep the key=value split.
+func isPaddedKeyMaterial(s string) bool {
+	if len(s) < 24 || len(s)%4 != 0 || !isPaddedBase64Token(s) {
+		return false
+	}
+	var upper, lower, digit bool
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= 'a' && c <= 'z':
+			lower = true
+		case c >= '0' && c <= '9':
+			digit = true
+		}
+	}
+	return upper && lower && digit
+}
+
 // processBinaryBlob scores the inside of a bytes literal that holds binary
 // data as one token. Only the entropy score decides: the whitelists in
 // processSingleToken read its backslashes as a Windows path, and a 0x20 byte
@@ -2868,7 +2896,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 	}
 	// Base64 padding is not a key/value separator — let the token through to
 	// single-token scoring, which is where the base64 rule lives.
-	if isPaddedBase64Blob(rawToken) || isElidedBase64(rawToken) {
+	if isPaddedBase64Blob(rawToken) || isElidedBase64(rawToken) || isPaddedKeyMaterial(rawToken) {
 		return false, false
 	}
 	// The caller already knows this token is a secret (it sat under a
@@ -2892,7 +2920,7 @@ func (st *configState) processEqualPair(rawToken string, forcedSensitive bool, o
 		// Same guard as the one on the raw token, applied to the quoted content:
 		// base64 padding is not a separator, and re-parsing on it hands the
 		// body back as an unscored "key".
-		if isPaddedBase64Blob(trimmed) || isElidedBase64(trimmed) {
+		if isPaddedBase64Blob(trimmed) || isElidedBase64(trimmed) || isPaddedKeyMaterial(trimmed) {
 			sb.WriteString(quote)
 			st.processSingleToken(trimmed, trimmed, forcedSensitive, false, false, sb)
 			sb.WriteString(quote)
