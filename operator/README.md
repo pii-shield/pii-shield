@@ -23,11 +23,16 @@ The easiest way to install the operator is via our official Helm chart hosted on
    ```bash
    helm install pii-shield-operator pii-shield/pii-shield-operator -n operator-system --create-namespace
    ```
-   *Note: If `cert-manager` is not installed, the Helm chart will automatically generate and inject fallback self-signed TLS certificates for the Mutating Webhook.*
+   *Note:* The chart takes the webhook's TLS certificate from cert-manager by default (`webhook.useCertManager=true`), so cert-manager must already be installed in the cluster; without it the install fails, because the cluster does not know the `Certificate` and `Issuer` kinds the chart creates. To install without cert-manager, add `--set webhook.useCertManager=false`: Helm then generates a self-signed certificate. Use that only for local validation or tightly controlled environments (see [docs/operator-stabilization.md](../docs/operator-stabilization.md)).
 
 ### Quickstart Example
 
-Once installed, you can protect any application by applying a `PiiPolicy` and adding a label to your Pods.
+Once installed, you can protect any application by labeling its namespace, applying a `PiiPolicy` and adding a label to your Pods.
+
+0. **Enable the namespace.** The webhook is called only for pods in namespaces labeled `pii-shield.io/injection=enabled`:
+   ```bash
+   kubectl label namespace default pii-shield.io/injection=enabled
+   ```
 
 1. **Create a Policy:**
    ```yaml
@@ -396,7 +401,7 @@ helm upgrade --install pii-shield-operator pii-shield/pii-shield-operator \
          annotations:
            pii-shield.io/policy: "strict-policy"
    ```
-   *Tip: You can also label an entire namespace (`pii-shield.io/inject: "true"`) to automatically protect all Pods within it.*
+   *Both labels are needed:* the namespace label `pii-shield.io/injection: enabled` lets the webhook see the pod, and the pod label `pii-shield.io/inject: "true"` asks for the sidecar. The pod label is checked on the pod only, so putting `pii-shield.io/inject` on a namespace does nothing. The sidecar is added only when a pod is created; restart workloads that were already running.
 
 The Operator will automatically inject the secure Sidecar Agent into your Pod, configuring it with the correct `fsGroup` to securely access `emptyDir` log volumes.
 
