@@ -85,6 +85,8 @@ helm install pii-shield-operator pii-shield/pii-shield-operator -n operator-syst
 ```
 This deploys the PII-Shield Operator which automatically injects highly-secure, distroless sidecars into your Pods without requiring any code or Dockerfile changes.
 
+The chart takes the webhook's TLS certificate from cert-manager by default (`webhook.useCertManager=true`), so cert-manager must already be installed in the cluster; without it the install fails, because the cluster does not know the `Certificate` and `Issuer` kinds the chart creates. To install without cert-manager, add `--set webhook.useCertManager=false`: Helm then generates a self-signed certificate. Use that only for local validation or tightly controlled environments (see [docs/operator-stabilization.md](docs/operator-stabilization.md)).
+
 ### Docker
 Get the latest lightweight image from Docker Hub or GHCR:
 ```bash
@@ -149,7 +151,12 @@ echo "Error: User password=MySecretPass123! failed login" | docker run -i --rm g
 ```
 
 2. Kubernetes (Automated Sidecar Injection)
-With the PII-Shield Operator installed, protecting an application is as simple as creating a `PiiPolicy` and labeling your Pods.
+With the PII-Shield Operator installed, protecting an application takes a namespace label, a `PiiPolicy` and a label on your Pods.
+
+**Enable the namespace:** the webhook is called only for pods in namespaces labeled `pii-shield.io/injection=enabled`.
+```bash
+kubectl label namespace default pii-shield.io/injection=enabled
+```
 
 **Create a Policy:**
 ```yaml
@@ -179,6 +186,8 @@ spec:
 ```
 
 The Operator will automatically inject the `pii-shield-agent` using the Native Sidecar pattern (K8s 1.28+) and securely mask all logs!
+
+Both labels are needed: the namespace label lets the webhook see the pod, and the pod label `pii-shield.io/inject: "true"` asks for the sidecar. The sidecar is added only when a pod is created, so restart workloads that were already running (`kubectl rollout restart deployment/secure-app`).
 
 Not sure what the rules will hide? Add `auditMode: true` to the policy first: the sidecar leaves every line as it is and only counts what it would have redacted (`piishield_audit_*` metrics and an hourly summary in its log). Run it on real traffic for a while, then drop the field and restart the workload. In pipe mode the sidecar still sits in the stream's path; see [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 

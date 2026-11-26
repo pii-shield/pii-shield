@@ -54,7 +54,8 @@ Symptoms:
 Immediate checks:
 
 - [ ] Confirm the pod has `pii-shield.io/inject: "true"`.
-- [ ] Confirm the namespace has the expected labels.
+- [ ] Confirm the namespace has `pii-shield.io/injection: enabled`; the webhook is not called for pods in other namespaces.
+- [ ] Confirm the pod was created after the labels and the policy were in place; a running pod never gets a sidecar.
 - [ ] Confirm the referenced `PiiPolicy` exists.
 - [ ] Confirm the operator has permissions to read the policy.
 - [ ] Check pod events for webhook patches or admission errors.

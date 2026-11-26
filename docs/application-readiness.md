@@ -76,7 +76,7 @@ helm repo update
 helm install pii-shield-operator pii-shield/pii-shield-operator -n operator-system --create-namespace
 ```
 
-Workloads opt in through pod labels and policy annotations. Production users should validate webhook behavior, failure policy, sidecar injection, and log paths in a staging cluster before rollout.
+The chart uses cert-manager for the webhook certificate by default; without cert-manager, add `--set webhook.useCertManager=false` (see [operator-stabilization.md](operator-stabilization.md)). Namespaces opt in with the label `pii-shield.io/injection=enabled`, and workloads through the pod label `pii-shield.io/inject: "true"` and the `pii-shield.io/policy` annotation. Production users should validate webhook behavior, failure policy, sidecar injection, and log paths in a staging cluster before rollout.
 
 ### WASM SDKs
 
